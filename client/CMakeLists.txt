@@ -15,3 +15,24 @@ target_link_libraries(oxymp_clientcore
 )
 
 target_compile_features(oxymp_clientcore PUBLIC cxx_std_20)
+
+# Модуль, который лаунчер внедряет в процесс игры.
+#
+# Живёт в каталоге проекта: в папку игры не копируется ничего.
+if(WIN32)
+    add_library(oxymp_client SHARED
+        src/client_app.cpp
+        src/dllmain.cpp
+    )
+
+    set_target_properties(oxymp_client PROPERTIES
+        OUTPUT_NAME oxymp-client
+        PREFIX ""
+    )
+
+    target_link_libraries(oxymp_client PRIVATE
+        oxymp::clientcore
+        oxymp::options
+        spdlog::spdlog
+    )
+endif()

@@ -50,6 +50,11 @@ add_subdirectory(net)
 add_subdirectory(client)
 add_subdirectory(server)
 add_subdirectory(botclient)
+
+if(WIN32)
+    add_subdirectory(launcher)
+endif()
+
 add_subdirectory(tools/sigcheck)
 
 if(OXYMP_BUILD_TESTS)
