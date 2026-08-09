@@ -1,0 +1,22 @@
+# Сборка
+/build/
+/out/
+/install/
+
+# CMake
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.sln
+*.vcxproj*
+
+# Артефакты выполнения
+*.log
+/logs/
+oxymp.json
+server.json
