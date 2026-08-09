@@ -1,6 +1,8 @@
 add_executable(oxymp_sigcheck
     src/main.cpp
+    src/pe_headers.cpp
     src/pe_image.cpp
+    src/process_image.cpp
 )
 
 set_target_properties(oxymp_sigcheck PROPERTIES OUTPUT_NAME sigcheck)

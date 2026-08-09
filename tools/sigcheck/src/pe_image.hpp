@@ -1,64 +1,47 @@
 #pragma once
 
-#include <oxymp/memscan/scanner.hpp>
+#include "image_source.hpp"
 
-#include <cstdint>
 #include <filesystem>
-#include <optional>
-#include <string>
-#include <vector>
+#include <memory>
 
 namespace oxymp::sigcheck {
 
-/// Секция PE-образа.
-struct Section {
-    std::string name;
-    std::uint32_t rva = 0;
-    std::uint32_t virtualSize = 0;
-    std::uint32_t fileOffset = 0;
-    std::uint32_t rawSize = 0;
-    bool executable = false;
-
-    /// Сколько байт секции реально присутствует в файле.
-    ///
-    /// Виртуальный размер бывает больше файлового (хвост, который загрузчик обнулит),
-    /// а файловый — больше виртуального (выравнивание). Сканировать имеет смысл
-    /// только пересечение.
-    [[nodiscard]] std::uint32_t scannableSize() const noexcept {
-        return virtualSize < rawSize ? virtualSize : rawSize;
-    }
-};
-
-/// Исполняемый файл, прочитанный с диска.
+/// Образ, прочитанный с диска как обычный файл.
 ///
-/// Игра при этом не запускается и не изменяется — это статический разбор файла.
-/// Адреса считаются от предпочтительной базы загрузки; у живого процесса база
-/// может отличаться из-за ASLR, поэтому сравнивать имеет смысл RVA, а не VA.
-class PeImage {
+/// Игра при этом не запускается и не изменяется. Для GTA этот источник почти
+/// бесполезен: секции с кодом зашифрованы, и осмысленных совпадений в них нет —
+/// но он остаётся нужен, чтобы это увидеть (режим --sections показывает энтропию).
+class PeImage final : public ImageSource {
 public:
-    [[nodiscard]] static std::optional<PeImage> load(const std::filesystem::path& path,
-                                                     std::string& error);
+    [[nodiscard]] static std::unique_ptr<PeImage> load(const std::filesystem::path& path,
+                                                       std::string& error);
 
-    [[nodiscard]] std::uint64_t imageBase() const noexcept { return imageBase_; }
+    [[nodiscard]] std::uint64_t baseAddress() const noexcept override { return imageBase_; }
 
-    [[nodiscard]] const std::vector<Section>& sections() const noexcept { return sections_; }
+    [[nodiscard]] const std::vector<Section>& sections() const noexcept override { return sections_; }
 
-    /// Байты секции так, как они лежат в файле.
-    [[nodiscard]] memscan::ByteView sectionData(const Section& section) const noexcept;
+    [[nodiscard]] memscan::ByteView sectionData(const Section& section) const noexcept override;
 
-    /// RVA в указатель на буфер файла.
-    ///
-    /// Возвращает nullptr, если по этому RVA нет данных или их меньше, чем needed:
-    /// такое бывает у RVA, попадающих в неинициализированный хвост секции.
     [[nodiscard]] const std::uint8_t* rvaToPointer(std::uint64_t rva,
-                                                   std::size_t needed) const noexcept;
+                                                   std::size_t needed) const noexcept override;
+
+    [[nodiscard]] std::string origin() const override { return origin_; }
 
 private:
     PeImage() = default;
 
+    /// Сколько байт секции реально присутствует в файле.
+    ///
+    /// Виртуальный размер бывает больше файлового (хвост, который загрузчик обнулит),
+    /// а файловый — больше виртуального (выравнивание). Искать имеет смысл только
+    /// в пересечении.
+    [[nodiscard]] static std::uint32_t availableSize(const Section& section) noexcept;
+
     std::vector<std::uint8_t> bytes_;
     std::vector<Section> sections_;
     std::uint64_t imageBase_ = 0;
+    std::string origin_;
 };
 
 } // namespace oxymp::sigcheck

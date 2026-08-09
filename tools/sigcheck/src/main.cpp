@@ -1,19 +1,17 @@
-// sigcheck — статическая проверка сигнатур игрового движка.
+// sigcheck — проверка сигнатур игрового движка.
 //
-// Читает исполняемый файл игры с диска и проверяет, что каждая сигнатура из
-// каталога находится ровно один раз. Игра при этом не запускается, в процесс
-// ничего не внедряется, файлы игры не изменяются.
+// Проверяет, что каждая сигнатура из каталога находится в коде игры ровно один
+// раз. Сигнатуры привязаны к конкретной сборке, поэтому до того как писать код,
+// работающий с игрой, нужно знать, какие из них ещё действительны.
 //
-// Смысл утилиты: сигнатуры привязаны к конкретной сборке игры, и до того как
-// писать код, работающий с живым процессом, нужно знать, какие из них ещё
-// действительны. Ответ получается за секунды и без единого запуска игры.
-//
-// Важная оговорка: отсутствие совпадения в файле не всегда означает, что
-// сигнатура нерабочая. Часть кода игры может распаковываться или исправляться
-// уже в памяти процесса, и такие места статический разбор не видит. Поэтому
-// «не найдена» здесь — повод перепроверить в отладчике, а не приговор.
+// Байты берутся из памяти запущенной игры: в файле на диске секции с кодом
+// зашифрованы — это видно по энтропии в режиме --sections — и настоящих
+// инструкций там нет. Работа идёт только на чтение: ничего не внедряется,
+// ни файлы игры, ни её процесс не изменяются.
 
+#include "image_source.hpp"
 #include "pe_image.hpp"
+#include "process_image.hpp"
 
 #include <oxymp/gamesig/catalog.hpp>
 #include <oxymp/memscan/scanner.hpp>
@@ -25,6 +23,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,8 +34,8 @@ namespace {
 
 using namespace oxymp;
 
-constexpr std::string_view kDefaultGamePath =
-    R"(C:\Program Files\Rockstar Games\Grand Theft Auto V Legacy\GTA5.exe)";
+/// Имя процесса игры; оно же имя её главного модуля.
+const std::wstring kGameProcessName = L"GTA5.exe";
 
 /// Дополняет строку пробелами до заданной ширины в символах.
 ///
@@ -76,7 +75,7 @@ struct Result {
 };
 
 /// Все вхождения сигнатуры во всех исполняемых секциях, в виде RVA.
-std::vector<std::uint64_t> scanExecutableSections(const sigcheck::PeImage& image,
+std::vector<std::uint64_t> scanExecutableSections(const sigcheck::ImageSource& image,
                                                   const memscan::Pattern& pattern) {
     std::vector<std::uint64_t> hits;
 
@@ -93,7 +92,7 @@ std::vector<std::uint64_t> scanExecutableSections(const sigcheck::PeImage& image
     return hits;
 }
 
-Result evaluate(const sigcheck::PeImage& image, const gamesig::Signature& signature) {
+Result evaluate(const sigcheck::ImageSource& image, const gamesig::Signature& signature) {
     Result result;
     result.signature = &signature;
 
@@ -127,7 +126,7 @@ Result evaluate(const sigcheck::PeImage& image, const gamesig::Signature& signat
     switch (signature.resolution) {
     case gamesig::Resolution::Address:
         result.targetRva = result.siteRva;
-        result.value = image.imageBase() + result.siteRva;
+        result.value = image.baseAddress() + result.siteRva;
         result.status = Status::Ok;
         break;
 
@@ -153,7 +152,7 @@ Result evaluate(const sigcheck::PeImage& image, const gamesig::Signature& signat
         }
 
         result.targetRva = static_cast<std::uint64_t>(target);
-        result.value = image.imageBase() + result.targetRva;
+        result.value = image.baseAddress() + result.targetRva;
         result.status = Status::Ok;
         break;
     }
@@ -180,7 +179,7 @@ Result evaluate(const sigcheck::PeImage& image, const gamesig::Signature& signat
 }
 
 /// Строка, на которую указывает разрешённая сигнатура. Пусто, если её там нет.
-std::string readString(const sigcheck::PeImage& image, std::uint64_t rva, std::size_t maxLength) {
+std::string readString(const sigcheck::ImageSource& image, std::uint64_t rva, std::size_t maxLength) {
     const std::uint8_t* data = image.rvaToPointer(rva, 1);
     if (data == nullptr) {
         return {};
@@ -260,20 +259,20 @@ double shannonEntropy(memscan::ByteView data) {
     return entropy;
 }
 
-int reportSections(const sigcheck::PeImage& image) {
+int reportSections(const sigcheck::ImageSource& image) {
     std::cout << std::format("  {}{}{}{}{}{}\n", pad("СЕКЦИЯ", 12), pad("RVA", 12),
-                             pad("ВИРТ. РАЗМЕР", 16), pad("В ФАЙЛЕ", 16), pad("ИСП.", 8),
+                             pad("ВИРТ. РАЗМЕР", 16), pad("ДОСТУПНО", 16), pad("ИСП.", 8),
                              pad("ЭНТРОПИЯ", 10));
     std::cout << "  " << std::string(74, '-') << '\n';
 
     for (const sigcheck::Section& section : image.sections()) {
-        const double entropy = shannonEntropy(image.sectionData(section));
+        const memscan::ByteView data = image.sectionData(section);
 
         std::cout << std::format("  {}{}{}{}{}{:.2f}\n", pad(section.name, 12),
                                  pad(std::format("{:x}", section.rva), 12),
                                  pad(std::format("{}", section.virtualSize), 16),
-                                 pad(std::format("{}", section.rawSize), 16),
-                                 pad(section.executable ? "да" : "нет", 8), entropy);
+                                 pad(std::format("{}", data.size()), 16),
+                                 pad(section.executable ? "да" : "нет", 8), shannonEntropy(data));
     }
 
     std::cout << "\n  Ориентир: обычный код x86-64 даёт около 6.0-6.5 бит на байт.\n"
@@ -283,7 +282,7 @@ int reportSections(const sigcheck::PeImage& image) {
     return 0;
 }
 
-int probePattern(const sigcheck::PeImage& image, std::string_view patternText) {
+int probePattern(const sigcheck::ImageSource& image, std::string_view patternText) {
     const auto pattern = memscan::Pattern::parse(patternText);
     if (!pattern) {
         std::cerr << "Сигнатура записана некорректно.\n";
@@ -313,33 +312,13 @@ const Result* findResult(const std::vector<Result>& results, std::string_view id
     return nullptr;
 }
 
-/// Сверяет две сигнатуры, которые обязаны указывать на один и тот же адрес.
-void reportCrossCheck(const std::vector<Result>& results, std::string_view leftId,
-                      std::string_view rightId) {
-    const Result* left = findResult(results, leftId);
-    const Result* right = findResult(results, rightId);
-
-    if (left == nullptr || right == nullptr) {
-        return;
-    }
-    if (left->status != Status::Ok || right->status != Status::Ok) {
-        std::cout << std::format("  {} и {}: сверка невозможна, одна из сигнатур не разрешилась\n",
-                                 leftId, rightId);
-        return;
-    }
-
-    if (left->targetRva == right->targetRva) {
-        std::cout << std::format("  {} и {} указывают на один адрес — сходится\n", leftId, rightId);
-    } else {
-        std::cout << std::format(
-            "  {} ({:#x}) и {} ({:#x}) РАСХОДЯТСЯ — одна из сигнатур поймала не ту функцию\n",
-            leftId, left->targetRva, rightId, right->targetRva);
-    }
-}
-
 void printUsage() {
     std::cerr << "Использование:\n"
-                 "  sigcheck [--game <путь к GTA5.exe>] [режим]\n\n"
+                 "  sigcheck [источник] [режим]\n\n"
+                 "Источник байт:\n"
+                 "  --attach            память запущенной игры (по умолчанию)\n"
+                 "  --game <путь>       файл на диске; секции с кодом там зашифрованы,\n"
+                 "                      поэтому годится только для --sections\n\n"
                  "Режимы:\n"
                  "  (без режима)        проверить весь каталог сигнатур\n"
                  "  --sections          показать секции образа и их энтропию\n"
@@ -347,7 +326,7 @@ void printUsage() {
 }
 
 int run(int argc, char** argv) {
-    std::filesystem::path gamePath{kDefaultGamePath};
+    std::filesystem::path gamePath;
     std::string_view mode;
     std::string_view probe;
 
@@ -360,6 +339,8 @@ int run(int argc, char** argv) {
                 return 2;
             }
             gamePath = argv[i];
+        } else if (argument == "--attach") {
+            gamePath.clear();
         } else if (argument == "--sections") {
             mode = argument;
         } else if (argument == "--probe") {
@@ -375,19 +356,31 @@ int run(int argc, char** argv) {
         }
     }
 
-    std::cout << "oxyMP · sigcheck — статическая проверка сигнатур\n\n";
+    std::cout << "oxyMP · sigcheck — проверка сигнатур игрового движка\n\n";
 
     std::string error;
-    const auto image = sigcheck::PeImage::load(gamePath, error);
+    std::unique_ptr<sigcheck::ImageSource> image;
+
+    if (gamePath.empty()) {
+        auto attached = sigcheck::ProcessImage::attach(kGameProcessName, error);
+        if (attached && attached->unreadableBytes() != 0) {
+            std::cout << std::format("  Предупреждение: {} байт памяти прочитать не удалось,\n"
+                                     "  эти участки заполнены нулями.\n",
+                                     attached->unreadableBytes());
+        }
+        image = std::move(attached);
+    } else {
+        image = sigcheck::PeImage::load(gamePath, error);
+    }
+
     if (!image) {
-        std::cerr << std::format("Не удалось прочитать {}: {}\n", gamePath.string(), error);
-        std::cerr << "Путь к игре задаётся ключом --game.\n";
+        std::cerr << std::format("Не удалось получить образ: {}\n", error);
         return 2;
     }
 
-    std::cout << std::format("  Файл            {}\n", gamePath.string());
+    std::cout << std::format("  Источник        {}\n", image->origin());
     std::cout << std::format("  Каталог выверен под сборку {}\n", gamesig::kTargetGameVersion);
-    std::cout << std::format("  База образа     {:#x}\n\n", image->imageBase());
+    std::cout << std::format("  База образа     {:#x}\n\n", image->baseAddress());
 
     if (mode == "--sections") {
         return reportSections(*image);
@@ -402,11 +395,21 @@ int run(int argc, char** argv) {
         results.push_back(evaluate(*image, signature));
     }
 
+    // Дата сборки — самая надёжная проверка того, что каталог вообще применим
+    // к этому исполняемому файлу, поэтому она идёт до разбора остальных сигнатур.
+    bool buildMatches = true;
     if (const Result* buildDate = findResult(results, "build_date_string");
         buildDate != nullptr && buildDate->status == Status::Ok) {
         const std::string text = readString(*image, buildDate->targetRva, 32);
-        if (!text.empty()) {
-            std::cout << std::format("  Дата сборки исполняемого файла: \"{}\"\n\n", text);
+
+        buildMatches = text == gamesig::kVerifiedBuildDate;
+        std::cout << std::format("  Дата сборки     \"{}\"{}\n\n", text,
+                                 buildMatches ? "" : "  <- НЕ СОВПАДАЕТ С КАТАЛОГОМ");
+
+        if (!buildMatches) {
+            std::cout << std::format("  Каталог выверялся на сборке от \"{}\". Игра обновилась,\n"
+                                     "  и часть сигнатур может указывать не туда.\n\n",
+                                     gamesig::kVerifiedBuildDate);
         }
     }
 
@@ -425,20 +428,17 @@ int run(int argc, char** argv) {
                                  pad(statusLabel(result.status), 16), describeValue(result));
     }
 
-    std::cout << "\n  Перекрёстные проверки:\n";
-    reportCrossCheck(results, "script_thread_tick", "script_thread_tick_alias");
-
     std::cout << std::format("\n  Итого: {} из {} сигнатур разрешились однозначно.\n", okCount,
                              results.size());
 
     if (okCount != results.size()) {
-        std::cout << "\n  Не разрешившиеся сигнатуры нужно перепроверить в отладчике.\n"
-                     "  Учтите: часть кода игры может исправляться уже в памяти процесса,\n"
-                     "  и такие места статический разбор файла не видит.\n";
+        std::cout << "\n  Не разрешившиеся сигнатуры нужно уточнить в отладчике.\n"
+                     "  «НЕОДНОЗНАЧНО» означает, что сигнатуру надо удлинить,\n"
+                     "  «НЕ НАЙДЕНА» — что окрестности кода изменились.\n";
         return 1;
     }
 
-    return 0;
+    return buildMatches ? 0 : 1;
 }
 
 } // namespace

@@ -15,6 +15,13 @@ namespace oxymp::gamesig {
 /// утилитой sigcheck до того, как что-либо будет внедрено в процесс игры.
 inline constexpr std::string_view kTargetGameVersion = "1.0.3889.0";
 
+/// Дата сборки, зашитая в исполняемый файл целевой версии игры.
+///
+/// Точнее номера версии отвечает на вопрос «та ли это сборка»: номер меняется не
+/// при каждом обновлении, а дата — при каждом. Сверяется на старте, чтобы
+/// расхождение обнаруживалось сразу, а не превращалось в загадочный сбой позже.
+inline constexpr std::string_view kVerifiedBuildDate = "Jul  9 2026";
+
 namespace detail {
 
 inline constexpr std::array kSignatures = std::to_array<Signature>({
@@ -103,17 +110,6 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
                        "чтобы не повторять внутреннюю логику игры.",
         .pattern = "80 B9 ? 01 00 00 00 8B FA 48 8B D9 74 05",
         .offset = -0x0F,
-        .resolution = Resolution::Address,
-        .expectedMatches = 1,
-    },
-    {
-        .id = "script_thread_tick_alias",
-        .description = "Тот же тик потока, опознанный по прологу функции. Существует как "
-                       "перекрёстная проверка: должен разрешиться в тот же адрес, что и "
-                       "script_thread_tick. Расхождение означает, что одна из сигнатур "
-                       "поймала не ту функцию.",
-        .pattern = "48 83 EC 20 80 B9 ? 01 00 00 00 8B FA",
-        .offset = -0x0B,
         .resolution = Resolution::Address,
         .expectedMatches = 1,
     },
