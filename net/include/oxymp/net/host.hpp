@@ -1,0 +1,83 @@
+#pragma once
+
+#include <oxymp/net/event.hpp>
+#include <oxymp/shared/protocol/serialization.hpp>
+
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
+struct _ENetHost;
+struct _ENetPeer;
+
+namespace oxymp::net {
+
+/// Сетевой узел: слушающий сервер либо подключающийся клиент.
+///
+/// Единственное место в проекте, которое знает про используемую библиотеку сети.
+/// Всё остальное работает с PeerId, Event и диапазонами байт.
+class Host {
+public:
+    ~Host();
+
+    Host(const Host&) = delete;
+    Host& operator=(const Host&) = delete;
+
+    /// Поднимает сервер на указанном порту.
+    [[nodiscard]] static std::unique_ptr<Host> listen(std::uint16_t port, std::size_t maxPeers,
+                                                      std::string& error);
+
+    /// Создаёт клиента и начинает подключение.
+    ///
+    /// Возврат управления не означает, что соединение установлено: об этом
+    /// сообщит событие Connected. Отказ приходит как Disconnected.
+    [[nodiscard]] static std::unique_ptr<Host> connect(const std::string& address,
+                                                       std::uint16_t port, std::string& error);
+
+    /// Ждёт события не дольше указанного времени.
+    ///
+    /// Возвращает nullopt, если за это время ничего не произошло. Вызывать нужно
+    /// постоянно: на этом же вызове транспорт обслуживает подтверждения и
+    /// повторные отправки.
+    [[nodiscard]] std::optional<Event> poll(std::chrono::milliseconds timeout);
+
+    /// Отправляет пакет одному получателю.
+    ///
+    /// Надёжность выбирается каналом, а не отдельным параметром: управляющие
+    /// сообщения обязаны дойти, снимки состояния — нет. Держать это правило в
+    /// одном месте надёжнее, чем вспоминать его на каждой отправке.
+    void send(PeerId peer, shared::Channel channel, shared::ByteView payload);
+
+    /// Отправляет пакет всем соединениям, кроме указанного.
+    ///
+    /// kInvalidPeerId в качестве исключения означает «отправить всем».
+    void broadcast(shared::Channel channel, shared::ByteView payload,
+                   PeerId except = kInvalidPeerId);
+
+    /// Просит закрыть соединение. Событие Disconnected придёт позже.
+    void disconnect(PeerId peer);
+
+    /// Немедленно выталкивает накопленные пакеты.
+    ///
+    /// Нужен перед завершением работы: иначе последнее отправленное сообщение
+    /// может не успеть уйти.
+    void flush();
+
+    [[nodiscard]] std::size_t peerCount() const noexcept { return peers_.size(); }
+
+private:
+    Host() = default;
+
+    [[nodiscard]] PeerId registerPeer(_ENetPeer* peer);
+    void forgetPeer(_ENetPeer* peer);
+    [[nodiscard]] _ENetPeer* find(PeerId peer) const;
+
+    _ENetHost* host_ = nullptr;
+    std::unordered_map<PeerId, _ENetPeer*> peers_;
+    PeerId nextPeerId_ = 1;
+};
+
+} // namespace oxymp::net

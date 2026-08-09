@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.28)
 project(oxyMP
     VERSION 0.1.0
     DESCRIPTION "Минимальный мультиплеер для GTA V"
-    LANGUAGES CXX
+    LANGUAGES CXX C
 )
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -45,9 +45,15 @@ include(cmake/dependencies.cmake)
 
 add_subdirectory(memscan)
 add_subdirectory(gamesig)
+add_subdirectory(shared)
+add_subdirectory(net)
+add_subdirectory(client)
+add_subdirectory(server)
+add_subdirectory(botclient)
 add_subdirectory(tools/sigcheck)
 
 if(OXYMP_BUILD_TESTS)
     enable_testing()
     add_subdirectory(memscan/tests)
+    add_subdirectory(shared/tests)
 endif()
