@@ -119,6 +119,34 @@ DWORD findProcessId(const wchar_t* name) {
 
 } // namespace
 
+std::unique_ptr<GameProcess> GameProcess::attach(std::chrono::seconds waitTimeout,
+                                                 std::string& error) {
+    const auto deadline = std::chrono::steady_clock::now() + waitTimeout;
+
+    for (;;) {
+        if (const DWORD found = findProcessId(kGameExecutableName); found != 0) {
+            const HANDLE handle = ::OpenProcess(kInjectAccess, FALSE, found);
+            if (handle == nullptr) {
+                error = std::format("процесс игры найден, но доступ к нему закрыт: {}",
+                                    lastErrorText());
+                return nullptr;
+            }
+
+            std::unique_ptr<GameProcess> game{new GameProcess};
+            game->process_ = handle;
+            game->processId_ = found;
+            return game;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            error = "процесс GTA5.exe не найден — игра не запущена";
+            return nullptr;
+        }
+
+        ::Sleep(500);
+    }
+}
+
 std::unique_ptr<GameProcess> GameProcess::launch(const GameLocation& location, LaunchMode mode,
                                                  std::chrono::seconds appearTimeout,
                                                  std::string& error) {

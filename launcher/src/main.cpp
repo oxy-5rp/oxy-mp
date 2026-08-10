@@ -13,7 +13,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -37,11 +39,21 @@ void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp [--server <адрес:порт>] [--nickname <имя>]\n"
                  "        [--game <каталог игры>] [--client <путь к модулю>]\n"
-                 "        [--direct]\n\n"
+                 "        [--direct | --attach]\n\n"
+                 "  (по умолчанию) запустить игру через Rockstar Games Launcher и внедрить\n"
+                 "             модуль. Игра работает, но вместе с ней поднимается BattlEye.\n"
                  "  --direct   запустить GTA5.exe напрямую, минуя лаунчер Rockstar.\n"
                  "             Играть так нельзя: игра закрывается с ERR_NO_LAUNCHER.\n"
-                 "             Режим оставлен для опытов над процессом игры.\n";
+                 "  --attach   не запускать игру, а внедриться в уже запущенный GTA5.exe.\n"
+                 "             Как именно игра запущена и остаётся живой — решает пользователь;\n"
+                 "             oxyMP только вносит в неё мультиплеер.\n";
 }
+
+/// Режим работы лаунчера.
+enum class Mode {
+    Launch, ///< Запустить игру самим (через лаунчер Rockstar или напрямую).
+    Attach, ///< Внедриться в уже запущенный процесс игры.
+};
 
 /// Каталог, в котором лежит этот исполняемый файл.
 ///
@@ -67,6 +79,38 @@ std::filesystem::path executableDirectory() {
     return std::filesystem::path{buffer}.parent_path();
 }
 
+/// Кладёт настройки сессии в файл рядом с журналом клиента.
+///
+/// Единственный способ передать адрес сервера и имя в уже запущенный процесс
+/// (режим --attach): окружения он от нас не получал. Пишется в наш каталог, а
+/// не в папку игры.
+void writeSessionFile(const std::string& server, const std::string& nickname) {
+    const std::string localAppData = [] {
+        DWORD needed = ::GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
+        if (needed == 0) {
+            return std::string{};
+        }
+        std::wstring wide(needed, L'\0');
+        needed = ::GetEnvironmentVariableW(L"LOCALAPPDATA", wide.data(), needed);
+        wide.resize(needed);
+        return std::filesystem::path{wide}.string();
+    }();
+
+    if (localAppData.empty()) {
+        return;
+    }
+
+    const std::filesystem::path path = std::filesystem::path{localAppData} / "oxyMP" / "session.cfg";
+
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (file) {
+        file << "server=" << server << '\n' << "nickname=" << nickname << '\n';
+    }
+}
+
 bool setEnvironment(const char* name, const std::string& value) {
     const int size = ::MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                                            nullptr, 0);
@@ -89,7 +133,8 @@ int main(int argc, char** argv) {
     std::string nickname = "player";
     std::filesystem::path gameDirectory;
     std::filesystem::path clientModule;
-    auto mode = oxymp::launcher::LaunchMode::ViaRockstarLauncher;
+    auto launchMode = oxymp::launcher::LaunchMode::ViaRockstarLauncher;
+    Mode mode = Mode::Launch;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
@@ -104,7 +149,9 @@ int main(int argc, char** argv) {
         } else if (argument == "--client" && hasValue) {
             clientModule = argv[++i];
         } else if (argument == "--direct") {
-            mode = oxymp::launcher::LaunchMode::Direct;
+            launchMode = oxymp::launcher::LaunchMode::Direct;
+        } else if (argument == "--attach") {
+            mode = Mode::Attach;
         } else {
             printUsage();
             return 2;
@@ -117,57 +164,79 @@ int main(int argc, char** argv) {
         clientModule = executableDirectory() / kClientModuleName;
     }
 
-    std::string error;
-    const auto location = gameDirectory.empty()
-                              ? oxymp::launcher::locateGame(error)
-                              : oxymp::launcher::gameInDirectory(gameDirectory, error);
-    if (!location) {
-        spdlog::error("{}", error);
-        return 1;
-    }
-
-    spdlog::info("игра: {}{}", location->directory.string(),
-                 location->version.empty() ? "" : " версии " + location->version);
     spdlog::info("сервер: {}, имя: {}", server, nickname);
 
+    // Настройки дублируются двумя путями. Переменные окружения работают, когда
+    // игру запускаем мы: дочерний процесс их наследует. Файл рядом с журналом
+    // нужен для --attach: процесс уже запущен и окружения от нас не получал.
     if (!setEnvironment("OXYMP_SERVER", server) || !setEnvironment("OXYMP_NICKNAME", nickname)) {
         spdlog::error("не удалось передать настройки игре");
         return 1;
     }
+    writeSessionFile(server, nickname);
 
-    spdlog::info("запуск {}", mode == oxymp::launcher::LaunchMode::Direct
-                                 ? "напрямую (игра закроется с ERR_NO_LAUNCHER)"
-                                 : "через Rockstar Games Launcher");
+    std::string error;
+    std::unique_ptr<oxymp::launcher::GameProcess> game;
 
-    const auto game =
-        oxymp::launcher::GameProcess::launch(*location, mode, kProcessTimeout, error);
-    if (!game) {
-        spdlog::error("{}", error);
-        return 1;
-    }
+    if (mode == Mode::Attach) {
+        spdlog::info("ищем запущенную игру");
 
-    spdlog::info("игра запущена, идентификатор процесса {}", game->id());
+        game = oxymp::launcher::GameProcess::attach(kProcessTimeout, error);
+        if (!game) {
+            spdlog::error("{}", error);
+            return 1;
+        }
 
-    if (mode == oxymp::launcher::LaunchMode::Direct) {
-        // Окна при прямом запуске может не появиться вовсе, поэтому единственный
-        // надёжный признак готовности процесса — удавшееся внедрение.
-        spdlog::info("внедряем модуль");
+        spdlog::info("игра найдена, идентификатор процесса {}, внедряем модуль", game->id());
 
         if (!game->injectWithRetries(clientModule, kInjectTimeout, error)) {
             spdlog::error("не удалось внедрить модуль: {}", error);
             return 1;
         }
     } else {
-        spdlog::info("ждём появления окна игры");
-
-        if (!game->waitUntilWindowAppears(kWindowTimeout)) {
-            spdlog::error("окно игры так и не появилось — внедрять модуль небезопасно");
+        const auto location = gameDirectory.empty()
+                                  ? oxymp::launcher::locateGame(error)
+                                  : oxymp::launcher::gameInDirectory(gameDirectory, error);
+        if (!location) {
+            spdlog::error("{}", error);
             return 1;
         }
 
-        if (!game->inject(clientModule, error)) {
-            spdlog::error("не удалось внедрить модуль: {}", error);
+        spdlog::info("игра: {}{}", location->directory.string(),
+                     location->version.empty() ? "" : " версии " + location->version);
+        spdlog::info("запуск {}", launchMode == oxymp::launcher::LaunchMode::Direct
+                                     ? "напрямую (игра закроется с ERR_NO_LAUNCHER)"
+                                     : "через Rockstar Games Launcher");
+
+        game = oxymp::launcher::GameProcess::launch(*location, launchMode, kProcessTimeout, error);
+        if (!game) {
+            spdlog::error("{}", error);
             return 1;
+        }
+
+        spdlog::info("игра запущена, идентификатор процесса {}", game->id());
+
+        if (launchMode == oxymp::launcher::LaunchMode::Direct) {
+            // Окна при прямом запуске может не появиться вовсе, поэтому
+            // единственный надёжный признак готовности — удавшееся внедрение.
+            spdlog::info("внедряем модуль");
+
+            if (!game->injectWithRetries(clientModule, kInjectTimeout, error)) {
+                spdlog::error("не удалось внедрить модуль: {}", error);
+                return 1;
+            }
+        } else {
+            spdlog::info("ждём появления окна игры");
+
+            if (!game->waitUntilWindowAppears(kWindowTimeout)) {
+                spdlog::error("окно игры так и не появилось — внедрять модуль небезопасно");
+                return 1;
+            }
+
+            if (!game->inject(clientModule, error)) {
+                spdlog::error("не удалось внедрить модуль: {}", error);
+                return 1;
+            }
         }
     }
 

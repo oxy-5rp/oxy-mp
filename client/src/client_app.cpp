@@ -9,6 +9,7 @@
 #include <charconv>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -112,8 +113,51 @@ void setUpLogging() {
     }
 }
 
+/// Настройки из файла сессии.
+///
+/// Запасной путь для случая, когда модуль внедрён в уже запущенную игру
+/// (режим --attach лаунчера): окружения такой процесс от лаунчера не получал,
+/// поэтому адрес сервера и имя берутся из файла, который лаунчер кладёт рядом
+/// с журналом.
+void applySessionFile(Connection::Settings& settings) {
+    const std::string localAppData = environmentValue(L"LOCALAPPDATA");
+    if (localAppData.empty()) {
+        return;
+    }
+
+    std::ifstream file(std::filesystem::path{localAppData} / "oxyMP" / "session.cfg");
+    if (!file) {
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        const std::size_t eq = line.find('=');
+        if (eq == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = line.substr(0, eq);
+        const std::string value = line.substr(eq + 1);
+
+        if (key == "server") {
+            applyServerAddress(value, settings);
+        } else if (key == "nickname" && !value.empty()) {
+            settings.nickname = value;
+        }
+    }
+}
+
 Connection::Settings readSettings() {
     Connection::Settings settings;
+
+    // Файл читается первым, окружение — вторым и имеет приоритет: когда игру
+    // запускает лаунчер, окружение свежее файла, оставшегося от прошлого раза.
+    applySessionFile(settings);
 
     applyServerAddress(environmentValue(L"OXYMP_SERVER"), settings);
 
