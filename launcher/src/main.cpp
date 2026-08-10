@@ -27,10 +27,17 @@ constexpr const char* kClientModuleName = "oxymp-client.dll";
 /// Сколько ждать появления окна игры.
 constexpr auto kWindowTimeout = std::chrono::seconds{180};
 
+/// Сколько ждать появления процесса игры после запуска через лаунчер Rockstar.
+constexpr auto kProcessTimeout = std::chrono::seconds{180};
+
 void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp [--server <адрес:порт>] [--nickname <имя>]\n"
-                 "        [--game <каталог игры>] [--client <путь к модулю>]\n";
+                 "        [--game <каталог игры>] [--client <путь к модулю>]\n"
+                 "        [--direct]\n\n"
+                 "  --direct   запустить GTA5.exe напрямую, минуя лаунчер Rockstar.\n"
+                 "             Играть так нельзя: игра закрывается с ERR_NO_LAUNCHER.\n"
+                 "             Режим оставлен для опытов над процессом игры.\n";
 }
 
 /// Каталог, в котором лежит этот исполняемый файл.
@@ -79,6 +86,7 @@ int main(int argc, char** argv) {
     std::string nickname = "player";
     std::filesystem::path gameDirectory;
     std::filesystem::path clientModule;
+    auto mode = oxymp::launcher::LaunchMode::ViaRockstarLauncher;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
@@ -92,6 +100,8 @@ int main(int argc, char** argv) {
             gameDirectory = argv[++i];
         } else if (argument == "--client" && hasValue) {
             clientModule = argv[++i];
+        } else if (argument == "--direct") {
+            mode = oxymp::launcher::LaunchMode::Direct;
         } else {
             printUsage();
             return 2;
@@ -122,11 +132,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const auto game = oxymp::launcher::GameProcess::launch(*location, error);
+    spdlog::info("запуск {}", mode == oxymp::launcher::LaunchMode::Direct
+                                 ? "напрямую (игра закроется с ERR_NO_LAUNCHER)"
+                                 : "через Rockstar Games Launcher");
+
+    const auto game =
+        oxymp::launcher::GameProcess::launch(*location, mode, kProcessTimeout, error);
     if (!game) {
         spdlog::error("{}", error);
-        spdlog::error("если игра не запускается, проверьте, что Rockstar Games Launcher "
-                      "запущен и выполнен вход");
         return 1;
     }
 
