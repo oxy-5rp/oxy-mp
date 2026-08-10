@@ -265,6 +265,28 @@ bool GameProcess::inject(const std::filesystem::path& module, std::string& error
     return ok;
 }
 
+bool GameProcess::injectWithRetries(const std::filesystem::path& module,
+                                    std::chrono::seconds timeout, std::string& error) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+
+    for (;;) {
+        if (inject(module, error)) {
+            return true;
+        }
+
+        if (!isRunning()) {
+            error = "процесс игры завершился раньше, чем удалось внедрить модуль";
+            return false;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+
+        ::Sleep(100);
+    }
+}
+
 void GameProcess::waitForExit() {
     ::WaitForSingleObject(process_, INFINITE);
 }

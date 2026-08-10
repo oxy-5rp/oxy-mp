@@ -57,6 +57,15 @@ public:
     /// Внедряет модуль в процесс игры.
     [[nodiscard]] bool inject(const std::filesystem::path& module, std::string& error);
 
+    /// Внедряет модуль, повторяя попытки, пока процесс жив.
+    ///
+    /// Сразу после запуска процесс ещё занят собой и удалённый поток создать в
+    /// нём не удаётся. Ждать при этом нечего конкретного: окна у игры может не
+    /// появиться вовсе, поэтому единственный надёжный признак готовности — это
+    /// удавшееся внедрение.
+    [[nodiscard]] bool injectWithRetries(const std::filesystem::path& module,
+                                         std::chrono::seconds timeout, std::string& error);
+
     /// Ждёт завершения игры.
     void waitForExit();
 

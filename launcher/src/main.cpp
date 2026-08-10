@@ -30,6 +30,9 @@ constexpr auto kWindowTimeout = std::chrono::seconds{180};
 /// Сколько ждать появления процесса игры после запуска через лаунчер Rockstar.
 constexpr auto kProcessTimeout = std::chrono::seconds{180};
 
+/// Сколько добиваться внедрения при прямом запуске.
+constexpr auto kInjectTimeout = std::chrono::seconds{30};
+
 void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp [--server <адрес:порт>] [--nickname <имя>]\n"
@@ -144,16 +147,28 @@ int main(int argc, char** argv) {
     }
 
     spdlog::info("игра запущена, идентификатор процесса {}", game->id());
-    spdlog::info("ждём появления окна игры");
 
-    if (!game->waitUntilWindowAppears(kWindowTimeout)) {
-        spdlog::error("окно игры так и не появилось — внедрять модуль небезопасно");
-        return 1;
-    }
+    if (mode == oxymp::launcher::LaunchMode::Direct) {
+        // Окна при прямом запуске может не появиться вовсе, поэтому единственный
+        // надёжный признак готовности процесса — удавшееся внедрение.
+        spdlog::info("внедряем модуль");
 
-    if (!game->inject(clientModule, error)) {
-        spdlog::error("не удалось внедрить модуль: {}", error);
-        return 1;
+        if (!game->injectWithRetries(clientModule, kInjectTimeout, error)) {
+            spdlog::error("не удалось внедрить модуль: {}", error);
+            return 1;
+        }
+    } else {
+        spdlog::info("ждём появления окна игры");
+
+        if (!game->waitUntilWindowAppears(kWindowTimeout)) {
+            spdlog::error("окно игры так и не появилось — внедрять модуль небезопасно");
+            return 1;
+        }
+
+        if (!game->inject(clientModule, error)) {
+            spdlog::error("не удалось внедрить модуль: {}", error);
+            return 1;
+        }
     }
 
     spdlog::info("модуль внедрён: {}", clientModule.filename().string());
