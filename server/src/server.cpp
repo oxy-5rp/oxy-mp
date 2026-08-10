@@ -121,6 +121,12 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::PlayerState:
+        if (const auto state = shared::decode<shared::PlayerState>(packet)) {
+            handlePlayerState(peer, *state);
+        }
+        return;
+
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -195,6 +201,21 @@ void Server::handlePing(net::PeerId peer, const shared::Ping& ping) {
 
     const auto packet = shared::encode(pong);
     host_->send(peer, shared::Channel::State, shared::ByteView{packet});
+}
+
+void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
+    const Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        // Состояние до рукопожатия рассылать некому и незачем.
+        return;
+    }
+
+    // Идентификатор проставляет сервер, а не клиент. Иначе достаточно было бы
+    // подменить одно поле, чтобы двигать чужого игрока.
+    state.playerId = player->id;
+
+    const auto packet = shared::encode(state);
+    host_->broadcast(shared::Channel::State, shared::ByteView{packet}, peer);
 }
 
 void Server::reject(net::PeerId peer, shared::RejectReason reason) {

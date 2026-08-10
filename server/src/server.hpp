@@ -43,6 +43,7 @@ private:
 
     void handleHello(net::PeerId peer, const shared::ClientHello& hello);
     void handlePing(net::PeerId peer, const shared::Ping& ping);
+    void handlePlayerState(net::PeerId peer, shared::PlayerState state);
 
     /// Отправляет отказ и закрывает соединение.
     void reject(net::PeerId peer, shared::RejectReason reason);

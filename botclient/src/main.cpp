@@ -11,6 +11,7 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <iostream>
 #include <string>
@@ -21,6 +22,13 @@
 #endif
 
 namespace {
+
+/// Круг, по которому ходит бот. Координаты игровые, точка около Веспуччи.
+constexpr float kCircleRadius = 25.0F;
+constexpr float kGroundHeight = 70.0F;
+
+/// Угловая скорость в радианах в секунду: полный круг примерно за 12 секунд.
+constexpr float kAngularSpeed = 0.5F;
 
 std::atomic<bool> g_stopRequested{false};
 
@@ -94,10 +102,27 @@ int main(int argc, char** argv) {
     bool everConnected = false;
 
     while (!g_stopRequested.load()) {
-        connection.update(std::chrono::milliseconds{50});
+        connection.update(std::chrono::milliseconds{20});
 
         if (connection.state() == oxymp::client::ConnectionState::Connected) {
             everConnected = true;
+
+            // Бот ходит по кругу. Движение нужно настоящее: на неподвижном
+            // игроке ни интерполяция, ни экстраполяция себя не проявят.
+            const float elapsed =
+                std::chrono::duration<float>{std::chrono::steady_clock::now() - started}.count();
+            const float angle = elapsed * kAngularSpeed;
+
+            oxymp::shared::PlayerState state;
+            state.position = oxymp::shared::Vec3{kCircleRadius * std::cos(angle),
+                                                 kCircleRadius * std::sin(angle), kGroundHeight};
+            state.velocity = oxymp::shared::Vec3{-kCircleRadius * kAngularSpeed * std::sin(angle),
+                                                 kCircleRadius * kAngularSpeed * std::cos(angle),
+                                                 0.0F};
+            state.heading = angle * 180.0F / 3.14159265F;
+            state.health = 200;
+
+            connection.setLocalState(state);
         }
 
         if (connection.state() == oxymp::client::ConnectionState::Rejected) {
@@ -115,6 +140,15 @@ int main(int argc, char** argv) {
                          connection.remotePlayers().size(),
                          latency ? std::to_string(latency->count()) + " мс"
                                  : std::string{"не измерена"});
+
+            // Главное доказательство работы мультиплеера: мы видим, где сейчас
+            // находятся другие игроки, и их положение меняется.
+            for (const auto& [id, player] : connection.remotePlayers()) {
+                const auto position = player.interpolatedPosition(now);
+                spdlog::info("  игрок \"{}\" (id {}) в точке {:.1f} {:.1f} {:.1f}",
+                             player.nickname.empty() ? "?" : player.nickname, id, position.x,
+                             position.y, position.z);
+            }
         }
 
         if (seconds != 0 && now >= deadline) {

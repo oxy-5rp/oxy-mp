@@ -3,12 +3,31 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace oxymp::client {
 namespace {
 
 /// Как часто отправляется проверка связи.
 constexpr auto kPingInterval = std::chrono::seconds{2};
+
+/// Как часто уходит снимок своего состояния.
+///
+/// Двадцать раз в секунду: чаще — лишний трафик, реже — интерполяция начинает
+/// заметно отставать от настоящего движения.
+constexpr auto kStateInterval = std::chrono::milliseconds{50};
+
+/// Насколько далеко разрешено достраивать движение за последним снимком.
+///
+/// Без ограничения потерянная связь уводила бы модель игрока в бесконечность.
+constexpr auto kMaxExtrapolation = std::chrono::milliseconds{250};
+
+/// На сколько чужие игроки показываются позади настоящего времени.
+///
+/// Плата за плавность: столько времени нужно, чтобы в запасе всегда была пара
+/// снимков, между которыми можно считать положение. Примерно два интервала
+/// отправки — этого хватает, чтобы пережить одиночную потерю пакета.
+constexpr auto kInterpolationDelay = std::chrono::milliseconds{100};
 
 /// Границы задержки между попытками подключения.
 constexpr auto kMinRetryDelay = std::chrono::milliseconds{500};
@@ -54,6 +73,50 @@ std::string_view describe(ConnectionState state) noexcept {
     return "?";
 }
 
+shared::Vec3 RemotePlayer::interpolatedPosition(std::chrono::steady_clock::time_point now) const {
+    if (!hasState) {
+        return {};
+    }
+
+    // Рисуем чужих игроков с небольшой задержкой относительно настоящего времени.
+    //
+    // Это принципиальный момент: если показывать самый свежий снимок, между
+    // снимками показывать будет нечего, и движение превратится в рывки. Отставая
+    // на kInterpolationDelay, мы почти всегда оказываемся между двумя уже
+    // полученными снимками и можем считать положение между ними.
+    const auto renderAt = now - kInterpolationDelay;
+
+    const auto span = std::chrono::duration<float>{latestAt - previousAt}.count();
+    const auto ahead = std::chrono::duration<float>{renderAt - latestAt}.count();
+
+    if (ahead <= 0.0F) {
+        if (span <= 0.0F) {
+            // Снимок пока один — интерполировать не между чем.
+            return latest.position;
+        }
+
+        const float progress = 1.0F + ahead / span;
+        const float clamped = std::clamp(progress, 0.0F, 1.0F);
+
+        return shared::Vec3{
+            std::lerp(previous.position.x, latest.position.x, clamped),
+            std::lerp(previous.position.y, latest.position.y, clamped),
+            std::lerp(previous.position.z, latest.position.z, clamped),
+        };
+    }
+
+    // Свежих снимков нет дольше задержки: достраиваем движение по последней
+    // известной скорости, но не бесконечно — иначе потеря связи унесёт игрока.
+    const float limit = std::chrono::duration<float>{kMaxExtrapolation}.count();
+    const float elapsed = std::min(ahead, limit);
+
+    return shared::Vec3{
+        latest.position.x + latest.velocity.x * elapsed,
+        latest.position.y + latest.velocity.y * elapsed,
+        latest.position.z + latest.velocity.z * elapsed,
+    };
+}
+
 Connection::Connection(Settings settings) : settings_(std::move(settings)) {}
 
 Connection::~Connection() = default;
@@ -82,6 +145,7 @@ void Connection::update(std::chrono::milliseconds budget) {
     }
 
     sendPingIfDue();
+    sendStateIfDue();
 }
 
 void Connection::beginAttempt() {
@@ -150,8 +214,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
 
     case shared::MessageId::PlayerJoined:
         if (const auto joined = shared::decode<shared::PlayerJoined>(packet)) {
-            remotePlayers_.insert_or_assign(joined->playerId,
-                                            RemotePlayer{joined->playerId, joined->nickname});
+            // Именно обновление полей, а не замена записи: снимок состояния мог
+            // прийти раньше объявления о входе, и затирать его нельзя.
+            RemotePlayer& player = remotePlayers_[joined->playerId];
+            player.id = joined->playerId;
+            player.nickname = joined->nickname;
+
             spdlog::info("в сессии появился игрок \"{}\" (id {})", joined->nickname,
                          joined->playerId);
         }
@@ -161,6 +229,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         if (const auto left = shared::decode<shared::PlayerLeft>(packet)) {
             remotePlayers_.erase(left->playerId);
             spdlog::info("игрок id {} вышел", left->playerId);
+        }
+        return;
+
+    case shared::MessageId::PlayerState:
+        if (const auto state = shared::decode<shared::PlayerState>(packet)) {
+            handleRemoteState(*state);
         }
         return;
 
@@ -180,6 +254,7 @@ void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
     // а не с накопленной задержки.
     retryDelay_ = kMinRetryDelay;
     nextPingAt_ = Clock::now();
+    nextStateAt_ = Clock::now();
 
     spdlog::info("сервер принял: наш id {}, темп {} тактов в секунду", welcome.playerId,
                  welcome.tickRate);
@@ -199,6 +274,36 @@ void Connection::handlePong(const shared::Pong& pong) {
     }
 
     latency_ = std::chrono::milliseconds{now - pong.timestampMs};
+}
+
+void Connection::handleRemoteState(const shared::PlayerState& state) {
+    if (state.playerId == localPlayerId_ || state.playerId == shared::kInvalidPlayerId) {
+        return;
+    }
+
+    // Снимок может прийти раньше объявления о входе — например если пакеты
+    // разошлись. Заводим игрока молча: имя придёт следующим PlayerJoined.
+    RemotePlayer& player = remotePlayers_[state.playerId];
+    player.id = state.playerId;
+
+    const auto now = Clock::now();
+
+    if (player.hasState) {
+        player.previous = player.latest;
+        player.previousAt = player.latestAt;
+    } else {
+        player.previous = state;
+        player.previousAt = now;
+        player.hasState = true;
+    }
+
+    player.latest = state;
+    player.latestAt = now;
+}
+
+void Connection::setLocalState(const shared::PlayerState& state) {
+    localState_ = state;
+    localState_.playerId = shared::kInvalidPlayerId;
 }
 
 void Connection::sendHello() {
@@ -225,6 +330,17 @@ void Connection::sendPingIfDue() {
     nextPingAt_ = Clock::now() + kPingInterval;
 }
 
+void Connection::sendStateIfDue() {
+    if (state_ != ConnectionState::Connected || Clock::now() < nextStateAt_) {
+        return;
+    }
+
+    const auto packet = shared::encode(localState_);
+    host_->send(serverPeer_, shared::Channel::State, shared::ByteView{packet});
+
+    nextStateAt_ = Clock::now() + kStateInterval;
+}
+
 void Connection::fallBackToWaiting(std::string_view reason) {
     if (state_ == ConnectionState::Rejected) {
         return;
@@ -238,6 +354,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     remotePlayers_.clear();
     latency_.reset();
     nextPingAt_ = Clock::time_point::max();
+    nextStateAt_ = Clock::time_point::max();
 
     state_ = ConnectionState::Waiting;
     nextAttemptAt_ = Clock::now() + retryDelay_;

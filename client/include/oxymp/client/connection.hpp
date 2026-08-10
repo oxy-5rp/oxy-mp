@@ -33,6 +33,29 @@ enum class ConnectionState {
 struct RemotePlayer {
     shared::PlayerId id = shared::kInvalidPlayerId;
     std::string nickname;
+
+    /// Последнее и предыдущее известные состояния.
+    ///
+    /// Их два, потому что рисовать игрока строго по последнему снимку нельзя:
+    /// снимки приходят реже кадров и с неровными промежутками, и модель будет
+    /// прыгать. Промежуточное положение считается между этими двумя.
+    shared::PlayerState previous;
+    shared::PlayerState latest;
+
+    /// Когда пришли соответствующие снимки.
+    std::chrono::steady_clock::time_point previousAt{};
+    std::chrono::steady_clock::time_point latestAt{};
+
+    /// Получен ли хотя бы один снимок.
+    bool hasState = false;
+
+    /// Положение на текущий момент.
+    ///
+    /// Между двумя последними снимками положение считается пропорционально
+    /// прошедшему времени; за пределами этого промежутка — достраивается по
+    /// скорости, чтобы игрок не замирал при потере пакета.
+    [[nodiscard]] shared::Vec3 interpolatedPosition(
+        std::chrono::steady_clock::time_point now) const;
 };
 
 /// Соединение с сервером и состояние сессии.
@@ -67,6 +90,12 @@ public:
     /// Просит закрыть соединение и больше не подключаться.
     void disconnect();
 
+    /// Задаёт состояние своего игрока, которое уходит на сервер.
+    ///
+    /// Идентификатор заполнять не нужно: сервер знает, чьё это соединение, и
+    /// проставляет его сам.
+    void setLocalState(const shared::PlayerState& state);
+
     [[nodiscard]] ConnectionState state() const noexcept { return state_; }
 
     [[nodiscard]] shared::PlayerId localPlayerId() const noexcept { return localPlayerId_; }
@@ -95,9 +124,11 @@ private:
     void handleWelcome(const shared::ServerWelcome& welcome);
     void handleReject(const shared::ServerReject& reject);
     void handlePong(const shared::Pong& pong);
+    void handleRemoteState(const shared::PlayerState& state);
 
     void sendHello();
     void sendPingIfDue();
+    void sendStateIfDue();
 
     /// Сбрасывает состояние сессии и назначает следующую попытку.
     void fallBackToWaiting(std::string_view reason);
@@ -121,6 +152,9 @@ private:
 
     std::optional<std::chrono::milliseconds> latency_;
     bool stopped_ = false;
+
+    shared::PlayerState localState_;
+    Clock::time_point nextStateAt_ = Clock::time_point::max();
 };
 
 /// Человекочитаемое описание причины отказа.

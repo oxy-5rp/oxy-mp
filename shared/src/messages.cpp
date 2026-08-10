@@ -80,6 +80,24 @@ PlayerLeft PlayerLeft::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerState::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeVec3(position);
+    writer.writeFloat(heading);
+    writer.writeVec3(velocity);
+    writer.writeU16(health);
+}
+
+PlayerState PlayerState::read(ByteReader& reader) {
+    PlayerState message;
+    message.playerId = reader.readU32();
+    message.position = reader.readVec3();
+    message.heading = reader.readFloat();
+    message.velocity = reader.readVec3();
+    message.health = reader.readU16();
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -93,6 +111,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::Pong:
     case MessageId::PlayerJoined:
     case MessageId::PlayerLeft:
+    case MessageId::PlayerState:
         return static_cast<MessageId>(packet.front());
     }
 

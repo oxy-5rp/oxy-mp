@@ -90,6 +90,24 @@ TEST_CASE("PlayerJoined and PlayerLeft survive a round trip", "[messages]") {
     CHECK(receivedLeft->playerId == 3);
 }
 
+TEST_CASE("PlayerState survives a round trip", "[messages]") {
+    PlayerState sent;
+    sent.playerId = 17;
+    sent.position = Vec3{-1337.5F, 220.25F, 58.0F};
+    sent.heading = 91.5F;
+    sent.velocity = Vec3{1.5F, -2.25F, 0.0F};
+    sent.health = 175;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 17);
+    CHECK(received->position == sent.position);
+    CHECK(received->heading == 91.5F);
+    CHECK(received->velocity == sent.velocity);
+    CHECK(received->health == 175);
+}
+
 TEST_CASE("peekMessageId reads the type without decoding", "[messages]") {
     const std::vector<std::uint8_t> packet = encode(Ping{});
 
