@@ -102,6 +102,7 @@ Noclip::Noclip(const NativeTable& table) noexcept
     : getCoords_(table.handlerFor(natives::kGetEntityCoords)),
       setCoords_(table.handlerFor(natives::kSetEntityCoords)),
       setHeading_(table.handlerFor(natives::kSetEntityHeading)),
+      placeExactly_(table.handlerFor(natives::kSetEntityCoordsNoOffset)),
       freeze_(table.handlerFor(natives::kFreezeEntityPosition)),
       setCollision_(table.handlerFor(natives::kSetEntityCollision)),
       cameraCoords_(table.handlerFor(natives::kGetGameplayCamCoord)),
@@ -119,6 +120,12 @@ void Noclip::setActive(int ped, bool active) {
 
     active_ = active;
     movedAt_ = Clock::time_point{};
+
+    // Свой счёт начинается там, где персонаж стоит сейчас. Это единственное
+    // место, где положение читается у игры: дальше оно ведётся самостоятельно.
+    if (active) {
+        position_ = coordsOf(ped);
+    }
 
     // Разбор направления пишется заново на каждое включение: числа нужны ровно
     // тогда, когда полёт ведёт себя не так, как ожидалось.
@@ -233,6 +240,48 @@ shared::Vec3 Noclip::lookDirection(shared::Vec3 position) {
     return agree ? fromAngles : fromGeometry;
 }
 
+/// Дальше этого расхождение считается чужим переносом, в метрах.
+///
+/// Своих расхождений быть не должно вовсе: персонажа ставят точно туда, куда
+/// сказано. А вот чужие бывают — перенос из меню, воскрешение, — и после них
+/// свой счёт надо начинать заново, иначе первое же нажатие вернёт персонажа
+/// туда, откуда его увели.
+///
+/// Пять метров: поправка игры не бывает и вполовину такой, а перенос не бывает
+/// и вполовину таким коротким.
+constexpr float kForeignMove = 5.0F;
+
+shared::Vec3 Noclip::trackedPosition(int ped) {
+    const shared::Vec3 actual = coordsOf(ped);
+
+    const shared::Vec3 apart{actual.x - position_.x, actual.y - position_.y,
+                             actual.z - position_.z};
+
+    if (length(apart) > kForeignMove) {
+        position_ = actual;
+    }
+
+    return position_;
+}
+
+void Noclip::place(int ped, shared::Vec3 destination) {
+    // Перестановка без поправки на землю — та самая, из-за которой полёт уходил
+    // вверх. Обычная перестановка ставит персонажа не туда, куда сказано, а туда,
+    // где ему полагается стоять: приподнимает над указанной точкой. Раз в кадр
+    // это незаметно, но мы читали положение обратно, и приподнимания
+    // складывались друг с другом.
+    if (placeExactly_ != nullptr) {
+        invokeNative<void>(placeExactly_, ped, destination.x, destination.y, destination.z, false,
+                           false, false);
+        return;
+    }
+
+    // Запасной путь на случай, если точной перестановки в таблице не нашлось.
+    // Лететь по нему можно, но вверх будет сносить — потому он и запасной.
+    invokeNative<void>(setCoords_, ped, destination.x, destination.y, destination.z, false, false,
+                       false, true);
+}
+
 float Noclip::elapsed() {
     const Clock::time_point now = Clock::now();
 
@@ -253,7 +302,7 @@ void Noclip::update(int ped) {
         return;
     }
 
-    const shared::Vec3 position = coordsOf(ped);
+    const shared::Vec3 position = trackedPosition(ped);
 
     if (const shared::Vec3 looking = lookDirection(position); length(looking) > kTinyLength) {
         lastDirection = looking;
@@ -300,14 +349,10 @@ void Noclip::update(int ped) {
     const shared::Vec3 step = normalised(move);
     const float distance = (keyDown(VK_SHIFT) ? kFastSpeed : kSpeed) * seconds;
 
-    const shared::Vec3 destination{position.x + step.x * distance,
-                                   position.y + step.y * distance,
-                                   position.z + step.z * distance};
+    position_ = shared::Vec3{position.x + step.x * distance, position.y + step.y * distance,
+                             position.z + step.z * distance};
 
-    // Последние признаки те же, что при обычном переносе: не искать землю и
-    // считать перемещение мгновенным.
-    invokeNative<void>(setCoords_, ped, destination.x, destination.y, destination.z, false, false,
-                       false, true);
+    place(ped, position_);
 
     // Персонаж разворачивается по камере, иначе он летит боком.
     invokeNative<void>(setHeading_, ped, headingOf(lastDirection));

@@ -13,14 +13,23 @@
 namespace oxymp::client::game {
 namespace {
 
-/// Машины, которые меню умеет выдавать.
+/// Машины, которые меню предлагает готовым списком.
 ///
 /// Список короткий и намеренно: это не каталог всей игры, а то, на чём удобно
-/// проверять сессию — быстрое, вместительное, летающее и по воде.
+/// проверять сессию — быстрое, вместительное, летающее и по воде. Всё остальное
+/// берётся первым пунктом, по названию: моделей в игре больше семисот, и списком
+/// их не показать.
 struct Model {
     const char* name;
     const char* label;
 };
+
+/// Место пункта «по названию» в разделе транспорта.
+///
+/// Первым, а не последним: набрать название — это то, ради чего в раздел заходят
+/// чаще всего, а список под ним — короткая подсказка на случай, если название не
+/// вспоминается.
+constexpr std::size_t kByName = 0;
 
 constexpr std::array<Model, 14> kVehicles = {{
     {"adder", "Adder"},
@@ -122,6 +131,7 @@ AdminMenu::AdminMenu(const NativeTable& table) noexcept
       hasModelLoaded_(table.handlerFor(natives::kHasModelLoaded)),
       modelNoLongerNeeded_(table.handlerFor(natives::kSetModelAsNoLongerNeeded)),
       isModelInCdimage_(table.handlerFor(natives::kIsModelInCdimage)),
+      isModelAVehicle_(table.handlerFor(natives::kIsModelAVehicle)),
       createVehicle_(table.handlerFor(natives::kCreateVehicle)),
       deleteVehicle_(table.handlerFor(natives::kDeleteVehicle)),
       setIntoVehicle_(table.handlerFor(natives::kSetPedIntoVehicle)),
@@ -165,6 +175,10 @@ void AdminMenu::toggle() {
 
 void AdminMenu::close() {
     open_ = false;
+
+    // Закрытое меню строку уже не ждёт: иначе ввод остался бы висеть без того,
+    // кто его заказал.
+    cancelText();
 }
 
 void AdminMenu::enter(Page page) {
@@ -181,8 +195,8 @@ std::size_t AdminMenu::itemCount() const {
     case Page::Root:
         return 5;
     case Page::Vehicles:
-        // Список машин плюс «убрать» и «починить».
-        return kVehicles.size() + 2;
+        // Ввод названия, список машин, «убрать» и «починить».
+        return kVehicles.size() + 3;
     case Page::Skins:
         return kSkins.size();
     case Page::Teleport:
@@ -258,12 +272,16 @@ void AdminMenu::activate(int player, int ped, bool alternate) {
         }
 
     case Page::Vehicles: {
-        if (index < kVehicles.size()) {
-            pendingModel_ = invokeNative<std::uint32_t>(hashKey_, kVehicles[index].name);
-            pending_ = Pending::Vehicle;
-            pendingFrames_ = 0;
+        if (index == kByName) {
+            asking_ = true;
+            prompt_ = "модель:";
+            note_ = "введите название модели и нажмите ввод";
+            return;
+        }
 
-            note_ = std::format("заказана {}", kVehicles[index].label);
+        if (const std::size_t listed = index - 1; listed < kVehicles.size()) {
+            orderVehicle(invokeNative<std::uint32_t>(hashKey_, kVehicles[listed].name),
+                         kVehicles[listed].label);
             return;
         }
 
@@ -277,7 +295,7 @@ void AdminMenu::activate(int player, int ped, bool alternate) {
             return;
         }
 
-        if (index == kVehicles.size()) {
+        if (index == kVehicles.size() + 1) {
             int handle = vehicle;
 
             NativeContext context;
@@ -460,6 +478,54 @@ bool AdminMenu::waypoint(shared::Vec3& destination) const {
     return true;
 }
 
+void AdminMenu::orderVehicle(std::uint32_t model, std::string_view label) {
+    pendingModel_ = model;
+    pending_ = Pending::Vehicle;
+    pendingFrames_ = 0;
+
+    note_ = std::format("заказана {}", label);
+}
+
+void AdminMenu::supplyText(std::string typed) {
+    asking_ = false;
+    prompt_.clear();
+
+    // Пробелы по краям убираются молча: в названии модели их нет никогда, а
+    // случайный пробел в конце превратил бы верное название в неизвестное.
+    const std::size_t first = typed.find_first_not_of(" \t");
+    const std::size_t last = typed.find_last_not_of(" \t");
+
+    if (first == std::string::npos) {
+        note_ = "название не введено";
+        return;
+    }
+
+    const std::string name = typed.substr(first, last - first + 1);
+
+    const std::uint32_t model = invokeNative<std::uint32_t>(hashKey_, name.c_str());
+
+    // Проверка до заказа, а не после. Заказ несуществующей модели ничем себя не
+    // выдаёт: игра просто никогда её не загрузит, и меню будет ждать её впустую
+    // до конца отсчёта, показывая «заказана» вместо «такой нет».
+    if (isModelInCdimage_ != nullptr && !invokeNative<bool>(isModelInCdimage_, model)) {
+        note_ = std::format("модели «{}» в игре нет", name);
+        return;
+    }
+
+    if (isModelAVehicle_ != nullptr && !invokeNative<bool>(isModelAVehicle_, model)) {
+        note_ = std::format("«{}» — не машина", name);
+        return;
+    }
+
+    orderVehicle(model, name);
+}
+
+void AdminMenu::cancelText() {
+    asking_ = false;
+    prompt_.clear();
+    note_.clear();
+}
+
 void AdminMenu::spawnVehicle(int ped) {
     NativeContext coords;
     coords.push(ped);
@@ -582,7 +648,9 @@ AdminMenu::View AdminMenu::view() const {
 
     case Page::Vehicles:
         view.title = "Транспорт";
-        view.items.reserve(kVehicles.size() + 2);
+        view.items.reserve(kVehicles.size() + 3);
+
+        view.items.push_back(Item{.label = "Выдать по названию", .value = "ввод"});
 
         for (const Model& model : kVehicles) {
             view.items.push_back(Item{.label = model.label, .value = model.name});

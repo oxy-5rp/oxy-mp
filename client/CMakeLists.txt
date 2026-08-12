@@ -33,7 +33,6 @@ if(WIN32)
         src/game/controls.cpp
         src/game/crash_log.cpp
         src/game/engine_addresses.cpp
-        src/game/execute_watch.cpp
         src/game/frontend.cpp
         src/game/hook.cpp
         src/game/hud.cpp
@@ -42,6 +41,7 @@ if(WIN32)
         src/game/loaded_image.cpp
         src/game/native_table.cpp
         src/game/net_session.cpp
+        src/game/network_bail.cpp
         src/game/network_game.cpp
         src/game/noclip.cpp
         src/game/nameplates.cpp

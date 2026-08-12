@@ -131,14 +131,6 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
     adminMenu_.requestThrough(
         [&mail = mail_](shared::AdminCommand command, shared::PlayerId target,
                         shared::Vec3 position) { mail.postAdmin(command, target, position); });
-
-    // Сигнатура разрешается в четырёхбайтное смещение внутри инструкции, а сама
-    // инструкция начинается на три байта раньше: `mov [признак], sil` — это два
-    // байта кода плюс байт с описанием операндов.
-    if (auto* const displacement = addresses.pointerTo<std::uint8_t*>("netgame_teardown_write");
-        displacement != nullptr) {
-        teardownSite_ = displacement - 3;
-    }
 }
 
 std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& addresses,
@@ -207,6 +199,17 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
             spdlog::error("поднятие сессии заказано, но её точки входа не разрешились");
         }
 
+        // Перехват ставится здесь, задолго до первой просьбы поднять сессию, и
+        // это не запас времени ради запаса: без него сессия ложится через доли
+        // секунды после подъёма, и поставить перехват в тот же кадр — значит
+        // опоздать.
+        std::string bailError;
+
+        session->networkBail_ = game::NetworkBail::install(addresses, bailError);
+        if (session->networkBail_ == nullptr) {
+            spdlog::error("выход из сессии не перехвачен, и сессия проживёт доли секунды: {}",
+                          bailError);
+        }
     }
     if (session->settings_.forceNetworkGame != game::NetworkGame::Fake::None &&
         !session->networkGame_.ready()) {
@@ -557,8 +560,16 @@ void GameSession::handleTyping() {
         return;
     }
 
-    if (!textEntry_->active() && pressedOnce(kChatKey)) {
-        textEntry_->begin();
+    if (!textEntry_->active()) {
+        // Строку может попросить меню — например, для названия машины. Его
+        // просьба идёт первой: раз меню открыто, чат сейчас не при чём.
+        if (adminMenu_.wantsText()) {
+            typingFor_ = Typing::Menu;
+            textEntry_->begin();
+        } else if (pressedOnce(kChatKey)) {
+            typingFor_ = Typing::Chat;
+            textEntry_->begin();
+        }
     }
 
     if (textEntry_->active()) {
@@ -566,24 +577,35 @@ void GameSession::handleTyping() {
         // Съеденных сообщений окна для этого мало: клавиатуру GTA читает
         // напрямую, мимо них.
         controls_.suppressEverything();
-        feed_.setInput(true, textEntry_->text());
+        feed_.setInput(true, promptForTyping(), textEntry_->text());
         return;
     }
 
     std::string typed;
-    switch (textEntry_->takeOutcome(typed)) {
-    case game::TextEntry::Outcome::Submitted:
-        mail_.postChat(std::move(typed));
-        feed_.setInput(false, {});
-        return;
+    const game::TextEntry::Outcome outcome = textEntry_->takeOutcome(typed);
 
-    case game::TextEntry::Outcome::Cancelled:
-        feed_.setInput(false, {});
-        return;
-
-    case game::TextEntry::Outcome::Typing:
+    if (outcome == game::TextEntry::Outcome::Typing) {
         return;
     }
+
+    if (outcome == game::TextEntry::Outcome::Submitted) {
+        if (typingFor_ == Typing::Menu) {
+            adminMenu_.supplyText(std::move(typed));
+        } else {
+            mail_.postChat(std::move(typed));
+        }
+    } else if (typingFor_ == Typing::Menu) {
+        adminMenu_.cancelText();
+    }
+
+    typingFor_ = Typing::Chat;
+    feed_.setInput(false, {}, {});
+}
+
+std::string GameSession::promptForTyping() const {
+    // У чата подписи нет: строка под его собственными репликами и без подписи
+    // читается как реплика.
+    return typingFor_ == Typing::Menu ? adminMenu_.textPrompt() : std::string{};
 }
 
 void GameSession::handleMenu(int player, int ped) {
@@ -591,7 +613,20 @@ void GameSession::handleMenu(int player, int ped) {
     // открывать меню.
     const bool typing = textEntry_ != nullptr && textEntry_->active();
 
-    if (!typing && pressedOnce(kMenuKey)) {
+    // Клавиши опрашиваются каждый кадр, даже когда меню их не слушает.
+    //
+    // Опрос ведёт счёт нажатиям, и пропущенный кадр оставляет в нём вчерашнее
+    // состояние: клавиша, нажатая во время набора и всё ещё зажатая после него,
+    // выглядела бы нажатой заново. Ввод в чате отзывался бы в меню.
+    const bool menuKey = pressedOnce(kMenuKey);
+    const bool up = pressedOnce(VK_UP);
+    const bool down = pressedOnce(VK_DOWN);
+    const bool enter = pressedOnce(VK_RETURN);
+    const bool alternate = pressedOnce(VK_RIGHT);
+    const bool left = pressedOnce(VK_LEFT);
+    const bool backspace = pressedOnce(VK_BACK);
+
+    if (!typing && menuKey) {
         adminMenu_.toggle();
     }
 
@@ -600,19 +635,19 @@ void GameSession::handleMenu(int player, int ped) {
         // ведут по пунктам, а не персонажа.
         controls_.suppressEverything();
 
-        if (pressedOnce(VK_UP)) {
+        if (up) {
             adminMenu_.press(game::AdminMenu::Key::Up, player, ped);
         }
-        if (pressedOnce(VK_DOWN)) {
+        if (down) {
             adminMenu_.press(game::AdminMenu::Key::Down, player, ped);
         }
-        if (pressedOnce(VK_RETURN)) {
+        if (enter) {
             adminMenu_.press(game::AdminMenu::Key::Enter, player, ped);
         }
-        if (pressedOnce(VK_RIGHT)) {
+        if (alternate) {
             adminMenu_.press(game::AdminMenu::Key::Alternate, player, ped);
         }
-        if (pressedOnce(VK_LEFT) || pressedOnce(VK_BACK)) {
+        if (left || backspace) {
             adminMenu_.press(game::AdminMenu::Key::Back, player, ped);
         }
     }
@@ -684,19 +719,10 @@ void GameSession::teleportSafely(int ped, shared::Vec3 destination, float headin
 }
 
 void GameSession::holdSession() {
-    // Ловушка ставится вместе с первой просьбой и один раз. Она не вмешивается:
-    // игра выполняет ту же инструкцию, что и без неё, — но мы узнаём, кто её
-    // выполнил, а без этого причина выхода из сессии остаётся неизвестной.
-    if (teardownWatch_ == nullptr && teardownSite_ != nullptr && !netSession_.asked()) {
-        std::string error;
-
-        teardownWatch_ = game::ExecuteWatch::install(teardownSite_,
-                                                     game::ScriptTick::gameThreadId(),
-                                                     "выключение признака сетевой игры", error);
-
-        if (teardownWatch_ == nullptr) {
-            spdlog::debug("ловушка на выключение признака не поставлена: {}", error);
-        }
+    // Держать начинаем до первой просьбы: игра выходит из сессии сама, и первый
+    // же её выход случается раньше, чем мы успеем спросить, поднялась ли она.
+    if (networkBail_ != nullptr) {
+        networkBail_->hold(true);
     }
 
     netSession_.host(settings_.sessionMode);

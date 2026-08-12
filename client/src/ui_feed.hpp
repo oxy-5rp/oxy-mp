@@ -74,8 +74,12 @@ public:
     void pushChat(shared::ChatKind kind, std::string text);
     void pushConsole(unsigned int level, std::string text);
 
-    /// Строка ввода: открыта ли и что в ней набрано.
-    void setInput(bool active, std::string text);
+    /// Строка ввода: открыта ли, о чём спрашивает и что в ней набрано.
+    ///
+    /// Подпись пуста для чата — там и без подписи ясно, что набирается реплика.
+    /// У всего остального она обязательна: строка ввода одна на весь интерфейс, и
+    /// без подписи набор названия машины выглядел бы как реплика в чат.
+    void setInput(bool active, std::string prompt, std::string text);
 
     /// Пункт админ-меню, каким его видит страница.
     struct MenuItem {
@@ -131,6 +135,7 @@ private:
     std::vector<Line> console_;
 
     bool inputActive_ = false;
+    std::string inputPrompt_;
     std::string inputText_;
 
     bool consoleVisible_ = false;

@@ -49,25 +49,20 @@
      около десятка секунд, и всё это время видна её собственная заставка. Так и
      задумано — закрывать её нечем, да и незачем. */
 
-  /* Левый верхний угол оставлен незакрытым.
+  /* Экран закрывает кадр целиком, без выреза под левый верхний угол.
 
-     Кнопка Home и уведомления Social Club рисуются самой игрой в этом углу, а
-     мы рисуемся поверх всего кадра — и закрывали их собой.
+     Вырез там был — сперва прямоугольный, потом плавный, — и делался он ради
+     кнопки Home и уведомлений Social Club, которые игра рисует в этом углу.
+     Обе попытки выглядели одинаково: пятном на ровном фоне. Прикрыть чужой
+     угол, не показав шва, нечем — фон здесь сплошной, и любая прореха в нём
+     видна.
 
-     Не вырез, а растворение. Вырез здесь уже был, прямоугольный, и выглядел
-     ровно тем, чем был: дырой в панели. Плавный переход читается как задуманный
-     — фон просто не доходит до угла.
-
-     Делается это в фоне, а не в содержимом: брендинг и полоса стоят по центру и
-     угла не касаются. */
+     Уведомления от этого не пропадают: экран держится секунды и уходит вместе с
+     появлением игрока в мире, а угол под ним остаётся игре. */
   .loading {
     position: fixed;
     inset: 0;
     background: #06080b;
-    -webkit-mask-image: radial-gradient(circle 620px at 0 0,
-                                        transparent 0 210px, #000 620px);
-    mask-image: radial-gradient(circle 620px at 0 0,
-                                transparent 0 210px, #000 620px);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -265,6 +260,13 @@
   }
   body.typing .entry { display: block; }
 
+  /* Подпись строки ввода. Пустая — значит чат, и тогда её просто не видно:
+     пустой элемент места не занимает. */
+  .entry #prompt {
+    color: var(--accent);
+    margin-right: 6px;
+  }
+
   .entry .caret {
     display: inline-block;
     width: 7px;
@@ -413,7 +415,7 @@
 
 <div class="card chat">
   <div class="lines" id="lines"></div>
-  <div class="entry"><span id="typed"></span><span class="caret"></span></div>
+  <div class="entry"><span id="prompt"></span><span id="typed"></span><span class="caret"></span></div>
 </div>
 
 <div class="card menu">
@@ -598,6 +600,7 @@
       document.body.classList.toggle('alive', !!s.alive);
       document.body.classList.toggle('console', !!s.consoleVisible);
       document.body.classList.toggle('typing', !!s.inputActive);
+      document.getElementById('prompt').textContent = s.inputPrompt || '';
       document.getElementById('typed').textContent = s.inputText || '';
     }
   };

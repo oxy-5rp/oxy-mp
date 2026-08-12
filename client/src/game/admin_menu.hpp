@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace oxymp::client::game {
@@ -89,6 +90,22 @@ public:
     /// Обрабатывает нажатие. Ничего не делает, пока меню закрыто.
     void press(Key key, int player, int ped);
 
+    /// Ждёт ли меню от игрока строку.
+    ///
+    /// Само меню букв не читает: клавиатура перехватывается одна на весь клиент,
+    /// и владеет ею тот же, кто ведёт чат. Меню лишь говорит, что строка нужна,
+    /// и получает её готовой.
+    [[nodiscard]] bool wantsText() const noexcept { return asking_; }
+
+    /// О чём меню спрашивает. Показывается перед набираемым текстом.
+    [[nodiscard]] const std::string& textPrompt() const noexcept { return prompt_; }
+
+    /// Отдаёт набранное. Пустая строка равносильна отказу.
+    void supplyText(std::string typed);
+
+    /// Отменяет ожидание строки.
+    void cancelText();
+
     /// Обновляет список игроков и доводит до конца отложенное.
     ///
     /// Отложенное — это всё, что требует загруженной модели: заказанная модель
@@ -118,6 +135,9 @@ private:
     void enter(Page page);
     void activate(int player, int ped, bool alternate);
 
+    /// Заказывает модель машины. Появится она, когда загрузится, — в update.
+    void orderVehicle(std::uint32_t model, std::string_view label);
+
     void spawnVehicle(int ped);
     void applySkin(int player, int ped);
 
@@ -135,6 +155,7 @@ private:
     NativeHandler hasModelLoaded_ = nullptr;
     NativeHandler modelNoLongerNeeded_ = nullptr;
     NativeHandler isModelInCdimage_ = nullptr;
+    NativeHandler isModelAVehicle_ = nullptr;
     NativeHandler createVehicle_ = nullptr;
     NativeHandler deleteVehicle_ = nullptr;
     NativeHandler setIntoVehicle_ = nullptr;
@@ -178,6 +199,10 @@ private:
 
     /// Неуязвимость — единственное, что меню включает надолго, а не разово.
     bool invincibleOn_ = false;
+
+    /// Ждём ли строку от игрока и о чём спрашиваем.
+    bool asking_ = false;
+    std::string prompt_;
 
     std::vector<Participant> players_;
 };

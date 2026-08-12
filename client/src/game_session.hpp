@@ -2,13 +2,13 @@
 
 #include "game/admin_menu.hpp"
 #include "game/appearance.hpp"
-#include "game/engine_addresses.hpp"
-#include "game/execute_watch.hpp"
 #include "game/controls.hpp"
+#include "game/engine_addresses.hpp"
 #include "game/frontend.hpp"
 #include "game/hud.hpp"
 #include "game/nameplates.hpp"
 #include "game/net_session.hpp"
+#include "game/network_bail.hpp"
 #include "game/network_game.hpp"
 #include "game/noclip.hpp"
 #include "game/online_map.hpp"
@@ -147,7 +147,19 @@ private:
     void ensureTextEntry();
 
     /// Ведёт чат и консоль: открытие, набор, отправку.
+    ///
+    /// Строка ввода одна на весь клиент, и просить её могут двое: чат и меню.
+    /// Иначе пришлось бы держать два перехвата клавиатуры одного окна.
     void handleTyping();
+
+    /// Кому сейчас принадлежит набираемая строка.
+    enum class Typing {
+        Chat,
+        Menu,
+    };
+
+    /// Подпись строки ввода для того, кто ею сейчас владеет.
+    [[nodiscard]] std::string promptForTyping() const;
 
     /// Ведёт админ-меню: открытие, перемещение по пунктам, распоряжения.
     void handleMenu(int player, int ped);
@@ -216,16 +228,15 @@ private:
     /// нет, а без окна перехватывать нечего.
     std::unique_ptr<game::TextEntry> textEntry_;
 
-    /// Ловушка на инструкцию, которой игра гасит признак сетевой игры.
-    ///
-    /// Не вмешательство, а вопрос: кто её выполняет. Ставится вместе с сессией и
-    /// снимается сама после трёх ответов. Игра при этом не изменена ни на байт —
-    /// ловушка стоит в отладочных регистрах процессора, а не в её коде.
-    std::unique_ptr<game::ExecuteWatch> teardownWatch_;
+    /// Кому уйдёт набранное, когда игрок нажмёт ввод.
+    Typing typingFor_ = Typing::Chat;
 
-    /// Где лежит инструкция, гасящая признак. Берётся при сборке: каталог
-    /// адресов принадлежит вызывающему и переживать сессию не обязан.
-    void* teardownSite_ = nullptr;
+    /// Запертая дверь, через которую игра уходит из сессии.
+    ///
+    /// Ставится задолго до первой просьбы поднять сессию: сессия ложится через
+    /// доли секунды после подъёма, и поставить перехват в тот же кадр — значит
+    /// опоздать.
+    std::unique_ptr<game::NetworkBail> networkBail_;
 
     /// Перехват тика. Снимается первым при разрушении: пока он стоит, игра
     /// может вызвать onFrame в любое мгновение.

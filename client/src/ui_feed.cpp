@@ -124,10 +124,11 @@ void UiFeed::pushConsole(unsigned int level, std::string text) {
     trim(console_);
 }
 
-void UiFeed::setInput(bool active, std::string text) {
+void UiFeed::setInput(bool active, std::string prompt, std::string text) {
     const std::lock_guard guard{mutex_};
 
     inputActive_ = active;
+    inputPrompt_ = std::move(prompt);
     inputText_ = std::move(text);
 }
 
@@ -165,8 +166,8 @@ std::string UiFeed::takeUpdate() {
 
     std::string message = std::format(
         R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
-        R"("consoleVisible":{},"inputActive":{},"inputText":"{}","stage":{},"ready":{},)"
-        R"("alive":{})",
+        R"("consoleVisible":{},"inputActive":{},"inputPrompt":"{}","inputText":"{}",)"
+        R"("stage":{},"ready":{},"alive":{})",
         connection_.state, connection_.players, connection_.latencyMilliseconds,
         // Отсутствие номера доходит до страницы отрицательным числом, а не
         // огромным: наибольшее беззнаковое выглядит как настоящий номер игрока,
@@ -175,8 +176,8 @@ std::string UiFeed::takeUpdate() {
             ? -1
             : static_cast<std::int64_t>(connection_.playerId),
         connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0, inputActive_ ? 1 : 0,
-        escape(inputText_), static_cast<unsigned int>(stage_), ready_ ? 1 : 0,
-        alive ? 1 : 0);
+        escape(inputPrompt_), escape(inputText_), static_cast<unsigned int>(stage_),
+        ready_ ? 1 : 0, alive ? 1 : 0);
 
     if (sessionChanged_) {
         sessionChanged_ = false;

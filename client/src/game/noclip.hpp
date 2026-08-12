@@ -70,12 +70,22 @@ private:
 
     [[nodiscard]] shared::Vec3 coordsOf(int entity) const;
 
+    /// Где персонаж находится по нашему счёту.
+    ///
+    /// Заодно замечает, что его перенесли помимо нас — из меню или воскрешением,
+    /// — и в этом случае принимает новое место за своё.
+    [[nodiscard]] shared::Vec3 trackedPosition(int ped);
+
+    /// Ставит персонажа ровно в указанную точку, без поправки на землю.
+    void place(int ped, shared::Vec3 destination);
+
     /// Сколько времени прошло с прошлой перестановки, в секундах.
     [[nodiscard]] float elapsed();
 
     NativeHandler getCoords_ = nullptr;
     NativeHandler setCoords_ = nullptr;
     NativeHandler setHeading_ = nullptr;
+    NativeHandler placeExactly_ = nullptr;
     NativeHandler freeze_ = nullptr;
     NativeHandler setCollision_ = nullptr;
     NativeHandler cameraCoords_ = nullptr;
@@ -98,6 +108,18 @@ private:
     /// выключением и включением проходят минуты, и первый шаг после них унёс бы
     /// персонажа за карту.
     Clock::time_point movedAt_{};
+
+    /// Где мы держим персонажа по собственному счёту.
+    ///
+    /// Считается от самого себя, а не от того, что вернёт игра. Это и есть
+    /// исправление подъёма: положение персонажа игра вправе поправить после
+    /// каждой перестановки, и, читая его обратно, мы складывали свой шаг с её
+    /// поправкой. Поправка эта всегда вверх — и полёт уходил вверх в любую
+    /// сторону, даже когда шаг был строго горизонтальным.
+    ///
+    /// Со своим счётом такой обратной связи нет вовсе: сколько прошли, столько и
+    /// прошли.
+    shared::Vec3 position_{};
 };
 
 } // namespace oxymp::client::game
