@@ -6,6 +6,8 @@
 #include "launcher_patch.hpp"
 #include "rockstar_launcher.hpp"
 
+#include <oxymp/gamesig/catalog.hpp>
+
 #include <spdlog/spdlog.h>
 
 #include <chrono>
@@ -205,6 +207,25 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
                                : gameInDirectory(settings.gameDirectory, error);
     if (!installed) {
         report(Progress::Failed, error);
+        return nullptr;
+    }
+
+    // Версия сверяется здесь, до всего остального, и это не придирка.
+    //
+    // Клиент опознаёт игру по байтам её кода, и на другой сборке эти байты
+    // другие: он откажется работать уже внутри игры, а человек увидит запущенную
+    // GTA без всякого oxyMP и без единого слова о причине — она останется в
+    // журнале, куда он не полезет.
+    //
+    // Пустая версия — не повод отказывать: прочитать её могло не выйти по
+    // причинам, к сборке отношения не имеющим, и тогда пусть решает клиент.
+    if (!installed->version.empty() && installed->version != gamesig::kTargetGameVersion) {
+        report(Progress::Failed,
+               std::format("У вас GTA V версии {}, а oxyMP собран под {}.\n\n"
+                           "Это не поправимо настройками: клиент узнаёт игру по её коду, "
+                           "а у другой сборки код другой.\n"
+                           "Нужна ровно та версия — либо новая сборка oxyMP под вашу.",
+                           installed->version, gamesig::kTargetGameVersion));
         return nullptr;
     }
 

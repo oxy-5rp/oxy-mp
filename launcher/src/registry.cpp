@@ -3,17 +3,22 @@
 #include <windows.h>
 
 namespace oxymp::launcher {
+namespace {
 
-std::optional<std::wstring> readLocalMachineString(const wchar_t* path, const wchar_t* name) {
+/// Читает строковое значение из указанной ветки реестра.
+///
+/// Ветка — довод, а не два почти одинаковых тела: у Rockstar настройки лежат
+/// в машинной ветке, у Steam в пользовательской, и различаются они только этим.
+std::optional<std::wstring> readString(HKEY root, const wchar_t* path, const wchar_t* name) {
     DWORD bytes = 0;
-    if (::RegGetValueW(HKEY_LOCAL_MACHINE, path, name, RRF_RT_REG_SZ, nullptr, nullptr, &bytes) !=
+    if (::RegGetValueW(root, path, name, RRF_RT_REG_SZ, nullptr, nullptr, &bytes) !=
         ERROR_SUCCESS) {
         return std::nullopt;
     }
 
     std::wstring value(bytes / sizeof(wchar_t), L'\0');
-    if (::RegGetValueW(HKEY_LOCAL_MACHINE, path, name, RRF_RT_REG_SZ, nullptr, value.data(),
-                       &bytes) != ERROR_SUCCESS) {
+    if (::RegGetValueW(root, path, name, RRF_RT_REG_SZ, nullptr, value.data(), &bytes) !=
+        ERROR_SUCCESS) {
         return std::nullopt;
     }
 
@@ -23,6 +28,16 @@ std::optional<std::wstring> readLocalMachineString(const wchar_t* path, const wc
     }
 
     return value;
+}
+
+} // namespace
+
+std::optional<std::wstring> readLocalMachineString(const wchar_t* path, const wchar_t* name) {
+    return readString(HKEY_LOCAL_MACHINE, path, name);
+}
+
+std::optional<std::wstring> readCurrentUserString(const wchar_t* path, const wchar_t* name) {
+    return readString(HKEY_CURRENT_USER, path, name);
 }
 
 } // namespace oxymp::launcher
