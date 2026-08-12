@@ -617,6 +617,22 @@
     });
   }
 
+  // Окно таскают за титульную полосу: рамки Windows у него нет, и тянуть
+  // больше не за что. Нажатия на кнопках и по вводу сюда не доходят — иначе
+  // попытка нажать «закрыть» уводила бы окно вслед за мышью.
+  document.querySelector('.titlebar').addEventListener('mousedown', event => {
+    if (event.button !== 0) return;
+    if (event.target.closest('[data-window], .ipbutton, .ippanel, nav')) return;
+
+    if (bridge) bridge.postMessage({ action: 'drag' });
+  });
+
+  document.querySelector('.titlebar').addEventListener('dblclick', event => {
+    if (event.target.closest('[data-window], .ipbutton, .ippanel, nav')) return;
+
+    if (bridge) bridge.postMessage({ action: 'window', command: 'maximize' });
+  });
+
   /* ---- недавние серверы -------------------------------------------------
      Хранятся у самой страницы: мастер-сервера у oxyMP нет, и список серверов
      взять неоткуда, кроме как из того, куда человек уже заходил. */

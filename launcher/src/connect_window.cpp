@@ -21,8 +21,11 @@ constexpr const wchar_t* kWindowClass = L"oxyMPConnect";
 constexpr const wchar_t* kWindowTitle = L"oxyMP";
 
 /// Размер окна в точках при обычном масштабе. Подобран под содержимое страницы.
-constexpr int kWidth = 560;
-constexpr int kHeight = 700;
+/// Размер окна. Ровно тот, под который нарисована страница: у макета 1240×790,
+/// и всякое расхождение здесь превращается в полосу пустоты или в обрезанную
+/// вёрстку.
+constexpr int kWidth = 1240;
+constexpr int kHeight = 790;
 
 /// Сообщение «в рабочем потоке что-то произошло».
 ///
@@ -185,12 +188,51 @@ void startSession(std::string address, std::string nickname) {
     });
 }
 
+/// Высота титульной полосы страницы, в точках.
+///
+/// Совпадает с той, что задана в разметке. За неё окно и таскают: рамки Windows
+/// у нас нет, и тянуть больше не за что.
+constexpr int kTitleBarHeight = 56;
+
 void handlePageMessage(std::string_view json) {
-    if (field(json, "action") != "connect") {
+    const std::string_view action = field(json, "action");
+
+    if (action == "connect") {
+        startSession(field(json, "address"), field(json, "nickname"));
         return;
     }
 
-    startSession(field(json, "address"), field(json, "nickname"));
+    // Кнопки окна нарисованы на странице, а делает по ним всё равно окно: у
+    // страницы своего окна нет, она живёт внутри нашего.
+    if (action == "window") {
+        if (g_window == nullptr || g_window->handle == nullptr) {
+            return;
+        }
+
+        const std::string_view command = field(json, "command");
+
+        if (command == "close") {
+            ::PostMessageW(g_window->handle, WM_CLOSE, 0, 0);
+        } else if (command == "minimize") {
+            ::ShowWindow(g_window->handle, SW_MINIMIZE);
+        } else if (command == "maximize") {
+            // Разворот переключает сам себя: одна кнопка на оба состояния — так
+            // устроено везде, и вторая кнопка рядом с ней выглядела бы лишней.
+            const bool spread = ::IsZoomed(g_window->handle) != FALSE;
+            ::ShowWindow(g_window->handle, spread ? SW_RESTORE : SW_MAXIMIZE);
+        }
+
+        return;
+    }
+
+    if (action == "drag") {
+        // Перетаскивание за титульную полосу. Окно само отпускает мышь и берёт
+        // ведение на себя — так же, как это делает обычный заголовок Windows.
+        if (g_window != nullptr && g_window->handle != nullptr) {
+            ::ReleaseCapture();
+            ::SendMessageW(g_window->handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        }
+    }
 }
 
 LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -239,15 +281,28 @@ int ConnectWindow::run(const Paths& paths, Session::Settings settings) {
         return 1;
     }
 
-    // Размер задаётся клиентской области, а не всему окну: иначе рамка и
-    // заголовок съедят часть страницы, и вёрстка окажется обрезанной.
-    RECT bounds{0, 0, kWidth, kHeight};
-    ::AdjustWindowRect(&bounds, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME, FALSE);
+    // Окно без рамки и без заголовка Windows.
+    //
+    // Свои кнопки и своя титульная полоса нарисованы на странице, а рамка
+    // Windows дорисовала бы сверху вторую — с чужими цветами и вторым набором
+    // тех же кнопок. WS_POPUP убирает её целиком, и клиентская область
+    // становится равна окну: страница занимает его без остатка, и подгонять
+    // размер под невидимую рамку больше не нужно.
+    const DWORD style = WS_POPUP | WS_CLIPCHILDREN;
 
-    window.handle = ::CreateWindowExW(
-        0, kWindowClass, kWindowTitle, (WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME) & ~WS_MAXIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, bounds.right - bounds.left, bounds.bottom - bounds.top,
-        nullptr, nullptr, instance, nullptr);
+    // По середине того экрана, где сейчас курсор: окно крупное, и появиться
+    // углом за краем ему нельзя.
+    POINT cursor{};
+    ::GetCursorPos(&cursor);
+
+    MONITORINFO screen{sizeof(screen)};
+    ::GetMonitorInfoW(::MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &screen);
+
+    const int left = screen.rcWork.left + ((screen.rcWork.right - screen.rcWork.left) - kWidth) / 2;
+    const int top = screen.rcWork.top + ((screen.rcWork.bottom - screen.rcWork.top) - kHeight) / 2;
+
+    window.handle = ::CreateWindowExW(0, kWindowClass, kWindowTitle, style, left, top, kWidth,
+                                      kHeight, nullptr, nullptr, instance, nullptr);
 
     if (window.handle == nullptr) {
         spdlog::error("не удалось создать окно");

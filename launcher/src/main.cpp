@@ -15,6 +15,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -157,15 +158,23 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (showWindow) {
-        // Консоль лаунчеру нужна только когда его запускают из скрипта. Игроку
-        // она показывает чёрное окно рядом с настоящим и объясняет ровно ничего.
-        if (const HWND console = ::GetConsoleWindow(); console != nullptr) {
-            ::ShowWindow(console, SW_HIDE);
+    if (!showWindow) {
+        // Лаунчер объявлен оконным, и своей консоли у него нет вовсе — чёрное
+        // окно больше не мигает при запуске. Но запущенный из командной строки
+        // он обязан в неё же и говорить, иначе вывод пропадает бесследно.
+        //
+        // Подключаемся к консоли того, кто нас позвал. Позвали не из консоли —
+        // подключаться не к чему, и это не ошибка.
+        if (::AttachConsole(ATTACH_PARENT_PROCESS) != 0) {
+            FILE* stream = nullptr;
+            ::freopen_s(&stream, "CONOUT$", "w", stdout);
+            ::freopen_s(&stream, "CONOUT$", "w", stderr);
         }
+    }
 
-        // Спрятав консоль, журнал нужно куда-то деть: иначе разбираться в том,
-        // что пошло не так у игрока, будет не по чему.
+    if (showWindow) {
+        // Журнал уходит в файл: окна консоли у оконного приложения нет, а
+        // разбираться в том, что пошло не так у игрока, по чему-то надо.
         try {
             auto logger = spdlog::basic_logger_mt("launcher",
                                                   (paths.logs() / "launcher.log").string(), true);
