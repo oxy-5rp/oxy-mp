@@ -69,6 +69,11 @@ void UiFeed::setStage(shared::LoadStage stage) {
     stage_ = stage;
 }
 
+void UiFeed::setWorldReady() {
+    const std::lock_guard guard{mutex_};
+    worldReady_ = true;
+}
+
 void UiFeed::setReady() {
     const std::lock_guard guard{mutex_};
     ready_ = true;
@@ -76,7 +81,7 @@ void UiFeed::setReady() {
 
 bool UiFeed::playerInWorld() const {
     const std::lock_guard guard{mutex_};
-    return ready_;
+    return worldReady_;
 }
 
 void UiFeed::beat() {
@@ -129,23 +134,21 @@ void UiFeed::pushConsole(unsigned int level, std::string text) {
     trim(console_);
 }
 
-void UiFeed::setInput(bool active, std::string prompt, std::string text) {
+void UiFeed::setInput(bool active, std::string text) {
     const std::lock_guard guard{mutex_};
 
     inputActive_ = active;
-    inputPrompt_ = std::move(prompt);
     inputText_ = std::move(text);
 }
 
-void UiFeed::setMenu(bool open, std::string title, std::vector<MenuItem> items, int selected,
-                     std::string note) {
+void UiFeed::setMenu(Menu menu) {
     const std::lock_guard guard{mutex_};
+    menu_ = std::move(menu);
+}
 
-    menuOpen_ = open;
-    menuTitle_ = std::move(title);
-    menuItems_ = std::move(items);
-    menuSelected_ = selected;
-    menuNote_ = std::move(note);
+bool UiFeed::menuOpen() const {
+    const std::lock_guard guard{mutex_};
+    return menu_.open;
 }
 
 void UiFeed::setConsoleVisible(bool visible) {
@@ -171,7 +174,7 @@ std::string UiFeed::takeUpdate() {
 
     std::string message = std::format(
         R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
-        R"("consoleVisible":{},"inputActive":{},"inputPrompt":"{}","inputText":"{}",)"
+        R"("consoleVisible":{},"inputActive":{},"inputText":"{}",)"
         R"("stage":{},"ready":{},"alive":{},"money":{})",
         connection_.state, connection_.players, connection_.latencyMilliseconds,
         // Отсутствие номера доходит до страницы отрицательным числом, а не
@@ -181,7 +184,7 @@ std::string UiFeed::takeUpdate() {
             ? -1
             : static_cast<std::int64_t>(connection_.playerId),
         connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0, inputActive_ ? 1 : 0,
-        escape(inputPrompt_), escape(inputText_), static_cast<unsigned int>(stage_),
+        escape(inputText_), static_cast<unsigned int>(stage_),
         ready_ ? 1 : 0, alive ? 1 : 0,
         // Неизвестные деньги доходят до страницы как null, а не как ноль: ноль —
         // это разорение, а нам нужно «сервер ещё не сказал».
@@ -223,19 +226,23 @@ std::string UiFeed::takeUpdate() {
     // Меню отдаётся целиком и каждый раз, но только пока открыто: закрытое, оно
     // сводится к одному признаку, а открытое живёт секунды и меняется от каждого
     // нажатия — собирать его разницу дороже, чем переслать заново.
-    message += std::format(R"(,"menu":{{"open":{})", menuOpen_ ? 1 : 0);
+    message += std::format(R"(,"menu":{{"open":{})", menu_.open ? 1 : 0);
 
-    if (menuOpen_) {
-        message += std::format(R"(,"title":"{}","selected":{},"note":"{}","items":[)",
-                               escape(menuTitle_), menuSelected_, escape(menuNote_));
+    if (menu_.open) {
+        message += std::format(R"(,"title":"{}","selected":{},"note":"{}","asking":{},"items":[)",
+                               escape(menu_.title), menu_.selected, escape(menu_.note),
+                               menu_.asking ? 1 : 0);
 
-        for (std::size_t i = 0; i < menuItems_.size(); ++i) {
+        for (std::size_t i = 0; i < menu_.items.size(); ++i) {
             if (i != 0) {
                 message += ',';
             }
 
-            message += std::format(R"({{"label":"{}","value":"{}"}})", escape(menuItems_[i].label),
-                                   escape(menuItems_[i].value));
+            const MenuItem& item = menu_.items[i];
+
+            message += std::format(R"({{"label":"{}","value":"{}","kind":{},"on":{}}})",
+                                   escape(item.label), escape(item.value), item.kind,
+                                   item.on ? 1 : 0);
         }
 
         message += ']';

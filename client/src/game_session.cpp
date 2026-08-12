@@ -53,6 +53,11 @@ constexpr auto kSweepReportInterval = std::chrono::seconds{30};
 /// Ждать бесконечно нельзя: выключенный сервер оставил бы игрока на экране
 /// загрузки навсегда, хотя сама игра к этому моменту уже готова. По истечении
 /// срока игрок попадает в мир, а состояние соединения переезжает в уголок.
+///
+/// Отсчёт начинается там же, где и само подключение, — с появления игрока в
+/// мире. Срок заметно больше того, после которого клиент называет молчание
+/// бедой: игрок должен успеть прочитать «сервер не отвечает» на экране загрузки,
+/// а не увидеть эту надпись мельком перед самым её уходом.
 constexpr auto kConnectWaitLimit = std::chrono::seconds{12};
 
 /// За сколько проявляется картинка игры, в миллисекундах.
@@ -93,13 +98,14 @@ bool pressedOnce(int key) {
 GameSession::GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
-                         UiFeed& feed)
+                         UiFeed& feed, UiMail& clicks)
     : settings_(std::move(settings)),
       status_(status),
       roster_(roster),
       localState_(localState),
       mail_(mail),
       feed_(feed),
+      clicks_(clicks),
       hud_(table),
       player_(table),
       screen_(table),
@@ -137,7 +143,8 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  Settings settings, const SessionStatus& status,
                                                  const RemoteRoster& roster,
                                                  LocalState& localState, SessionMail& mail,
-                                                 UiFeed& feed, std::string& error) {
+                                                 UiFeed& feed, UiMail& clicks,
+                                                 std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
         return nullptr;
@@ -150,7 +157,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     }
 
     std::unique_ptr<GameSession> session{new GameSession{
-        addresses, table, std::move(settings), status, roster, localState, mail, feed}};
+        addresses, table, std::move(settings), status, roster, localState, mail, feed, clicks}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -467,6 +474,11 @@ void GameSession::advance() {
         spawn();
         stage_ = Stage::Playing;
         playingSince_ = Clock::now();
+
+        // Отсюда начинается подключение: сетевой поток ждёт именно этой
+        // отметки. Экран загрузки при этом остаётся — на нём теперь идёт ход
+        // подключения, и уйдёт он по своему признаку, в draw.
+        feed_.setWorldReady();
         return;
 
     case Stage::Playing:
@@ -561,8 +573,39 @@ void GameSession::handleTyping() {
         feed_.setConsoleVisible(consoleVisible_);
     }
 
+    typingJustEnded_ = false;
+
     if (textEntry_ == nullptr) {
         return;
+    }
+
+    // Порядок здесь обязателен: сперва итог прошлого набора, и только потом
+    // начало нового.
+    //
+    // Раньше было наоборот, и на этом терялось всё набранное для меню. Набор
+    // заканчивается вводом, а меню до этого мгновения всё ещё просит строку:
+    // видя просьбу, клиент начинал набор заново — и стирал итог, до которого не
+    // дошёл. Со стороны это выглядело так, что название модели ввести нельзя:
+    // строка набирается, ввод нажимается, и ничего не происходит.
+    if (!textEntry_->active()) {
+        std::string typed;
+        const game::TextEntry::Outcome outcome = textEntry_->takeOutcome(typed);
+
+        if (outcome != game::TextEntry::Outcome::Typing) {
+            if (outcome == game::TextEntry::Outcome::Submitted) {
+                if (typingFor_ == Typing::Menu) {
+                    adminMenu_.supplyText(std::move(typed));
+                } else {
+                    mail_.postChat(std::move(typed));
+                }
+            } else if (typingFor_ == Typing::Menu) {
+                adminMenu_.cancelText();
+            }
+
+            typingFor_ = Typing::Chat;
+            typingJustEnded_ = true;
+            feed_.setInput(false, {});
+        }
     }
 
     if (!textEntry_->active()) {
@@ -586,41 +629,57 @@ void GameSession::handleTyping() {
         // Съеденных сообщений окна для этого мало: клавиатуру GTA читает
         // напрямую, мимо них.
         controls_.suppressEverything();
-        feed_.setInput(true, promptForTyping(), textEntry_->text());
-        return;
+        feed_.setInput(true, textEntry_->text());
     }
-
-    std::string typed;
-    const game::TextEntry::Outcome outcome = textEntry_->takeOutcome(typed);
-
-    if (outcome == game::TextEntry::Outcome::Typing) {
-        return;
-    }
-
-    if (outcome == game::TextEntry::Outcome::Submitted) {
-        if (typingFor_ == Typing::Menu) {
-            adminMenu_.supplyText(std::move(typed));
-        } else {
-            mail_.postChat(std::move(typed));
-        }
-    } else if (typingFor_ == Typing::Menu) {
-        adminMenu_.cancelText();
-    }
-
-    typingFor_ = Typing::Chat;
-    feed_.setInput(false, {}, {});
 }
 
-std::string GameSession::promptForTyping() const {
-    // У чата подписи нет: строка под его собственными репликами и без подписи
-    // читается как реплика.
-    return typingFor_ == Typing::Menu ? adminMenu_.textPrompt() : std::string{};
+void GameSession::applyClicks(int player, int ped) {
+    for (const UiClick& click : clicks_.take()) {
+        // Нажатие мышью где угодно, кроме самого поля, прекращает набор: игрок
+        // ушёл из поля, и держать клавиатуру за ним значит отбирать её у того,
+        // чем он занялся вместо этого.
+        if (click.kind != UiClick::Kind::Point && click.kind != UiClick::Kind::Ask &&
+            typingFor_ == Typing::Menu && textEntry_ != nullptr && textEntry_->active()) {
+            textEntry_->cancel();
+        }
+
+        switch (click.kind) {
+        case UiClick::Kind::Point:
+            adminMenu_.select(click.index);
+            break;
+
+        case UiClick::Kind::Press:
+            adminMenu_.select(click.index);
+            adminMenu_.press(game::AdminMenu::Key::Enter, player, ped);
+            break;
+
+        case UiClick::Kind::Alternate:
+            adminMenu_.select(click.index);
+            adminMenu_.press(game::AdminMenu::Key::Alternate, player, ped);
+            break;
+
+        case UiClick::Kind::Back:
+            adminMenu_.press(game::AdminMenu::Key::Back, player, ped);
+            break;
+
+        case UiClick::Kind::Close:
+            adminMenu_.close();
+            break;
+
+        case UiClick::Kind::Ask:
+            adminMenu_.askForModel();
+            break;
+        }
+    }
 }
 
 void GameSession::handleMenu(int player, int ped) {
+    applyClicks(player, ped);
+
     // Пока набирается текст, клавиши принадлежат чату: «ё» в реплике не должна
-    // открывать меню.
-    const bool typing = textEntry_ != nullptr && textEntry_->active();
+    // открывать меню. Кадр, в котором набор кончился, — тоже: клавиша, которой
+    // его закончили, ещё зажата, и меню приняло бы её за своё нажатие.
+    const bool typing = (textEntry_ != nullptr && textEntry_->active()) || typingJustEnded_;
 
     // Клавиши опрашиваются каждый кадр, даже когда меню их не слушает.
     //
@@ -691,10 +750,26 @@ void GameSession::handleMenu(int player, int ped) {
     items.reserve(view.items.size());
 
     for (const game::AdminMenu::Item& item : view.items) {
-        items.push_back(UiFeed::MenuItem{.label = item.label, .value = item.value});
+        items.push_back(UiFeed::MenuItem{
+            .label = item.label,
+            .value = item.value,
+            .kind = static_cast<unsigned int>(item.kind),
+            .on = item.on,
+        });
     }
 
-    feed_.setMenu(view.open, view.title, std::move(items), view.selected, view.note);
+    feed_.setMenu(UiFeed::Menu{
+        .open = view.open,
+        .title = view.title,
+        .items = std::move(items),
+        .selected = view.selected,
+        .note = view.note,
+        // Набор для меню виден странице как живое поле ввода: и пока меню ждёт
+        // строку, и пока игрок её набирает. Строка чата в это время молчит —
+        // набранное показывается в самом меню.
+        .asking = adminMenu_.wantsText() ||
+                  (typingFor_ == Typing::Menu && textEntry_ != nullptr && textEntry_->active()),
+    });
 }
 
 void GameSession::applyOrders(int ped) {

@@ -248,6 +248,28 @@ void AdminMenu::press(Key key, int player, int ped) {
     }
 }
 
+void AdminMenu::select(int index) {
+    if (!open_) {
+        return;
+    }
+
+    const int count = static_cast<int>(itemCount());
+    if (index < 0 || index >= count) {
+        return;
+    }
+
+    selected_ = index;
+}
+
+void AdminMenu::askForModel() {
+    if (!open_) {
+        return;
+    }
+
+    asking_ = true;
+    note_ = "наберите название модели и нажмите ввод";
+}
+
 void AdminMenu::activate(int player, int ped, bool alternate) {
     const std::size_t index = static_cast<std::size_t>(std::max(selected_, 0));
 
@@ -273,9 +295,7 @@ void AdminMenu::activate(int player, int ped, bool alternate) {
 
     case Page::Vehicles: {
         if (index == kByName) {
-            asking_ = true;
-            prompt_ = "модель:";
-            note_ = "введите название модели и нажмите ввод";
+            askForModel();
             return;
         }
 
@@ -488,7 +508,6 @@ void AdminMenu::orderVehicle(std::uint32_t model, std::string_view label) {
 
 void AdminMenu::supplyText(std::string typed) {
     asking_ = false;
-    prompt_.clear();
 
     // Пробелы по краям убираются молча: в названии модели их нет никогда, а
     // случайный пробел в конце превратил бы верное название в неизвестное.
@@ -522,7 +541,6 @@ void AdminMenu::supplyText(std::string typed) {
 
 void AdminMenu::cancelText() {
     asking_ = false;
-    prompt_.clear();
     note_.clear();
 }
 
@@ -641,8 +659,11 @@ AdminMenu::View AdminMenu::view() const {
     case Page::Root:
         view.title = "oxyMP";
         view.items = {
-            {"Транспорт", ""}, {"Внешность", ""}, {"Телепорт", ""},
-            {"Игроки", ""},    {"Мир", ""},
+            {.label = "Транспорт", .value = "машины и ремонт", .kind = Kind::Section},
+            {.label = "Внешность", .value = "модель персонажа", .kind = Kind::Section},
+            {.label = "Телепорт", .value = "метка и места", .kind = Kind::Section},
+            {.label = "Игроки", .value = "кто в сессии", .kind = Kind::Section},
+            {.label = "Мир", .value = "погода и время", .kind = Kind::Section},
         };
         return view;
 
@@ -650,7 +671,8 @@ AdminMenu::View AdminMenu::view() const {
         view.title = "Транспорт";
         view.items.reserve(kVehicles.size() + 3);
 
-        view.items.push_back(Item{.label = "Выдать по названию", .value = "ввод"});
+        view.items.push_back(
+            Item{.label = "Название модели", .value = "adder", .kind = Kind::Field});
 
         for (const Model& model : kVehicles) {
             view.items.push_back(Item{.label = model.label, .value = model.name});
@@ -687,7 +709,8 @@ AdminMenu::View AdminMenu::view() const {
         for (const Participant& participant : players_) {
             view.items.push_back(Item{
                 .label = std::format("{} [{}]", participant.nickname, participant.id),
-                .value = "ввод — к нему, → — сюда",
+                .value = "",
+                .kind = Kind::Player,
             });
         }
 
@@ -708,8 +731,12 @@ AdminMenu::View AdminMenu::view() const {
         }
 
         view.items.push_back(Item{.label = "Вылечить себя", .value = ""});
-        view.items.push_back(
-            Item{.label = "Неуязвимость", .value = invincibleOn_ ? "вкл" : "выкл"});
+        view.items.push_back(Item{
+            .label = "Неуязвимость",
+            .value = "",
+            .kind = Kind::Toggle,
+            .on = invincibleOn_,
+        });
         return view;
     }
 

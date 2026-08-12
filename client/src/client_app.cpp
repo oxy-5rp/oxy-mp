@@ -5,6 +5,7 @@
 #include "resource_cache.hpp"
 #include "session_mail.hpp"
 #include "ui_feed.hpp"
+#include "ui_mail.hpp"
 
 #include "game/crash_log.hpp"
 #include "game/engine_addresses.hpp"
@@ -540,7 +541,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               const Connection::Settings& settings,
                                               const SessionStatus& status,
                                               const RemoteRoster& roster, LocalState& localState,
-                                              SessionMail& mail, UiFeed& feed,
+                                              SessionMail& mail, UiFeed& feed, UiMail& clicks,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -583,7 +584,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, error);
+                                       localState, mail, feed, clicks, error);
     if (session == nullptr) {
         spdlog::error("игровая сессия не создана: {}", error);
     }
@@ -602,6 +603,11 @@ void run() {
     UiFeed feed;
     feed.describeSession(std::format("{}:{}", settings.address, settings.port),
                          settings.nickname);
+
+    // Обратное направление: что игрок нажал на странице мышью. Объявлено здесь
+    // же, потому что переживать обязано обоих — и слой интерфейса, который сюда
+    // пишет, и игровую сессию, которая отсюда читает.
+    UiMail clicks;
 
     // Ловушка падений ставится раньше всего остального: всё, что делает клиент
     // дальше, вправе уронить игру, и от этого мгновения в журнале должна
@@ -648,6 +654,29 @@ void run() {
         }
     }
 
+    // Интерфейс внутри кадра игры поднимается сразу за перехватами и раньше
+    // всего остального, и это не вкусовщина, а единственный способ показать
+    // экран загрузки вовремя.
+    //
+    // Раньше он поднимался после игровой сессии, а та ждёт заполнения таблицы
+    // нативов — минуту с лишним. Всё это время экран загрузки существовал
+    // только в замысле: игрок смотрел заставку игры и её же страницу загрузки,
+    // а наша появлялась к тому мгновению, когда закрывать ею было уже нечего.
+    //
+    // Механизм перехвата ему нужен готовым — отсюда и проверка: без него
+    // подменить показ кадра нечем. Ничего другого, кроме перехватов, ему не
+    // нужно: ни таблицы нативов, ни скриптового тика.
+    std::unique_ptr<game::UiLayer> ui;
+
+    if (hooksReady) {
+        std::string uiError;
+
+        ui = game::UiLayer::create(feed, clicks, uiError);
+        if (ui == nullptr) {
+            spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
+        }
+    }
+
     // Объявлены раньше сессии и потому переживают её: сессия пользуется ими из
     // потока игры до самого своего разрушения.
     SessionStatus status;
@@ -674,24 +703,7 @@ void run() {
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   scriptStartup);
-    }
-
-    // Интерфейс внутри кадра игры. Поднимается после сессии и до сети: он
-    // показывает и то и другое, а рисовать начинает с первого же кадра, который
-    // игра покажет после его появления.
-    //
-    // Механизм перехвата ему нужен готовым — отсюда и проверка: без него
-    // подменить показ кадра нечем.
-    std::unique_ptr<game::UiLayer> ui;
-
-    if (hooksReady) {
-        std::string uiError;
-
-        ui = game::UiLayer::create(feed, uiError);
-        if (ui == nullptr) {
-            spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
-        }
+                                   clicks, scriptStartup);
     }
 
     // Соединение поднимается здесь, а не в начале, и это перемена по просьбе.
@@ -725,6 +737,11 @@ void run() {
     std::chrono::steady_clock::time_point connectionStartedAt{};
 
     while (!g_stopRequested.load()) {
+        // Заголовок окна выправляется на каждом обороте, а не только при живом
+        // соединении: окно игра пересоздаёт на переходах, и до появления игрока
+        // в мире это случается не раз.
+        window.apply(kWindowTitle);
+
         // К серверу идём не раньше, чем игрок появится в мире.
         //
         // Движок к этому времени не просто опознан, а работает: таблица нативов
@@ -733,8 +750,10 @@ void run() {
         // нечего, а сервер тем временем числит игроком того, кто ещё смотрит
         // заставку Rockstar.
         //
-        // Раньше отсчёт шёл от внедрения, и первая же неудачная попытка писала
-        // «сервер не отвечает» поверх экрана загрузки.
+        // Экран загрузки при этом никуда не девается: подключение идёт на нём
+        // последней стадией, и уходит он, только когда с сервером всё решится.
+        // Так «сервер не отвечает» перестало быть неожиданной жалобой поверх
+        // загрузки и стало её последней строкой.
         if (connectionStartedAt == std::chrono::steady_clock::time_point{}) {
             if (!feed.playerInWorld()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{50});
@@ -820,14 +839,6 @@ void run() {
             .players = players + 1,
             .connected = connection.state() == ConnectionState::Connected,
         });
-
-        // Страница интерфейса получает новое состояние отсюда же: этот цикл
-        // и так крутится двадцать раз в секунду, а чаще ей нечего показывать.
-        if (ui != nullptr) {
-            ui->pump();
-        }
-
-        window.apply(kWindowTitle);
     }
 
     connection.disconnect();

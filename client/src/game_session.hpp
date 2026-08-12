@@ -27,6 +27,7 @@
 #include "session_mail.hpp"
 #include "session_status.hpp"
 #include "ui_feed.hpp"
+#include "ui_mail.hpp"
 
 #include <oxymp/shared/math/vec3.hpp>
 
@@ -96,6 +97,7 @@ public:
                                                              LocalState& localState,
                                                              SessionMail& mail,
                                                              UiFeed& feed,
+                                                             UiMail& clicks,
                                                              std::string& error);
 
     ~GameSession();
@@ -119,7 +121,7 @@ public:
 private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
-                LocalState& localState, SessionMail& mail, UiFeed& feed);
+                LocalState& localState, SessionMail& mail, UiFeed& feed, UiMail& clicks);
 
     /// Чем клиент занят между запуском игры и полноценной игрой.
     ///
@@ -169,11 +171,11 @@ private:
         Menu,
     };
 
-    /// Подпись строки ввода для того, кто ею сейчас владеет.
-    [[nodiscard]] std::string promptForTyping() const;
-
     /// Ведёт админ-меню: открытие, перемещение по пунктам, распоряжения.
     void handleMenu(int player, int ped);
+
+    /// Применяет к меню то, что игрок сделал на странице мышью.
+    void applyClicks(int player, int ped);
 
     /// Исполняет распоряжения администратора сессии.
     void applyOrders(int ped);
@@ -210,6 +212,11 @@ private:
     /// строк чата. Он живёт внутри этого же процесса и рисуется прямо в кадр.
     UiFeed& feed_;
 
+    /// Обратное направление: что игрок нажал на странице мышью. Забирается
+    /// изнутри тика — почти каждый пункт меню это нативы, а их можно звать
+    /// только оттуда.
+    UiMail& clicks_;
+
     game::Hud hud_;
     game::Player player_;
     game::Screen screen_;
@@ -241,6 +248,14 @@ private:
 
     /// Кому уйдёт набранное, когда игрок нажмёт ввод.
     Typing typingFor_ = Typing::Chat;
+
+    /// Кончился ли набор строки в этом кадре.
+    ///
+    /// Клавиша, которой набор закончили, не должна отзываться в меню. Иначе
+    /// Enter, отправивший название модели, в том же кадре нажимал бы выбранный
+    /// пункт — то самое поле ввода, — и меню тут же спрашивало бы название
+    /// заново.
+    bool typingJustEnded_ = false;
 
     /// Запертая дверь, через которую игра уходит из сессии.
     ///

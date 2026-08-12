@@ -48,8 +48,10 @@ if(WIN32)
         src/game/nameplates.cpp
         src/game/online_map.cpp
         src/game/overlay_renderer.cpp
+        src/game/page_source.cpp
         src/game/present_hook.cpp
         src/game/player.cpp
+        src/game/pointer.cpp
         src/game/remote_players.cpp
         src/game/respawn.cpp
         src/game/screen.cpp
@@ -75,6 +77,13 @@ if(WIN32)
     # заканчивается в модуле, который в неё внедряется. Бот-клиент, собранный
     # из того же ядра, про игру не знает вовсе.
     oxymp_embed_text(oxymp_client ui/hud_page.html hudPage oxymp::client::game::ui)
+
+    # Картинка экрана загрузки встраивается тем же способом, что и разметка, и по
+    # той же причине: страница доходит до CEF ссылкой с данными, у которой нет
+    # ни файла на диске, ни соседей рядом с ним. Класть её рядом с клиентом
+    # значило бы завести файл, который можно потерять, — а без него экран
+    # загрузки остался бы пустым.
+    oxymp_embed_text(oxymp_client ui/loading_art.jpg loadingArt oxymp::client::game::ui)
 
     # d3d11 и d3dcompiler — интерфейс рисуется прямо в кадр игры, а не окном
     # поверх неё. cefui — сама страница, отдающая готовые точки.

@@ -1,5 +1,7 @@
 #include <oxymp/cefui/browser.hpp>
 
+#include "page_message.hpp"
+
 #include <include/cef_client.h>
 #include <include/cef_parser.h>
 #include <include/wrapper/cef_helpers.h>
@@ -11,9 +13,6 @@
 namespace oxymp::cefui {
 namespace {
 
-/// Имя сообщения, которым страница говорит с клиентом.
-constexpr const char* kMessageFromPage = "oxymp";
-
 /// Заготовка страницы, доставляемой строкой.
 ///
 /// CEF умеет открыть страницу только по ссылке, и передать ей разметку прямо в
@@ -21,6 +20,38 @@ constexpr const char* kMessageFromPage = "oxymp";
 /// целиком. Файла на диске при этом не заводится — ровно то же, чем обходился
 /// прежний движок.
 constexpr const char* kDataPrefix = "data:text/html;charset=utf-8;base64,";
+
+/// Как Chromium называет эту кнопку в событии нажатия.
+cef_mouse_button_type_t buttonType(Browser::MouseButton button) {
+    switch (button) {
+    case Browser::MouseButton::Middle:
+        return MBT_MIDDLE;
+    case Browser::MouseButton::Right:
+        return MBT_RIGHT;
+    case Browser::MouseButton::Left:
+        break;
+    }
+
+    return MBT_LEFT;
+}
+
+/// Признак «эта кнопка сейчас нажата», каким его ждёт Chromium.
+///
+/// Нужен в каждом событии, а не только в нажатии: движение с нажатой кнопкой —
+/// это перетаскивание, и отличить его от простого движения странице больше не по
+/// чему.
+std::uint32_t buttonFlag(Browser::MouseButton button) {
+    switch (button) {
+    case Browser::MouseButton::Middle:
+        return EVENTFLAG_MIDDLE_MOUSE_BUTTON;
+    case Browser::MouseButton::Right:
+        return EVENTFLAG_RIGHT_MOUSE_BUTTON;
+    case Browser::MouseButton::Left:
+        break;
+    }
+
+    return EVENTFLAG_LEFT_MOUSE_BUTTON;
+}
 
 } // namespace
 
@@ -50,6 +81,30 @@ struct Browser::State : public CefClient,
     /// Страницу просят показать раньше, чем он готов: поднимается он своим
     /// чередом, и ждать этого — значит держать кадр пустым.
     std::string pending;
+
+    /// Какие кнопки мыши сейчас держат нажатыми.
+    std::uint32_t held = 0;
+
+    /// Браузер, если он уже есть. Спрашивается отовсюду: он заводится позже
+    /// объекта и уходит раньше него.
+    CefRefPtr<CefBrowser> current() {
+        const std::lock_guard guard{mutex};
+        return browser;
+    }
+
+    /// Событие мыши в точке с учётом того, что сейчас зажато.
+    CefMouseEvent mouseAt(int x, int y) {
+        CefMouseEvent event;
+        event.x = x;
+        event.y = y;
+
+        {
+            const std::lock_guard guard{mutex};
+            event.modifiers = held;
+        }
+
+        return event;
+    }
 
     // --- CefClient ---------------------------------------------------------
 
@@ -280,6 +335,73 @@ void Browser::resize(int width, int height) {
         // изменился.
         browser->GetHost()->WasResized();
     }
+}
+
+void Browser::moveMouse(int x, int y) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    if (const CefRefPtr<CefBrowser> browser = state_->current(); browser != nullptr) {
+        browser->GetHost()->SendMouseMoveEvent(state_->mouseAt(x, y), false);
+    }
+}
+
+void Browser::clickMouse(int x, int y, MouseButton button, bool down) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const CefRefPtr<CefBrowser> browser = state_->current();
+    if (browser == nullptr) {
+        return;
+    }
+
+    // Признак нажатия учитывается до самого события, а не после: страница ждёт
+    // его уже в том событии, которым кнопку нажали.
+    {
+        const std::lock_guard guard{state_->mutex};
+
+        if (down) {
+            state_->held |= buttonFlag(button);
+        } else {
+            state_->held &= ~buttonFlag(button);
+        }
+    }
+
+    // Один щелчок, а не два: двойных нажатий страница не различает, и считать
+    // их незачем.
+    browser->GetHost()->SendMouseClickEvent(state_->mouseAt(x, y), buttonType(button), !down, 1);
+}
+
+void Browser::scrollMouse(int x, int y, int delta) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    if (const CefRefPtr<CefBrowser> browser = state_->current(); browser != nullptr) {
+        browser->GetHost()->SendMouseWheelEvent(state_->mouseAt(x, y), 0, delta);
+    }
+}
+
+void Browser::releaseMouse() {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const CefRefPtr<CefBrowser> browser = state_->current();
+    if (browser == nullptr) {
+        return;
+    }
+
+    {
+        const std::lock_guard guard{state_->mutex};
+        state_->held = 0;
+    }
+
+    // Точка за пределами страницы вместе с признаком ухода: иначе последний
+    // пункт, над которым стоял указатель, остался бы подсвеченным навсегда.
+    browser->GetHost()->SendMouseMoveEvent(state_->mouseAt(-1, -1), true);
 }
 
 void Browser::onMessage(MessageHandler handler) {
