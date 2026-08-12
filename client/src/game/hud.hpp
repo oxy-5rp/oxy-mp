@@ -41,6 +41,21 @@ public:
     /// заводить два разных смысла у одних и тех же долей экрана.
     void drawRect(float centreX, float centreY, float width, float height, Colour colour) const;
 
+    /// Прячет счётчик денег игры на этот кадр.
+    ///
+    /// Число, которое он показывает, — из сохранения настоящего GTA Online. Оно
+    /// чужое: за ним стоят покупки игрока в настоящей игре, и к нашей сессии оно
+    /// отношения не имеет. Свои деньги мы показываем сами.
+    ///
+    /// Прячем, а не переписываем, и это принципиально. Переписать значило бы
+    /// влезть в чужое сохранение — испортить человеку настоящую игру ради
+    /// красивой цифры в нашей. Скрытый счётчик не меняет в сохранении ни байта.
+    ///
+    /// «На этот кадр» — так устроен натив: игра каждый кадр собирает HUD заново,
+    /// и запрет живёт ровно до следующего. Поэтому зовётся он из тика, каждый
+    /// раз.
+    void hideMoney() const;
+
 private:
     NativeHandler drawRect_ = nullptr;
     NativeHandler setFont_ = nullptr;
@@ -51,6 +66,7 @@ private:
     NativeHandler beginText_ = nullptr;
     NativeHandler addSubstring_ = nullptr;
     NativeHandler endText_ = nullptr;
+    NativeHandler hideComponent_ = nullptr;
 };
 
 } // namespace oxymp::client::game

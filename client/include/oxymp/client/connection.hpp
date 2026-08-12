@@ -138,6 +138,18 @@ public:
     /// Забирает пришедшие распоряжения администратора сессии.
     [[nodiscard]] std::vector<shared::AdminOrder> takeOrders();
 
+    /// Забирает список раздаваемого сервером, если он приходил.
+    ///
+    /// Один раз за подключение: список приходит следом за приветствием и больше
+    /// не меняется, пока соединение живо.
+    [[nodiscard]] std::optional<std::vector<shared::ResourceEntry>> takeResources();
+
+    /// Забирает новый счёт денег, если он приходил.
+    ///
+    /// Не очередь, в отличие от соседей: промежуточные суммы никому не нужны,
+    /// важна последняя. Пусто — значит с прошлого раза ничего не менялось.
+    [[nodiscard]] std::optional<std::int64_t> takeMoney();
+
     [[nodiscard]] ConnectionState state() const noexcept { return state_; }
 
     [[nodiscard]] shared::PlayerId localPlayerId() const noexcept { return localPlayerId_; }
@@ -199,6 +211,12 @@ private:
     std::vector<shared::ChatLine> chatLines_;
     std::vector<shared::DamageTaken> damage_;
     std::vector<shared::AdminOrder> orders_;
+
+    /// Последний присланный счёт денег, ещё не забранный.
+    std::optional<std::int64_t> money_;
+
+    /// Список раздаваемого сервером, ещё не забранный.
+    std::optional<std::vector<shared::ResourceEntry>> resources_;
 
     /// Отправляемое, что ещё не ушло. Копится между вызовами update: игровой
     /// поток кладёт сюда в любой момент кадра, а отправка идёт своим чередом.

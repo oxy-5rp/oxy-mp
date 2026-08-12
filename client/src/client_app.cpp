@@ -2,6 +2,7 @@
 
 #include "console_sink.hpp"
 #include "discord_presence.hpp"
+#include "resource_cache.hpp"
 #include "session_mail.hpp"
 #include "ui_feed.hpp"
 
@@ -244,6 +245,31 @@ constexpr auto kSilenceBeforeAlarm = std::chrono::seconds{5};
 constexpr auto kEngineRetryDelay = std::chrono::milliseconds{500};
 
 /// Разрешает каталог сигнатур, дожидаясь, пока игра развернёт свой код.
+/// Каталог, в котором лежит сам модуль клиента.
+///
+/// Именно модуля, а не исполняемого файла: исполняемый файл здесь — GTA5.exe, и
+/// её папка к oxyMP отношения не имеет. Рядом с модулем лежит всё наше: cef,
+/// кеш, журналы.
+std::filesystem::path clientDirectory() {
+    HMODULE module = nullptr;
+
+    if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             reinterpret_cast<LPCWSTR>(&clientDirectory), &module) == 0) {
+        return {};
+    }
+
+    std::wstring path(MAX_PATH, L'\0');
+    const DWORD written =
+        ::GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+    if (written == 0 || written >= path.size()) {
+        return {};
+    }
+    path.resize(written);
+
+    return std::filesystem::path{path}.parent_path();
+}
+
 std::unique_ptr<game::EngineAddresses> resolveEngine() {
     const auto startedAt = std::chrono::steady_clock::now();
     const auto deadline = startedAt + kEngineTimeout;
@@ -535,6 +561,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     // по-разному: смешав их, нельзя узнать, который из них уронил игру.
     const std::string netgame = environmentValue(L"OXYMP_NETGAME");
     const std::string sessionSwitch = environmentValue(L"OXYMP_SESSION");
+    const std::string onlineMap = environmentValue(L"OXYMP_ONLINE_MAP");
 
     GameSession::Settings sessionSettings{
         .serverAddress = std::format("{}:{}", settings.address, settings.port),
@@ -549,6 +576,10 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
         .hostSession = sessionSwitch != "0" && sessionSwitch != "off",
         .sessionMode = sessionSwitch == "raw" ? game::NetSession::Mode::Raw
                                               : game::NetSession::Mode::Solo,
+        // Карта сетевого режима выключена по умолчанию: она под подозрением в
+        // дырах, сквозь которые игрок проваливается. Включается тем же способом,
+        // что и остальное, — переменной окружения, без пересборки.
+        .onlineMap = onlineMap == "1" || onlineMap == "on",
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
@@ -673,6 +704,10 @@ void run() {
     // загрузки, где игроку и без того было тревожно.
     Connection connection{settings};
 
+    // Кеш ресурсов рядом с клиентом, а не в системных каталогах: игрок должен
+    // видеть, чем занято место, и уметь очистить его, просто удалив папку.
+    ResourceCache resources{clientDirectory() / "cache"};
+
     // Discord держится сетевым потоком, а не игровым: кадр игры не имеет права
     // ждать чужой процесс, а Discord может быть закрыт или не установлен вовсе.
     DiscordPresence discord{kDiscordClientId};
@@ -683,18 +718,52 @@ void run() {
     // Проверено: игра замирала сразу после ухода экрана загрузки.
     game::Window window;
 
-    // Когда соединение началось. По нему решается, пора ли жаловаться игроку:
-    // первые секунды сервер имеет право молчать, и объявлять его недоступным,
-    // не дав ему ответить, — значит пугать на ровном месте.
-    const auto connectionStartedAt = std::chrono::steady_clock::now();
+    // Когда соединение началось. Ставится не здесь, а в тот миг, когда к серверу
+    // действительно пошли: по нему решается, пора ли жаловаться игроку, и отсчёт
+    // от несделанной попытки объявил бы сервер молчащим ещё до того, как его
+    // о чём-то спросили.
+    std::chrono::steady_clock::time_point connectionStartedAt{};
 
     while (!g_stopRequested.load()) {
+        // К серверу идём не раньше, чем игрок появится в мире.
+        //
+        // Движок к этому времени не просто опознан, а работает: таблица нативов
+        // заполнена, скриптовый тик идёт, персонаж стоит на земле. Всё, что
+        // раньше, — это загрузка, и подключаться посреди неё незачем: отправлять
+        // нечего, а сервер тем временем числит игроком того, кто ещё смотрит
+        // заставку Rockstar.
+        //
+        // Раньше отсчёт шёл от внедрения, и первая же неудачная попытка писала
+        // «сервер не отвечает» поверх экрана загрузки.
+        if (connectionStartedAt == std::chrono::steady_clock::time_point{}) {
+            if (!feed.playerInWorld()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+                continue;
+            }
+
+            connectionStartedAt = std::chrono::steady_clock::now();
+            spdlog::info("игрок в мире — подключаемся к серверу");
+        }
+
         connection.update(std::chrono::milliseconds{50});
 
         const std::size_t players = connection.remotePlayers().size();
         const std::optional<std::chrono::milliseconds> latency = connection.latency();
 
         status.update(connection.state(), players, latency, connection.localPlayerId());
+
+        if (const auto money = connection.takeMoney()) {
+            status.setMoney(*money);
+        }
+
+        // Загрузка идёт здесь, в сетевом потоке, и это не выбор из удобства:
+        // качать в потоке игры значило бы остановить кадр на время закачки.
+        if (const auto offered = connection.takeResources()) {
+            for (const ResourceCache::Ready& item : resources.sync(settings.address,
+                                                                   settings.port, *offered)) {
+                feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
+            }
+        }
         roster.replace(describeRemotePlayers(connection), describeRemoteVehicles(connection));
 
         if (const auto own = localState.get()) {
@@ -739,6 +808,7 @@ void run() {
             .latencyMilliseconds = latencyMilliseconds,
             .playerId = connection.localPlayerId(),
             .troubled = troubled,
+            .money = status.snapshot().money,
         });
         feed.setRoster(describeRoster(connection, settings.nickname));
 

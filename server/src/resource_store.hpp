@@ -1,0 +1,54 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace oxymp::server {
+
+/// Ресурсы сервера: то, что он раздаёт клиентам вдобавок к самой игре.
+///
+/// Хозяин сервера кладёт в `resources/dlcpacks` обычные файлы игры — `amgone.rpf`
+/// с машиной, например. Сервер при запуске зашифровывает каждый и держит
+/// готовым к раздаче.
+///
+/// Имя, под которым ресурс раздаётся, — это отпечаток его содержимого, а не
+/// исходное имя. Так по ссылке не видно, что за ней лежит, и так же решается
+/// вопрос обновления: изменил файл — сменился отпечаток, клиент скачал заново;
+/// не менял — клиент не тронулся с места.
+class ResourceStore {
+public:
+    /// Ресурс, каким его видит клиент.
+    struct Item {
+        /// Исходное имя — для журнала и для человека. Клиенту оно тоже уходит:
+        /// по нему он понимает, что скачал, а разбираться в отпечатках незачем.
+        std::string name;
+
+        /// Отпечаток содержимого. Он же имя файла при раздаче.
+        std::string hash;
+
+        /// Размер уже зашифрованного, в байтах.
+        std::uint64_t size = 0;
+    };
+
+    /// Собирает и шифрует всё, что лежит в каталоге.
+    ///
+    /// Отсутствие каталога — не ошибка: сервер без ресурсов совершенно
+    /// работоспособен, и требовать пустую папку было бы придиркой.
+    void load(const std::filesystem::path& directory);
+
+    [[nodiscard]] const std::vector<Item>& items() const noexcept { return items_; }
+
+    /// Зашифрованное содержимое по отпечатку. Пусто — такого у нас нет.
+    [[nodiscard]] const std::vector<std::uint8_t>* find(const std::string& hash) const;
+
+    [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
+
+private:
+    std::vector<Item> items_;
+    std::unordered_map<std::string, std::vector<std::uint8_t>> packed_;
+};
+
+} // namespace oxymp::server

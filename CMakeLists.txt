@@ -82,3 +82,29 @@ if(OXYMP_BUILD_TESTS)
     add_subdirectory(memscan/tests)
     add_subdirectory(shared/tests)
 endif()
+
+# Раскладка собранного по каталогам, которые отдают людям.
+#
+# Каталог сборки для этого не годится и не должен: в нём лежат тесты, sigcheck,
+# бот, отладочные символы и кеш Chromium — всё то, что нужно нам и не нужно
+# никому больше. Раздавать его целиком значит просить человека разобраться, что
+# из восьми исполняемых файлов запускать.
+#
+# Двумя каталогами, а не одним: клиент и сервер ставят разные люди на разные
+# машины, и общего у них нет ничего, кроме версии протокола.
+#
+# Делает работу отдельный сценарий: раскладка зависит от того, что собрано, а
+# узнать это на настройке нельзя — в многоконфигурационной сборке конфигурация
+# выбирается позже.
+if(WIN32)
+    add_custom_target(oxymp_dist ALL
+        COMMAND "${CMAKE_COMMAND}"
+                -DDIST_CONFIG=$<CONFIG>
+                -DDIST_BIN=$<TARGET_FILE_DIR:oxymp_launcher>
+                -DDIST_ROOT=${CMAKE_SOURCE_DIR}/release
+                -P "${CMAKE_CURRENT_LIST_DIR}/cmake/dist_script.cmake"
+        DEPENDS oxymp_launcher oxymp_client oxymp_rglpatch oxymp_server oxymp_cef_runtime
+        COMMENT "Раскладка по каталогам client и server"
+        VERBATIM
+    )
+endif()

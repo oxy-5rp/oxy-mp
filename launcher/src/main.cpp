@@ -5,6 +5,8 @@
 // исполняемым файлом, а настройки уезжают в игру переменными окружения.
 
 #include "connect_window.hpp"
+#include "game_locator.hpp"
+#include "game_mirror.hpp"
 #include "paths.hpp"
 #include "session.hpp"
 
@@ -25,8 +27,8 @@ void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp [--server <адрес:порт>] [--nickname <имя>]\n"
                  "        [--game <каталог игры>] [--client <путь к модулю>]\n"
-                 "        [--direct | --attach] [--freemode] [--netgame | --netgame-full]\n"
-                 "        [--session] [--no-ui]\n\n"
+                 "        [--direct | --attach | --standalone] [--freemode]\n"
+                 "        [--netgame | --netgame-full] [--session] [--no-ui]\n\n"
                  "  (по умолчанию) показать окно подключения. Игра запускается через\n"
                  "             Rockstar Games Launcher, но вместо GTA5_BE.exe тот поднимает\n"
                  "             сразу GTA5.exe: игра числится запущенной, BattlEye не встаёт.\n"
@@ -35,6 +37,13 @@ void printUsage() {
                  "             тоже не встаёт, но лаунчер об игре не знает и не показывает\n"
                  "             её запущенной. Запасной путь на случай поломки основного.\n"
                  "  --attach   не запускать игру, а внедриться в уже запущенный GTA5.exe.\n"
+                 "  --standalone  запускать свою копию игры вместо установленной. GTA5.exe\n"
+                 "             закрепляется в папке oxymp-backup внутри игры, остальное\n"
+                 "             связывается жёсткими ссылками и места не занимает. Смысл в\n"
+                 "             том, что обновление Rockstar меняет установленную игру, а\n"
+                 "             закреплённая остаётся той, под которую написаны сигнатуры.\n"
+                 "             Включает прямой запуск: закреплённую копию поднять нечем\n"
+                 "             больше.\n"
                  "  --freemode вести игру сразу в сетевой свободный режим, минуя сюжет.\n"
                  "             Путь, которым oxyMP пойдёт, когда научится подставлять игре\n"
                  "             сессию. Пока не научился, игра по нему остаётся на вечной\n"
@@ -70,6 +79,7 @@ int main(int argc, char** argv) {
     settings.backupDirectory = paths.backup();
 
     bool showWindow = true;
+    bool prepareMirrorOnly = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
@@ -96,14 +106,55 @@ int main(int argc, char** argv) {
             settings.networkGameFake = "full";
         } else if (argument == "--direct") {
             settings.launchMode = oxymp::launcher::LaunchMode::Direct;
+        } else if (argument == "--standalone") {
+            // Прямой запуск включается заодно, а не требуется отдельным ключом:
+            // закреплённую копию поднять больше нечем, и заставлять человека
+            // помнить об этом значило бы разложить одно решение на два ключа.
+            settings.standalone = true;
+            settings.launchMode = oxymp::launcher::LaunchMode::Direct;
         } else if (argument == "--attach") {
             settings.attach = true;
+        } else if (argument == "--prepare-mirror") {
+            // Внутренний ключ, в подсказке его нет. Им лаунчер зовёт сам себя с
+            // правами администратора: собрать копию игры и сразу закончиться, не
+            // запуская ничего. Права нужны только на это.
+            prepareMirrorOnly = true;
+            showWindow = false;
         } else if (argument == "--no-ui") {
             showWindow = false;
         } else {
             printUsage();
             return 2;
         }
+    }
+
+    if (prepareMirrorOnly) {
+        // Этот запуск идёт с правами администратора и не делает ничего, кроме
+        // сборки копии. Ни игры, ни сети, ни окна: чем меньше сделано с правами,
+        // тем меньше их достанется тому, кому они не нужны.
+        std::string error;
+
+        const auto installed = settings.gameDirectory.empty()
+                                   ? oxymp::launcher::locateGame(error)
+                                   : oxymp::launcher::gameInDirectory(settings.gameDirectory,
+                                                                      error);
+        if (!installed) {
+            spdlog::error("{}", error);
+            return 1;
+        }
+
+        bool needsAdministrator = false;
+
+        const auto mirror = oxymp::launcher::GameMirror::prepare(
+            *installed, settings.backupDirectory / "game", error, needsAdministrator);
+
+        if (!mirror) {
+            spdlog::error("{}", error);
+            return 1;
+        }
+
+        spdlog::info("копия игры готова: {}", mirror->location.directory.string());
+        return 0;
     }
 
     if (showWindow) {

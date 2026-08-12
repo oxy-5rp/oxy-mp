@@ -1,5 +1,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 
+#include <algorithm>
+
 namespace oxymp::shared {
 
 void ClientHello::write(ByteWriter& writer) const {
@@ -212,6 +214,55 @@ AdminOrder AdminOrder::read(ByteReader& reader) {
     return message;
 }
 
+void MoneyChanged::write(ByteWriter& writer) const {
+    // Знаковое пишется беззнаковым, и обратное превращение возвращает то же
+    // число: дополнительный код и его обход по кругу определены языком, а не
+    // оставлены на усмотрение сборки.
+    writer.writeU64(static_cast<std::uint64_t>(amount));
+}
+
+MoneyChanged MoneyChanged::read(ByteReader& reader) {
+    MoneyChanged message;
+    message.amount = static_cast<std::int64_t>(reader.readU64());
+    return message;
+}
+
+void ResourceList::write(ByteWriter& writer) const {
+    const auto count =
+        static_cast<std::uint16_t>(std::min<std::size_t>(entries.size(), kMaxResources));
+
+    writer.writeU16(count);
+
+    for (std::uint16_t i = 0; i < count; ++i) {
+        writer.writeString(entries[i].name);
+        writer.writeString(entries[i].hash);
+        writer.writeU64(entries[i].size);
+    }
+}
+
+ResourceList ResourceList::read(ByteReader& reader) {
+    ResourceList message;
+
+    const std::uint16_t count = reader.readU16();
+
+    // Предел применяется при чтении, а не только при записи: пакет мог прийти
+    // откуда угодно, и верить его полю длины нельзя.
+    const std::uint16_t safe = std::min<std::uint16_t>(count, kMaxResources);
+
+    message.entries.reserve(safe);
+
+    for (std::uint16_t i = 0; i < safe; ++i) {
+        ResourceEntry entry;
+        entry.name = reader.readString();
+        entry.hash = reader.readString();
+        entry.size = reader.readU64();
+
+        message.entries.push_back(std::move(entry));
+    }
+
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -233,6 +284,8 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::DamageTaken:
     case MessageId::AdminAction:
     case MessageId::AdminOrder:
+    case MessageId::MoneyChanged:
+    case MessageId::ResourceList:
         return static_cast<MessageId>(packet.front());
     }
 

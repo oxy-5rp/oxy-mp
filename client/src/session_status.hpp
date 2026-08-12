@@ -126,6 +126,12 @@ public:
         /// которое выдал сервер.
         shared::PlayerId playerId = shared::kInvalidPlayerId;
 
+        /// Деньги игрока, как их считает сервер.
+        ///
+        /// Известны не сразу: сервер присылает их сразу за приветствием, но до
+        /// того показывать нечего, и прочерк честнее нуля.
+        std::optional<std::int64_t> money;
+
         [[nodiscard]] bool inSession() const noexcept {
             return state == ConnectionState::Connected;
         }
@@ -141,12 +147,23 @@ public:
         playerId_.store(playerId, std::memory_order_relaxed);
     }
 
+    /// Деньги приходят отдельным сообщением и меняются редко, поэтому пишутся
+    /// отдельно от остального: складывать их в общий update значило бы требовать
+    /// их у каждого, кто обновляет задержку.
+    void setMoney(std::int64_t amount) noexcept {
+        money_.store(amount, std::memory_order_relaxed);
+        moneyKnown_.store(true, std::memory_order_relaxed);
+    }
+
     [[nodiscard]] Snapshot snapshot() const noexcept {
         return Snapshot{
             .state = state_.load(std::memory_order_relaxed),
             .players = players_.load(std::memory_order_relaxed),
             .latencyMilliseconds = latency_.load(std::memory_order_relaxed),
             .playerId = playerId_.load(std::memory_order_relaxed),
+            .money = moneyKnown_.load(std::memory_order_relaxed)
+                         ? std::optional{money_.load(std::memory_order_relaxed)}
+                         : std::nullopt,
         };
     }
 
@@ -155,6 +172,8 @@ private:
     std::atomic<std::uint32_t> players_{0};
     std::atomic<std::int32_t> latency_{-1};
     std::atomic<shared::PlayerId> playerId_{shared::kInvalidPlayerId};
+    std::atomic<std::int64_t> money_{0};
+    std::atomic<bool> moneyKnown_{false};
 };
 
 } // namespace oxymp::client

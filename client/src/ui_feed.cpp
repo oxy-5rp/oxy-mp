@@ -74,6 +74,11 @@ void UiFeed::setReady() {
     ready_ = true;
 }
 
+bool UiFeed::playerInWorld() const {
+    const std::lock_guard guard{mutex_};
+    return ready_;
+}
+
 void UiFeed::beat() {
     const std::lock_guard guard{mutex_};
     beatAt_ = std::chrono::steady_clock::now();
@@ -167,7 +172,7 @@ std::string UiFeed::takeUpdate() {
     std::string message = std::format(
         R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
         R"("consoleVisible":{},"inputActive":{},"inputPrompt":"{}","inputText":"{}",)"
-        R"("stage":{},"ready":{},"alive":{})",
+        R"("stage":{},"ready":{},"alive":{},"money":{})",
         connection_.state, connection_.players, connection_.latencyMilliseconds,
         // Отсутствие номера доходит до страницы отрицательным числом, а не
         // огромным: наибольшее беззнаковое выглядит как настоящий номер игрока,
@@ -177,7 +182,10 @@ std::string UiFeed::takeUpdate() {
             : static_cast<std::int64_t>(connection_.playerId),
         connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0, inputActive_ ? 1 : 0,
         escape(inputPrompt_), escape(inputText_), static_cast<unsigned int>(stage_),
-        ready_ ? 1 : 0, alive ? 1 : 0);
+        ready_ ? 1 : 0, alive ? 1 : 0,
+        // Неизвестные деньги доходят до страницы как null, а не как ноль: ноль —
+        // это разорение, а нам нужно «сервер ещё не сказал».
+        connection_.money.has_value() ? std::format("{}", *connection_.money) : "null");
 
     if (sessionChanged_) {
         sessionChanged_ = false;

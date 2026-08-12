@@ -249,7 +249,7 @@ void GameSession::onFrame(bool ownsResources) {
     if (ownsResources) {
         // Первым делом и один раз за запуск. Позже переключать бессмысленно:
         // мир вокруг игрока к тому времени уже собран по одиночной разметке.
-        if (!onlineMapEnabled_) {
+        if (settings_.onlineMap && !onlineMapEnabled_) {
             onlineMapEnabled_ = true;
             onlineMap_.enable();
         }
@@ -377,6 +377,11 @@ void GameSession::suppressGame() {
     respawn_.suppressGameHandling();
     world_.suppressPopulation();
     world_.suppressWanted(player_.id());
+
+    // Счётчик денег игры прячется каждый кадр: он показывает баланс настоящего
+    // GTA Online, а тот к нашей сессии отношения не имеет. Свои деньги считает
+    // сервер, и показывает их наш интерфейс.
+    hud_.hideMoney();
 
     // Ход времени возвращается каждый кадр. Игра замедляет его сама — на колесе
     // выбора персонажа, при смерти, при аресте, — и в одиночной игре это
@@ -565,10 +570,14 @@ void GameSession::handleTyping() {
         // просьба идёт первой: раз меню открыто, чат сейчас не при чём.
         if (adminMenu_.wantsText()) {
             typingFor_ = Typing::Menu;
-            textEntry_->begin();
+
+            // Название модели набирается латиницей по местам клавиш: раскладку
+            // в GTA не переключить, а `adder` в русской раскладке набирается
+            // как `фввук`.
+            textEntry_->begin(game::TextEntry::Mode::Latin);
         } else if (pressedOnce(kChatKey)) {
             typingFor_ = Typing::Chat;
-            textEntry_->begin();
+            textEntry_->begin(game::TextEntry::Mode::Free);
         }
     }
 
@@ -625,6 +634,7 @@ void GameSession::handleMenu(int player, int ped) {
     const bool alternate = pressedOnce(VK_RIGHT);
     const bool left = pressedOnce(VK_LEFT);
     const bool backspace = pressedOnce(VK_BACK);
+    const bool escape = pressedOnce(VK_ESCAPE);
 
     if (!typing && menuKey) {
         adminMenu_.toggle();
@@ -649,6 +659,15 @@ void GameSession::handleMenu(int player, int ped) {
         }
         if (left || backspace) {
             adminMenu_.press(game::AdminMenu::Key::Back, player, ped);
+        }
+
+        // Escape закрывает меню целиком, а не на шаг назад.
+        //
+        // Без этого выйти было нечем, кроме стрелки влево и Backspace, а
+        // человек жмёт Escape — это первое, что приходит в голову, и до сих пор
+        // оно не делало ничего.
+        if (escape) {
+            adminMenu_.close();
         }
     }
 

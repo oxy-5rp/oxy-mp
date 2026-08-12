@@ -13,6 +13,14 @@ constexpr int kFont = 0;
 /// как есть», без обращения к таблице переводов игры.
 constexpr const char* kRawStringCommand = "STRING";
 
+/// Части HUD, показывающие деньги.
+///
+/// Их две, и прятать нужно обе: одна принадлежит сюжетному режиму, другая
+/// сетевому, а какую из них игра сочтёт нужной, зависит от того, во что она себя
+/// считает играющей. Прятать по одной значило бы гадать.
+constexpr int kCashComponent = 3;
+constexpr int kMultiplayerCashComponent = 4;
+
 } // namespace
 
 Hud::Hud(const NativeTable& table) noexcept
@@ -24,7 +32,8 @@ Hud::Hud(const NativeTable& table) noexcept
       setOutline_(table.handlerFor(natives::kSetTextOutline)),
       beginText_(table.handlerFor(natives::kBeginTextCommandDisplayText)),
       addSubstring_(table.handlerFor(natives::kAddTextComponentSubstringPlayerName)),
-      endText_(table.handlerFor(natives::kEndTextCommandDisplayText)) {}
+      endText_(table.handlerFor(natives::kEndTextCommandDisplayText)),
+      hideComponent_(table.handlerFor(natives::kHideHudComponentThisFrame)) {}
 
 bool Hud::ready() const noexcept {
     return drawRect_ != nullptr && setFont_ != nullptr && setScale_ != nullptr &&
@@ -43,6 +52,15 @@ void Hud::drawRect(float centreX, float centreY, float width, float height, Colo
     invokeNative<void>(drawRect_, centreX, centreY, width, height, static_cast<int>(colour.red),
                        static_cast<int>(colour.green), static_cast<int>(colour.blue),
                        static_cast<int>(colour.alpha), false);
+}
+
+void Hud::hideMoney() const {
+    if (hideComponent_ == nullptr) {
+        return;
+    }
+
+    invokeNative<void>(hideComponent_, kCashComponent);
+    invokeNative<void>(hideComponent_, kMultiplayerCashComponent);
 }
 
 void Hud::drawText(const std::string& text, float x, float y, float scale, Colour colour,

@@ -1,6 +1,7 @@
 #include "session.hpp"
 
 #include "game_locator.hpp"
+#include "game_mirror.hpp"
 #include "game_settings.hpp"
 #include "launcher_patch.hpp"
 #include "rockstar_launcher.hpp"
@@ -13,6 +14,8 @@
 #include <string>
 
 #include <windows.h>
+
+#include <shellapi.h>
 
 namespace oxymp::launcher {
 namespace {
@@ -46,21 +49,84 @@ bool setEnvironment(const wchar_t* name, const std::string& value) {
     return ::SetEnvironmentVariableW(name, wide.c_str()) != 0;
 }
 
+/// Каталог пользовательских данных. Пусто, если Windows его не назвала.
+std::filesystem::path localApplicationData() {
+    std::wstring value(MAX_PATH, L'\0');
+
+    const DWORD written = ::GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(),
+                                                    static_cast<DWORD>(value.size()));
+    if (written == 0 || written >= value.size()) {
+        return {};
+    }
+
+    value.resize(written);
+    return std::filesystem::path{value};
+}
+
+/// Просит Windows поднять нас же с правами — только ради сборки зеркала.
+///
+/// Тот же oxymp.exe, но с ключом --prepare-mirror: он собирает копию игры и сразу
+/// заканчивается, не запуская ничего. Игру после этого поднимает обычный,
+/// бесправный запуск — иначе права достались бы и ей, а с ними не работает
+/// Chromium.
+bool buildMirrorElevated(const Session::Settings& settings, std::string& error) {
+    wchar_t self[MAX_PATH]{};
+    if (::GetModuleFileNameW(nullptr, self, MAX_PATH) == 0) {
+        error = "не удалось узнать собственный путь";
+        return false;
+    }
+
+    std::wstring arguments = L"--prepare-mirror";
+
+    // Каталог игры передаётся дальше, если его указали ключом: у запуска с
+    // правами своё окружение, и найденное нами он сам не унаследует.
+    if (!settings.gameDirectory.empty()) {
+        arguments += L" --game \"" + settings.gameDirectory.wstring() + L"\"";
+    }
+
+    SHELLEXECUTEINFOW request{};
+    request.cbSize = sizeof(request);
+    request.fMask = SEE_MASK_NOCLOSEPROCESS;
+    request.lpVerb = L"runas";
+    request.lpFile = self;
+    request.lpParameters = arguments.c_str();
+    request.nShow = SW_HIDE;
+
+    if (::ShellExecuteExW(&request) == 0 || request.hProcess == nullptr) {
+        // Отказ от прав — не поломка, а решение человека, и говорить о нём надо
+        // так же.
+        error = ::GetLastError() == ERROR_CANCELLED
+                    ? "Без прав администратора свою копию игры не собрать.\n"
+                      "Либо подтвердите запрос Windows, либо запускайте без --standalone."
+                    : "не удалось запросить права администратора";
+        return false;
+    }
+
+    ::WaitForSingleObject(request.hProcess, INFINITE);
+
+    DWORD code = 1;
+    ::GetExitCodeProcess(request.hProcess, &code);
+    ::CloseHandle(request.hProcess);
+
+    if (code != 0) {
+        error = "сборка своей копии игры не удалась — подробности в журнале лаунчера";
+        return false;
+    }
+
+    return true;
+}
+
 /// Кладёт настройки сессии в файл рядом с журналом клиента.
 ///
 /// Единственный способ передать адрес сервера и имя в уже запущенный процесс
 /// (режим --attach): окружения он от нас не получал.
 void writeSessionFile(const std::string& server, const std::string& nickname) {
-    std::wstring localAppData(MAX_PATH, L'\0');
-    const DWORD written = ::GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData.data(),
-                                                    static_cast<DWORD>(localAppData.size()));
-    if (written == 0 || written >= localAppData.size()) {
+    const std::filesystem::path localAppData = localApplicationData();
+    if (localAppData.empty()) {
         return;
     }
-    localAppData.resize(written);
 
-    const std::filesystem::path path =
-        std::filesystem::path{localAppData} / "oxyMP" / "session.cfg";
+    const std::filesystem::path path = localAppData / "oxyMP" / "session.cfg";
 
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
@@ -134,12 +200,57 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
 
     report(Progress::Working, "Ищем установленную игру");
 
-    const auto location = settings.gameDirectory.empty()
-                              ? locateGame(error)
-                              : gameInDirectory(settings.gameDirectory, error);
-    if (!location) {
+    const auto installed = settings.gameDirectory.empty()
+                               ? locateGame(error)
+                               : gameInDirectory(settings.gameDirectory, error);
+    if (!installed) {
         report(Progress::Failed, error);
         return nullptr;
+    }
+
+    std::optional<GameLocation> location = installed;
+
+    if (settings.standalone) {
+        report(Progress::Working, "Готовим свою копию игры");
+
+        // Рядом с oxymp.exe, в его же папке backup: человек видит, где лежит его
+        // копия игры, и удаляет её вместе с модом, а не разыскивает по системе.
+        const std::filesystem::path preferred = settings.backupDirectory / "game";
+
+        bool needsAdministrator = false;
+        auto mirror = GameMirror::prepare(*installed, preferred, error, needsAdministrator);
+
+        // Права спрашиваются отдельным коротким запуском, а не для всего лаунчера,
+        // и это существенно, а не аккуратности ради.
+        //
+        // Лаунчер, запущенный с правами, запускает с ними и игру — права
+        // наследуются. А в игре с правами администратора не поднимается Chromium:
+        // интерфейс oxyMP просто не появляется. Проверено — именно так он и
+        // пропал.
+        //
+        // Поэтому под правами делается только то, ради чего они нужны: ссылки на
+        // файлы игры. Сама игра запускается обычным порядком.
+        if (!mirror && needsAdministrator) {
+            report(Progress::Working, "Нужны права администратора — подтвердите запрос Windows");
+
+            if (!buildMirrorElevated(settings, error)) {
+                report(Progress::Failed, error);
+                return nullptr;
+            }
+
+            mirror = GameMirror::prepare(*installed, preferred, error, needsAdministrator);
+        }
+
+        if (!mirror) {
+            report(Progress::Failed, error);
+            return nullptr;
+        }
+
+        location = mirror->location;
+
+        if (mirror->gameUpdated) {
+            report(Progress::Working, "Игра обновилась — запускаем закреплённую копию");
+        }
     }
 
     // Права на игру выдаёт лаунчер Rockstar, и спрашивают их в первые же
@@ -154,8 +265,12 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
 
     std::unique_ptr<GameProcess> game;
 
+    // Закреплённую копию поднять может только прямой запуск: лаунчер Rockstar
+    // запускает свою игру, и сказать ему про другой файл нечем. Ключ --standalone
+    // поэтому и включает прямой запуск — здесь это лишь соблюдается.
     if (settings.launchMode == LaunchMode::Direct) {
-        report(Progress::Working, "Запускаем игру напрямую");
+        report(Progress::Working, settings.standalone ? "Запускаем свою копию игры"
+                                                      : "Запускаем игру напрямую");
 
         game = GameProcess::launchDirectly(*location, error);
         if (!game) {

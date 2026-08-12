@@ -27,6 +27,7 @@ if(WIN32)
         src/dllmain.cpp
         src/discord_presence.cpp
         src/game_session.cpp
+        src/resource_cache.cpp
         src/ui_feed.cpp
         src/game/admin_menu.cpp
         src/game/appearance.cpp
@@ -87,5 +88,9 @@ if(WIN32)
         d3d11
         dxgi
         d3dcompiler
+
+        # Загрузка ресурсов с мини-сайта сервера. Библиотека отложенная — см.
+        # список DELAYLOAD, — и подгружается только когда сервер что-то раздаёт.
+        wininet
     )
 endif()

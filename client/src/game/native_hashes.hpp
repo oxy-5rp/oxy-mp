@@ -362,6 +362,9 @@ inline constexpr std::uint64_t kDisableAllControlActions = 0XD4510218399ED105;
 /// RESET_PLAYER_ARREST_STATE, канонический хеш 0X2D03E13C460760D6.
 inline constexpr std::uint64_t kResetPlayerArrestState = 0X3C2C878E6683CE75;
 
+/// HIDE_HUD_COMPONENT_THIS_FRAME, канонический хеш 0X6806C51AD12B83B8.
+inline constexpr std::uint64_t kHideHudComponentThisFrame = 0X4EB223432F8FA0A0;
+
 /// DISPLAY_HUD_WHEN_DEAD_THIS_FRAME, канонический хеш 0X71B74D2AE19338D0.
 inline constexpr std::uint64_t kDisplayHudWhenDeadThisFrame = 0XFE2EB239B608CDF9;
 

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "http_server.hpp"
 #include "player_registry.hpp"
+#include "resource_store.hpp"
 
 #include <oxymp/net/host.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
@@ -8,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,6 +32,18 @@ struct Config {
     /// обычного случая — чтобы гость, зашедший в сессию, не мог собрать к себе
     /// всех остальных.
     std::vector<shared::PlayerId> admins{0};
+
+    /// С чего игрок начинает.
+    ///
+    /// Своя сумма, к настоящему GTA Online отношения не имеющая. Не ноль, чтобы
+    /// в сессии было что тратить с первой минуты.
+    std::int64_t startingMoney = 100'000;
+
+    /// Откуда брать файлы, которые сервер раздаёт клиентам.
+    ///
+    /// Путь относительный: сервер запускают из своего каталога, и требовать
+    /// от хозяина писать полный путь незачем.
+    std::filesystem::path resourceDirectory = "resources/dlcpacks";
 };
 
 /// Сервер: владеет сетевым узлом и списком игроков.
@@ -85,6 +100,14 @@ private:
     Config config_;
     std::unique_ptr<net::Host> host_;
     PlayerRegistry players_;
+
+    /// Что сервер раздаёт клиентам сверх самой игры.
+    ///
+    /// Объявлен раньше раздачи и потому переживает её: раздача держит на него
+    /// ссылку и читает из своего потока.
+    ResourceStore resources_;
+
+    std::unique_ptr<HttpServer> http_;
 
     /// Когда соединение подключилось. Запись живёт до рукопожатия: молчащий
     /// клиент иначе занимал бы место в лимите игроков бесконечно.

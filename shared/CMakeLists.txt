@@ -1,6 +1,7 @@
 add_library(oxymp_shared STATIC
     src/messages.cpp
     src/serialization.cpp
+    src/vault.cpp
 )
 add_library(oxymp::shared ALIAS oxymp_shared)
 

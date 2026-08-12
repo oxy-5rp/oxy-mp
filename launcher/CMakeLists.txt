@@ -3,6 +3,7 @@ include(embed_text)
 add_executable(oxymp_launcher
     src/connect_window.cpp
     src/game_locator.cpp
+    src/game_mirror.cpp
     src/game_settings.cpp
     src/game_process.cpp
     src/launcher_patch.cpp

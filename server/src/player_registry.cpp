@@ -20,11 +20,12 @@ shared::PlayerId PlayerRegistry::freeId() const {
     }
 }
 
-const Player& PlayerRegistry::add(net::PeerId peer, std::string nickname) {
+const Player& PlayerRegistry::add(net::PeerId peer, std::string nickname, std::int64_t money) {
     Player player;
     player.id = freeId();
     player.peer = peer;
     player.nickname = std::move(nickname);
+    player.money = money;
 
     return players_.insert_or_assign(peer, std::move(player)).first->second;
 }

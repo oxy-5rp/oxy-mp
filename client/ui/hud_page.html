@@ -168,6 +168,21 @@
     gap: 3px;
   }
 
+  /* Деньги набраны цифрами одной ширины: счёт меняется на ходу, и без этого
+     соседние разряды дёргались бы при каждом изменении. */
+  .money {
+    padding: 7px 12px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    font-size: 19px;
+    font-weight: 500;
+    color: var(--good);
+  }
+
+  .money .sign { font-size: 14px; opacity: .75; }
+
   .server .top {
     display: flex;
     align-items: baseline;
@@ -405,6 +420,12 @@
     </div>
   </div>
 
+  <!-- Деньги отдельной карточкой, а не строкой в общей мелочи: это единственное
+       число, на которое игрок смотрит нарочно, а не мельком. -->
+  <div class="card money">
+    <span class="sign">$</span><span id="money">—</span>
+  </div>
+
   <div class="card roster">
     <h4>В сессии</h4>
     <ul id="roster"></ul>
@@ -564,6 +585,13 @@
       }
 
       document.getElementById('ping').textContent = s.latency >= 0 ? s.latency + ' мс' : '';
+
+      // null — сервер ещё не сказал, сколько у нас денег. Прочерк, а не ноль:
+      // ноль здесь означал бы разорение, а не незнание.
+      if (s.money !== undefined) {
+        document.getElementById('money').textContent =
+          s.money === null ? '—' : s.money.toLocaleString('ru-RU');
+      }
       document.getElementById('me').textContent = s.playerId >= 0 ? 'id ' + s.playerId : '';
 
       if (s.roster) {

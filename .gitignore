@@ -3,6 +3,10 @@
 /out/
 /install/
 
+# Готовая раздача: то, что отдают игроку и ставят на сервер.
+# Собирается из /build, хранить в истории нечего.
+/release/
+
 # CMake
 CMakeUserPresets.json
 CMakeCache.txt

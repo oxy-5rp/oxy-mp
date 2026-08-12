@@ -9,7 +9,7 @@ namespace oxymp::shared {
 /// Увеличивается при любом изменении состава или порядка полей в сообщениях.
 /// Клиент присылает её первым же сообщением, и сервер отказывает при несовпадении:
 /// молча разошедшиеся клиент и сервер дают ошибки, которые невозможно понять.
-inline constexpr std::uint16_t kProtocolVersion = 4;
+inline constexpr std::uint16_t kProtocolVersion = 5;
 
 /// Порт сервера по умолчанию.
 inline constexpr std::uint16_t kDefaultServerPort = 22005;

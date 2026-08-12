@@ -302,6 +302,52 @@ struct DamageTaken {
     [[nodiscard]] static DamageTaken read(ByteReader& reader);
 };
 
+/// Сколько у игрока денег.
+///
+/// Шлётся при входе и при каждом изменении. Целиком, а не разницей: разница
+/// требует, чтобы обе стороны считали одинаково и ничего не потеряли по дороге,
+/// а деньги — не то, где стоит на это полагаться.
+///
+/// Со знаком: долг в игре — обычное дело, а беззнаковое число превратило бы его
+/// в неправдоподобное богатство.
+struct MoneyChanged {
+    static constexpr MessageId kId = MessageId::MoneyChanged;
+
+    std::int64_t amount = 0;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static MoneyChanged read(ByteReader& reader);
+};
+
+/// Сколько ресурсов сервер вправе объявить за раз.
+///
+/// Предел нужен разбору, а не хозяину сервера: без него испорченный пакет с
+/// огромным числом в поле длины заставил бы клиент выделять память под список,
+/// которого нет.
+inline constexpr std::uint16_t kMaxResources = 512;
+
+/// Один раздаваемый ресурс.
+struct ResourceEntry {
+    /// Исходное имя — то, как файл называется у хозяина сервера.
+    std::string name;
+
+    /// Отпечаток содержимого. По нему ресурс качается и им же называется в кеше.
+    std::string hash;
+
+    /// Размер, чтобы показать человеку, сколько качать.
+    std::uint64_t size = 0;
+};
+
+/// Список того, что сервер раздаёт сверх самой игры.
+struct ResourceList {
+    static constexpr MessageId kId = MessageId::ResourceList;
+
+    std::vector<ResourceEntry> entries;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static ResourceList read(ByteReader& reader);
+};
+
 // --- Упаковка сообщений в пакеты ----------------------------------------------
 //
 // Пакет — это байт с типом сообщения и следом его поля. Границы пакетов

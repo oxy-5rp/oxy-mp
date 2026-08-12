@@ -4,7 +4,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <oxymp/shared/protocol/messages.hpp>
+#include <oxymp/shared/resource/vault.hpp>
 
+#include <algorithm>
+#include <array>
 #include <vector>
 
 using namespace oxymp::shared;
@@ -200,6 +203,27 @@ TEST_CASE("damage messages survive a round trip", "[messages]") {
     CHECK(receivedTaken->weapon == 0x1B06D571);
 }
 
+TEST_CASE("money survives a round trip", "[messages]") {
+    MoneyChanged money;
+    money.amount = 100'000;
+
+    const auto received = roundTrip(money);
+    REQUIRE(received.has_value());
+    CHECK(received->amount == 100'000);
+}
+
+TEST_CASE("a debt stays a debt", "[messages]") {
+    // Отрицательные деньги — обычное дело, а по проводу они идут беззнаковым
+    // числом. Ошибись в обратном превращении — и долг в сто тысяч превратился бы
+    // в восемнадцать квинтиллионов.
+    MoneyChanged owed;
+    owed.amount = -2'500;
+
+    const auto received = roundTrip(owed);
+    REQUIRE(received.has_value());
+    CHECK(received->amount == -2'500);
+}
+
 TEST_CASE("admin messages survive a round trip", "[messages]") {
     AdminAction action;
     action.command = AdminCommand::Summon;
@@ -290,4 +314,57 @@ TEST_CASE("decode refuses trailing bytes", "[messages]") {
 
 TEST_CASE("decode refuses an empty packet", "[messages]") {
     CHECK_FALSE(decode<Ping>(ByteView{}).has_value());
+}
+
+// --- Ресурсы ------------------------------------------------------------------
+
+TEST_CASE("a resource survives packing and unpacking", "[vault]") {
+    const std::string original = "RPF7 это притворяется файлом игры";
+    const std::span<const std::uint8_t> plain{
+        reinterpret_cast<const std::uint8_t*>(original.data()), original.size()};
+
+    const std::vector<std::uint8_t> key = Vault::builtInKey();
+    const std::vector<std::uint8_t> packed = Vault::pack(plain, key);
+
+    // Содержимое обязано перестать быть видимым: иначе весь смысл теряется.
+    const std::string asText(reinterpret_cast<const char*>(packed.data()), packed.size());
+    CHECK(asText.find("RPF7") == std::string::npos);
+
+    std::string error;
+    const std::vector<std::uint8_t> restored = Vault::unpack(packed, key, error);
+
+    REQUIRE(error.empty());
+    REQUIRE(restored.size() == original.size());
+
+    // Сравнение через беззнаковый вид: char знаковый, и кириллица в нём
+    // отрицательна — сравнение с байтом дало бы ложное расхождение.
+    const std::string restoredText(reinterpret_cast<const char*>(restored.data()),
+                                   restored.size());
+    CHECK(restoredText == original);
+}
+
+TEST_CASE("a resource refuses a wrong key", "[vault]") {
+    // Расшифровка чужим ключом не отказывает сама по себе — она молча даёт
+    // мусор. Отпечаток для того и лежит в заголовке, чтобы этот мусор не уехал
+    // дальше под видом содержимого.
+    const std::array<std::uint8_t, 4> original = {1, 2, 3, 4};
+
+    std::vector<std::uint8_t> key = Vault::builtInKey();
+    const std::vector<std::uint8_t> packed = Vault::pack(original, key);
+
+    key[0] ^= 0xFF;
+
+    std::string error;
+    const std::vector<std::uint8_t> restored = Vault::unpack(packed, key, error);
+
+    CHECK(restored.empty());
+    CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("packing the same thing twice gives the same name", "[vault]") {
+    // От этого зависит, будет ли клиент качать заново то, что не менялось.
+    const std::array<std::uint8_t, 3> data = {9, 9, 9};
+
+    CHECK(fingerprint(data) == fingerprint(data));
+    CHECK(fingerprint(data).size() == 64);
 }

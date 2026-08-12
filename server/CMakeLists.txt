@@ -1,6 +1,8 @@
 add_executable(oxymp_server
+    src/http_server.cpp
     src/main.cpp
     src/player_registry.cpp
+    src/resource_store.cpp
     src/server.cpp
 )
 
@@ -18,3 +20,9 @@ target_link_libraries(oxymp_server PRIVATE
     oxymp::options
     spdlog::spdlog
 )
+
+# Сокеты раздачи. ENet тянет ту же библиотеку, но полагаться на чужую сборку
+# нельзя: он вправе перестать это делать, и тогда ломаться будет здесь.
+if(WIN32)
+    target_link_libraries(oxymp_server PRIVATE ws2_32)
+endif()

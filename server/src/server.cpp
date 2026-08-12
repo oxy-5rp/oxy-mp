@@ -62,6 +62,26 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
     spdlog::info("сервер \"{}\" слушает порт {}, мест: {}", config.name, config.port,
                  config.maxPlayers);
 
+    // Ресурсы собираются до того, как кто-либо подключится: клиент получает их
+    // список первым же делом, и собирать его на ходу значило бы заставить
+    // первого вошедшего ждать шифрования всех файлов.
+    server->resources_.load(config.resourceDirectory);
+
+    if (!server->resources_.empty()) {
+        std::string httpError;
+
+        // Тот же номер порта, что и у игры. Спорить им не о чем: игра общается
+        // по UDP, раздача по TCP, и это разные пространства номеров.
+        server->http_ = HttpServer::start(config.port, server->resources_, httpError);
+
+        if (server->http_ == nullptr) {
+            // Не повод не запускать сервер: без раздачи играть можно, просто без
+            // добавленного хозяином содержимого.
+            spdlog::error("раздача ресурсов не поднялась: {}", httpError);
+            spdlog::error("клиенты не получат добавленное вами содержимое");
+        }
+    }
+
     return server;
 }
 
@@ -175,6 +195,8 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::ChatLine:
     case shared::MessageId::DamageTaken:
     case shared::MessageId::AdminOrder:
+    case shared::MessageId::MoneyChanged:
+    case shared::MessageId::ResourceList:
         spdlog::warn("соединение {} прислало серверное сообщение", peer);
         return;
     }
@@ -225,12 +247,36 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         existing.push_back(std::move(joined));
     }
 
-    const Player& player = players_.add(peer, hello.nickname);
+    const Player& player = players_.add(peer, hello.nickname, config_.startingMoney);
 
     shared::ServerWelcome welcome;
     welcome.playerId = player.id;
     welcome.tickRate = shared::kDefaultTickRate;
     sendTo(peer, welcome);
+
+    // Деньги — сразу за приветствием: до них клиент показывает прочерк, и чем
+    // короче это время, тем меньше похоже на неисправность.
+    shared::MoneyChanged money;
+    money.amount = player.money;
+    sendTo(peer, money);
+
+    // Список раздаваемого — следом, до всего остального. Клиент по нему решает,
+    // что качать, а качать он начинает до появления в мире: докачивать
+    // содержимое, когда игрок уже бегает, поздно.
+    //
+    // Отправляется всегда, даже пустым: пустой список это ответ «ничего не
+    // нужно», а молчание клиент отличить от него не сможет и будет ждать.
+    shared::ResourceList resources;
+
+    for (const ResourceStore::Item& item : resources_.items()) {
+        resources.entries.push_back(shared::ResourceEntry{
+            .name = item.name,
+            .hash = item.hash,
+            .size = item.size,
+        });
+    }
+
+    sendTo(peer, resources);
 
     for (const auto& joined : existing) {
         sendTo(peer, joined);

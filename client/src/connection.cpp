@@ -309,6 +309,18 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::MoneyChanged:
+        if (const auto money = shared::decode<shared::MoneyChanged>(packet)) {
+            money_ = money->amount;
+        }
+        return;
+
+    case shared::MessageId::ResourceList:
+        if (auto list = shared::decode<shared::ResourceList>(packet)) {
+            resources_ = std::move(list->entries);
+        }
+        return;
+
     // Это сообщения клиента. Сервер их не присылает.
     case shared::MessageId::ClientHello:
     case shared::MessageId::Ping:
@@ -471,6 +483,14 @@ void Connection::order(const shared::AdminAction& action) {
 
 std::vector<shared::AdminOrder> Connection::takeOrders() {
     return std::exchange(orders_, {});
+}
+
+std::optional<std::int64_t> Connection::takeMoney() {
+    return std::exchange(money_, std::nullopt);
+}
+
+std::optional<std::vector<shared::ResourceEntry>> Connection::takeResources() {
+    return std::exchange(resources_, std::nullopt);
 }
 
 void Connection::sendHello() {
