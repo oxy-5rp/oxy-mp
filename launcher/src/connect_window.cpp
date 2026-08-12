@@ -195,7 +195,11 @@ void startSession(std::string address, std::string nickname) {
 constexpr int kTitleBarHeight = 56;
 
 void handlePageMessage(std::string_view json) {
-    const std::string_view action = field(json, "action");
+    // Строкой, а не видом на неё: field отдаёт строку по значению, и вид на
+    // временный объект пережил бы сам объект. Ровно на этом сломались разом
+    // запуск игры, перетаскивание окна и его кнопки — сравнивалась
+    // освобождённая память, и не совпадало ничего.
+    const std::string action = field(json, "action");
 
     if (action == "connect") {
         startSession(field(json, "address"), field(json, "nickname"));
@@ -209,7 +213,7 @@ void handlePageMessage(std::string_view json) {
             return;
         }
 
-        const std::string_view command = field(json, "command");
+        const std::string command = field(json, "command");
 
         if (command == "close") {
             ::PostMessageW(g_window->handle, WM_CLOSE, 0, 0);

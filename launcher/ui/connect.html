@@ -63,16 +63,14 @@
 
   .brand { display: flex; align-items: center; gap: 10px; }
 
-  /* Знак нарисован разметкой, а не картинкой: файл рядом с лаунчером можно
-     потерять, а нарисованный знак не теряется и не ждёт загрузки. */
+  /* Знак вшит в саму страницу, а не лежит файлом рядом с лаунчером: отдельный
+     файл можно потерять при переносе, и тогда на его месте останется пустота.
+     Уменьшен до 68 точек — вдвое против показанного размера, ради чётких краёв
+     на экранах с удвоенной плотностью. */
   .mark {
     width: 34px; height: 34px;
-    border-radius: 9px;
-    display: grid; place-items: center;
-    background: linear-gradient(140deg, var(--action), oklch(0.42 0.09 258));
-    font-family: var(--mono);
-    font-size: 15px; font-weight: 700;
-    color: oklch(0.98 0.008 240);
+    object-fit: contain;
+    mix-blend-mode: screen;
   }
 
   .wordmark { font-size: 15px; font-weight: 800; letter-spacing: .16em; }
@@ -374,7 +372,7 @@
 
 <div class="titlebar">
   <div class="brand">
-    <div class="mark">o</div>
+    <img class="mark" id="logo" alt="oxyMP" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEQAAABECAYAAAA4E5OyAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUzSURBVHhe7ZxbaB5FFIB3zmw0baqivlQURB/UlhSEQgteghS8vfxFsHipFGoJkmJjEVuqULXe+tJo1YSgSTWKRNQ0UdOL1bZiffBBRQq2XlCh1As+KIr1Atocz5md2cx/HPPDZn6NOIWPmX9mZ/7Zr2dnziaQjP59QXyfMLCL7BiBCcNPhDET6vw/8h2RhHgkIYIkRJCECJIQQRIiSEIESYggCREkIYIkRDBzhKhA279AihBBEiJIQgRJiCAJESQhgn9GCB+pSilUrW2oZp+Eatacekwb4fdx3ad1djGPN28TaK4Q3ToH8ytWob5rFKH3MKqnvkQ19DWqpx1fFZ9dm6szz9jSXbvtKMJjB1GvHUK98OpmiWmekHz+JZgPfIpqH2K2h9hBjNvS1SWuz+9/1cL1XcQbiIrI1z2P0HJi8LunQXOE5OdeiHrsZ8xeoxsYPW75A7Mxhup1+G1ena/3Kfu4pHnfJimrn4wdKfGFAGjUPe9h9jotert/o/LGXLvXz/XyGkspRczzCkUKRY0+a15wHRWJL0QvvAoVyyijwt7IdmIn3QQ9Qmp/QWZxdVPyI8b4dRpnxpdyLHSNrq0NrqMicYVw+Oqufsz20g0YGRau75hA6P8E82UbEGprUC29zQC1oqzDtdW6Mb92Peb9h2kPmfirFJIFXX3BtVQkvhDYfACz3ULI2AQqasvbLw2Oa0RLx/VmIzVCfCnUpru3xdxHIgsBQOj7uAhxt2iGnnd48ReE084IjmuEXrLC7kk0ly+EIhE6twbHVCSykLZTEJ79tjgi3QbJ0GcY+gZh1snBcY2A6zZOPoYlND+1qWvWB8dUJK4QmHsOwku/Yfayv3haOEUM9B1CoGw1NG4qzGPY9YR5POrm5JLyG+i4KTiuIpGFnL8YFSdRo24DtAunfAQe3F/pWTcb9cbxIrkrhTC0L7HoBUuC4yoSV4heVEPFyRjnH/7iObu8Yzg4phHA9LxbZKn+nJScKRKuzm4PjqtIZCFX3lJsfv7CGT4eV24JjmmEOqEV1cCRYl9yEcdQJKrhH1CdOjc4riLxhJjQXr6p2Pz8x4Xh02Dp7cFxjeCTCYZ/NCeVmavMa2jOwSMkLOr7TFwhsGZg8nh0i6fThjNXoFwiNK4RQI+EojwmG7UR4k4vymtg6/uV9qUpiCyENz+zh1ghRgptfvT8w7yLg+MaAe0dZrzZl8p5qU6S9abdM1zIA/uKLJUXXkYJCSFJesFlwXFTwXPmy+6sT8ocnKXO5LddXpi+e2cRISO/Wxk2vMePUx7yEeoVDyHccI/Za/TyexEIroOB60Ub3Ej9dF2+uh/hhWOU1/jRQVBd0b6kL+8MrmUaxBPC5DfTScJvpyPe4hn+zD/04T7edLmU+G+3nIRxVDD8sw8e7wuhEwZGfkV9+pnBdUyDyELOW4xg8gWbmPn4gnxkH3/mCGMJToTkLYqOVQ/HflyYuEJ4gS23DmJ2wP3P0o25m/Bv2kf2uetD8EnzJr0197yD0NoWXMM0iSuE0TrHlu5BBN5LOPx5k+W337+DI8qVri777FwcfS3rnkNNL5Gh745AfCGMOR3mX4R55xbU9+9FePQgQu8hVL0fGsCW6nFb76PSwm1lO5ePfID6vj2oV27G/IJFJpUPfWckmiPEh2+ABZnfyyguPco+0Sb6myzBp/lC/mMkIYIkRJCECJIQQRIiSEIESYggCREkIYIkRJCECJIQQRIiSEIESYggCREkIYIkRJCECIyQ9AdVJjF/UOVzgs0ksuyzPwG/49Cob/9nUAAAAABJRU5ErkJggg==">
     <span class="wordmark">OXY<b>MP</b></span>
   </div>
 
