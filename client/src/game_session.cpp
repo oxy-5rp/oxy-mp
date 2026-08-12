@@ -132,6 +132,13 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
         [&mail = mail_](shared::AdminCommand command, shared::PlayerId target,
                         shared::Vec3 position) { mail.postAdmin(command, target, position); });
 
+    // Сигнатура разрешается в четырёхбайтное смещение внутри инструкции, а сама
+    // инструкция начинается на три байта раньше: `mov [признак], sil` — это два
+    // байта кода плюс байт с описанием операндов.
+    if (auto* const displacement = addresses.pointerTo<std::uint8_t*>("netgame_teardown_write");
+        displacement != nullptr) {
+        teardownSite_ = displacement - 3;
+    }
 }
 
 std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& addresses,
@@ -677,6 +684,21 @@ void GameSession::teleportSafely(int ped, shared::Vec3 destination, float headin
 }
 
 void GameSession::holdSession() {
+    // Ловушка ставится вместе с первой просьбой и один раз. Она не вмешивается:
+    // игра выполняет ту же инструкцию, что и без неё, — но мы узнаём, кто её
+    // выполнил, а без этого причина выхода из сессии остаётся неизвестной.
+    if (teardownWatch_ == nullptr && teardownSite_ != nullptr && !netSession_.asked()) {
+        std::string error;
+
+        teardownWatch_ = game::ExecuteWatch::install(teardownSite_,
+                                                     game::ScriptTick::gameThreadId(),
+                                                     "выключение признака сетевой игры", error);
+
+        if (teardownWatch_ == nullptr) {
+            spdlog::debug("ловушка на выключение признака не поставлена: {}", error);
+        }
+    }
+
     netSession_.host(settings_.sessionMode);
 
     // Повторная просьба, если сессия всё-таки легла. Раньше она была главным

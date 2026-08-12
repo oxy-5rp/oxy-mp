@@ -93,10 +93,17 @@ target_link_libraries(oxymp_cefsub PRIVATE oxymp::options oxymp::cef)
 # папкам незачем.
 set(OXYMP_CEF_STAGE "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/cef")
 
+# copy_directory_if_different, а не copy_directory, и это не мелочь: libcef.dll
+# весит четверть гигабайта и лежит загруженной в запущенной игре. Безусловное
+# копирование переписывало её на каждой сборке — и упиралось в отказ доступа,
+# стоило игре быть открытой. Сборка падала на ровном месте, ничего при этом не
+# собирая заново.
 add_custom_target(oxymp_cef_runtime ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${OXYMP_CEF_STAGE}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${OXYMP_CEF_ROOT}/Release" "${OXYMP_CEF_STAGE}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${OXYMP_CEF_ROOT}/Resources" "${OXYMP_CEF_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+            "${OXYMP_CEF_ROOT}/Release" "${OXYMP_CEF_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+            "${OXYMP_CEF_ROOT}/Resources" "${OXYMP_CEF_STAGE}"
     # Библиотека-заглушка нужна только сборке: рядом с игроком ей делать нечего.
     COMMAND ${CMAKE_COMMAND} -E rm -f "${OXYMP_CEF_STAGE}/libcef.lib"
     COMMENT "Раскладка хозяйства CEF"
