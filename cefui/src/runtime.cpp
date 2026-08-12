@@ -85,7 +85,7 @@ bool startRuntime(const std::wstring& root, std::string& error) {
 
     g_started.store(true);
 
-    spdlog::info("CEF поднят: {}", directory.string());
+    spdlog::debug("CEF поднят: {}", directory.string());
     return true;
 }
 

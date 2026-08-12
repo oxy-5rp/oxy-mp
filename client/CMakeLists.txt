@@ -41,7 +41,6 @@ if(WIN32)
         src/game/loaded_image.cpp
         src/game/native_table.cpp
         src/game/net_session.cpp
-        src/game/network_bail.cpp
         src/game/network_game.cpp
         src/game/noclip.cpp
         src/game/nameplates.cpp
@@ -55,6 +54,7 @@ if(WIN32)
         src/game/session_state.cpp
         src/game/script_startup.cpp
         src/game/story.cpp
+        src/game/streaming.cpp
         src/game/script_tick.cpp
         src/game/text_entry.cpp
         src/game/ui_layer.cpp

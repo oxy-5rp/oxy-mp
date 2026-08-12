@@ -129,7 +129,7 @@ Window::Window() noexcept {
         spdlog::warn("значок не найден в ресурсах модуля — окну останется рокстаровский");
     }
 
-    spdlog::info("окно игры найдено: {}", static_cast<const void*>(window_));
+    spdlog::debug("окно игры найдено: {}", static_cast<const void*>(window_));
 }
 
 void Window::apply(const std::string& title) {
@@ -158,7 +158,7 @@ void Window::apply(const std::string& title) {
         }
 
         lostReported_ = false;
-        spdlog::info("окно игры найдено заново: {}", static_cast<const void*>(window_));
+        spdlog::debug("окно игры найдено заново: {}", static_cast<const void*>(window_));
     }
 
     const std::wstring wanted = widen(title);
@@ -187,7 +187,7 @@ void Window::apply(const std::string& title) {
                               SMTO_ABORTIFHUNG | SMTO_NORMAL, kMessageTimeout, nullptr);
 
         if (applied_ != wanted) {
-            spdlog::info("заголовок окна игры: \"{}\"", title);
+            spdlog::debug("заголовок окна игры: \"{}\"", title);
             applied_ = wanted;
         }
     }
@@ -202,7 +202,7 @@ void Window::apply(const std::string& title) {
                               SMTO_ABORTIFHUNG | SMTO_NORMAL, kMessageTimeout, nullptr);
 
         iconApplied_ = true;
-        spdlog::info("значок окна игры заменён");
+        spdlog::debug("значок окна игры заменён");
     }
 }
 

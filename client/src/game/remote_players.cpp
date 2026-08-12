@@ -280,7 +280,7 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
         invokeNative<void>(canRagdoll_, ped, true);
     }
 
-    spdlog::info("игрок {} ({}) показан персонажем {}", player.id, player.nickname, ped);
+    spdlog::debug("игрок {} ({}) показан персонажем {}", player.id, player.nickname, ped);
     return ped;
 }
 
@@ -316,7 +316,7 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
             continue;
         }
 
-        spdlog::info("игрок {} ушёл, персонаж {} убран", it->first, it->second.ped);
+        spdlog::debug("игрок {} ушёл, персонаж {} убран", it->first, it->second.ped);
         remove(it->second.ped);
         it = puppets_.erase(it);
     }
@@ -401,7 +401,7 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     invokeNative<void>(clearTasks_, puppet.ped);
     puppet.taskedAt = 0;
 
-    spdlog::info("игрок {} {}", player.id, dead ? "погиб" : "снова жив");
+    spdlog::debug("игрок {} {}", player.id, dead ? "погиб" : "снова жив");
 }
 
 void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player) const {
@@ -445,7 +445,7 @@ void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player) const {
         invokeNative<void>(setIntoVehicle_, puppet.ped, vehicle, static_cast<int>(player.state.seat));
     }
 
-    spdlog::info("игрок {} сел в машину игрока {} на место {}", player.id,
+    spdlog::debug("игрок {} сел в машину игрока {} на место {}", player.id,
                  player.state.vehicleOwner, static_cast<int>(player.state.seat));
 }
 

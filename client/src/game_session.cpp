@@ -111,6 +111,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       appearance_(table),
       respawn_(table),
       noclip_(table),
+      streaming_(table),
       vehicles_(table),
       remotePlayers_(table, vehicles_),
       nameplates_(table, hud_),
@@ -199,17 +200,6 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
             spdlog::error("поднятие сессии заказано, но её точки входа не разрешились");
         }
 
-        // Перехват выхода ставится здесь, задолго до первой просьбы поднять
-        // сессию, и это не запас времени ради запаса: сессия ложится через
-        // четверть секунды после подъёма, и ставить перехват в тот же кадр —
-        // значит опоздать.
-        std::string bailError;
-
-        session->networkBail_ = game::NetworkBail::install(addresses, bailError);
-        if (session->networkBail_ == nullptr) {
-            spdlog::error("выход из сессии не перехвачен, и сессия проживёт доли секунды: {}",
-                          bailError);
-        }
     }
     if (session->settings_.forceNetworkGame != game::NetworkGame::Fake::None &&
         !session->networkGame_.ready()) {
@@ -264,6 +254,11 @@ void GameSession::onFrame(bool ownsResources) {
     // перехода виден только отсюда.
     networkGame_.reportChanges();
 
+    // Отметка о живом кадре. По ней интерфейс понимает, что игра не стоит: при
+    // открытом меню паузы тик не идёт вовсе, и уголок, нарисованный поверх меню,
+    // застыл бы на последнем состоянии.
+    feed_.beat();
+
     reportSessionState();
     reportPause();
     publishStage();
@@ -277,13 +272,13 @@ void GameSession::reportPause() {
     }
 
     if (!measurement->tickRan()) {
-        spdlog::info("меню паузы закрылось: наш тик за это время не пришёл ни разу — "
-                     "снимать паузу изнутри тика некому");
+        spdlog::debug("меню паузы закрылось: наш тик за это время не пришёл ни разу — "
+                      "снимать паузу изнутри тика некому");
         return;
     }
 
-    spdlog::info("меню паузы закрылось: наших кадров {}, игровое время продвинулось на {} мс — "
-                 "мир {}",
+    spdlog::debug("меню паузы закрылось: наших кадров {}, игровое время продвинулось на {} мс — "
+                  "мир {}",
                  measurement->frames, measurement->gameTime,
                  measurement->worldFroze() ? "стоял" : "шёл");
 }
@@ -305,7 +300,7 @@ void GameSession::reportSessionState() {
     sessionKnown_ = true;
     sessionStarted_ = started;
 
-    spdlog::info("игра считает, что сетевая сессия {}", started ? "начата" : "не начата");
+    spdlog::debug("игра считает, что сетевая сессия {}", started ? "начата" : "не начата");
 }
 
 void GameSession::publishStage() {
@@ -426,7 +421,7 @@ void GameSession::advance() {
         const Clock::time_point now = Clock::now();
         if (worldReadyAt_ == Clock::time_point{}) {
             worldReadyAt_ = now;
-            spdlog::info("игрок в мире, выжидаем");
+            spdlog::debug("игрок в мире, выжидаем");
             return;
         }
         if (now - worldReadyAt_ < kWorldSettle) {
@@ -434,7 +429,7 @@ void GameSession::advance() {
         }
 
         stage_ = Stage::ReplacingModel;
-        spdlog::info("меняем модель игрока");
+        spdlog::debug("меняем модель игрока");
         return;
     }
 
@@ -494,6 +489,21 @@ void GameSession::advance() {
         const int player = player_.id();
         const int ped = player_.ped();
         const bool dead = respawn_.dead(player);
+
+        // Мир вокруг игрока держится подгруженным всегда, а не только после
+        // переноса: игра вправе выгрузить то, чего он сейчас не касается, — и
+        // тогда под ним пропадает земля.
+        streaming_.keepCollisionAround(ped);
+
+        // Пока мир вокруг точки переноса не появился, персонажа держат
+        // замороженным: отпущенный, он полетит сквозь незагруженную землю.
+        if (streaming_.loading()) {
+            player_.freeze(ped, true);
+
+            if (streaming_.advance()) {
+                player_.freeze(ped, false);
+            }
+        }
 
         handleMenu(player, ped);
         applyOrders(ped);
@@ -653,19 +663,26 @@ void GameSession::applyIncomingDamage(int ped) {
     }
 }
 
-void GameSession::holdSession() {
-    // Держать начинаем до первой просьбы: игра выходит из сессии сама, и первый
-    // же её выход случается раньше, чем мы успеем спросить, поднялась ли она.
-    if (networkBail_ != nullptr) {
-        networkBail_->hold(true);
+void GameSession::teleportSafely(int ped, shared::Vec3 destination, float heading) {
+    if (ped == 0) {
+        return;
     }
 
+    player_.teleport(ped, destination);
+    player_.setHeading(ped, heading);
+
+    // Подгрузка начинается после переноса, а не до: сфера строится вокруг точки,
+    // где игрок уже стоит, и игра подгружает её в первую очередь.
+    streaming_.beginLoad(destination);
+}
+
+void GameSession::holdSession() {
     netSession_.host(settings_.sessionMode);
 
-    // Повторная просьба, если сессия всё-таки легла. Раньше это было главным
-    // средством — сессию поднимали заново по сорок раз, — и главным оно быть
-    // перестало: теперь игру просто не выпускают. Но осталось: не всякий выход
-    // проходит через перехваченную дверь.
+    // Повторная просьба, если сессия всё-таки легла. Раньше она была главным
+    // средством и работала против себя: сессию просили поднять каждый кадр, пока
+    // та поднималась, и от этого она и разваливалась. С выдержкой она стала тем,
+    // чем должна быть, — запасным выходом, который почти никогда не нужен.
     netSession_.rehostIfDropped(settings_.sessionMode, sessionState_.started());
 }
 
@@ -679,8 +696,7 @@ void GameSession::spawn() {
     // Пока это не снято, он стоит на месте, что бы игрок ни нажимал.
     player_.release(ped);
 
-    player_.teleport(ped, kSpawnPoint);
-    player_.setHeading(ped, kSpawnHeading);
+    teleportSafely(ped, kSpawnPoint, kSpawnHeading);
 
     // Запрет населения касается только новых прохожих и машин: созданные до
     // него остаются на местах, и убрать их нужно отдельно.
@@ -729,7 +745,7 @@ void GameSession::sweepScripts() {
         sweepLogged_ = true;
         sweepReportedAt_ = now;
 
-        spdlog::info("подавление работает: зачисток {}, гасим сюжет и телефон{}", sweeps_,
+        spdlog::debug("подавление работает: зачисток {}, гасим сюжет и телефон{}", sweeps_,
                      settings_.hostSession ? "; сетевые оставлены — они ведут сессию"
                                            : " и GTA Online");
     }
@@ -770,6 +786,7 @@ void GameSession::handleDeath(int player) {
     }
 
     respawn_.resurrect(kSpawnPoint, kSpawnHeading, player);
+    streaming_.beginLoad(kSpawnPoint);
     world_.clearArea(kSpawnPoint, kClearRadius);
 
     player_.release(player_.ped());

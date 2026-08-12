@@ -306,7 +306,7 @@ bool OverlayRenderer::ensurePipeline(IDXGISwapChain* swapchain) {
         return false;
     }
 
-    spdlog::info("интерфейс рисуется прямо в кадр игры");
+    spdlog::debug("интерфейс рисуется прямо в кадр игры");
     return true;
 }
 

@@ -147,6 +147,14 @@ void Player::setHeading(int ped, float degrees) const {
     invokeNative<void>(setHeading_, ped, degrees);
 }
 
+void Player::freeze(int ped, bool frozen) const {
+    if (freeze_ == nullptr || ped == 0) {
+        return;
+    }
+
+    invokeNative<void>(freeze_, ped, frozen);
+}
+
 shared::Vec3 Player::aimPoint(int ped) const {
     const shared::Vec3 position = coords(ped);
 

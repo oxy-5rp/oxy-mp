@@ -3,6 +3,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 #include <oxymp/shared/status/load_stage.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -59,6 +60,14 @@ public:
 
     /// Игрок в мире: экран загрузки может уходить.
     void setReady();
+
+    /// Отметка о том, что игровой кадр отработал.
+    ///
+    /// Ею интерфейс узнаёт, что игра жива. Узнать это иначе он не может, а знать
+    /// обязан: пока открыто меню паузы, скриптовый тик не идёт вовсе — и уголок,
+    /// нарисованный поверх меню, застыл бы на последнем состоянии. По давности
+    /// последней отметки видно, что игра остановилась, и интерфейс убирается сам.
+    void beat();
     void setConnection(const Connection& connection);
     void setRoster(std::vector<Participant> roster);
 
@@ -128,6 +137,9 @@ private:
 
     shared::LoadStage stage_ = shared::LoadStage::Booting;
     bool ready_ = false;
+
+    /// Когда игровой кадр отработал в последний раз.
+    std::chrono::steady_clock::time_point beatAt_{};
 
     bool menuOpen_ = false;
     std::string menuTitle_;

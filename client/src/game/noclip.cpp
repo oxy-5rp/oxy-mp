@@ -176,6 +176,29 @@ shared::Vec3 Noclip::directionFromGeometry(shared::Vec3 position) const {
     return normalised(towards);
 }
 
+/// Направление, положенное на горизонт.
+///
+/// Именно им и летают. Направление взгляда годилось бы, будь камера там же, где
+/// глаза, — но она висит позади и выше персонажа и смотрит на него сверху вниз:
+/// градусов на десять даже тогда, когда игрок держит её ровно. Полёт «вперёд»
+/// по такому направлению всё время сносит в землю, и это и было тем, что
+/// оставалось кривым после всех исправлений: направление считалось верно, а
+/// летело не туда, куда игрок целился.
+///
+/// Вверх и вниз теперь отдельными клавишами. Так устроен свободный полёт во всех
+/// знакомых средствах отладки, и причина у всех одна и та же.
+shared::Vec3 flatten(const shared::Vec3& direction) {
+    const shared::Vec3 flat{direction.x, direction.y, 0.0F};
+
+    if (length(flat) < kTinyLength) {
+        // Взгляд строго вниз или строго вверх: горизонтального направления у
+        // него нет вовсе, и брать его неоткуда.
+        return {};
+    }
+
+    return normalised(flat);
+}
+
 shared::Vec3 Noclip::lookDirection(shared::Vec3 position) {
     const shared::Vec3 fromAngles = directionFromAngles();
     const shared::Vec3 fromGeometry = directionFromGeometry(position);
@@ -201,7 +224,7 @@ shared::Vec3 Noclip::lookDirection(shared::Vec3 position) {
     if (!reported_) {
         reported_ = true;
 
-        spdlog::info("свободный полёт: углы дают ({:.2f} {:.2f} {:.2f}), геометрия — "
+        spdlog::debug("свободный полёт: углы дают ({:.2f} {:.2f} {:.2f}), геометрия — "
                      "({:.2f} {:.2f} {:.2f}), сходство {:.2f} — берём {}",
                      fromAngles.x, fromAngles.y, fromAngles.z, fromGeometry.x, fromGeometry.y,
                      fromGeometry.z, agreement, agree ? "углы" : "геометрию");
@@ -236,20 +259,18 @@ void Noclip::update(int ped) {
         lastDirection = looking;
     }
 
-    const shared::Vec3 forward = lastDirection;
-    const shared::Vec3 right = rightOf(forward);
+    const shared::Vec3 forward = flatten(lastDirection);
+    const shared::Vec3 right = rightOf(lastDirection);
 
     shared::Vec3 move{};
 
     if (keyDown('W')) {
         move.x += forward.x;
         move.y += forward.y;
-        move.z += forward.z;
     }
     if (keyDown('S')) {
         move.x -= forward.x;
         move.y -= forward.y;
-        move.z -= forward.z;
     }
     if (keyDown('D')) {
         move.x += right.x;
@@ -289,7 +310,7 @@ void Noclip::update(int ped) {
                        false, true);
 
     // Персонаж разворачивается по камере, иначе он летит боком.
-    invokeNative<void>(setHeading_, ped, headingOf(forward));
+    invokeNative<void>(setHeading_, ped, headingOf(lastDirection));
 }
 
 } // namespace oxymp::client::game

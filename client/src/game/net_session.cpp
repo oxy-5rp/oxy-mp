@@ -106,13 +106,13 @@ bool NetSession::host(Mode mode) {
         asked_ = true;
         askedAt_ = std::chrono::steady_clock::now();
 
-        spdlog::warn("просим игру поднять одиночную сетевую сессию (попытка {})", attempts_);
+        spdlog::debug("просим игру поднять одиночную сетевую сессию (попытка {})", attempts_);
 
         // Довод — режим сессии. Ноль означает обычный, без особых условий:
         // тот же, которым игра пользуется сама, уводя игрока в сессию на одного.
         invokeNative<void>(hostSolo_, 0);
 
-        spdlog::info("вызов одиночной сессии вернул управление");
+        spdlog::debug("вызов одиночной сессии вернул управление");
         return true;
     }
 
@@ -125,14 +125,14 @@ bool NetSession::host(Mode mode) {
     // по ходу запуска игры, и попроси мы раньше — просьба ушла бы в никуда, а
     // выглядело бы это как «функция не работает».
     if (!managerReady()) {
-        spdlog::warn("распорядителя сети ещё нет — поднимать сессию рано");
+        spdlog::debug("распорядителя сети ещё нет — поднимать сессию рано");
         return false;
     }
 
     asked_ = true;
     askedAt_ = std::chrono::steady_clock::now();
 
-    spdlog::warn("просим игру поднять сессию: видимость {}, до {} игроков, признаки {}",
+    spdlog::debug("просим игру поднять сессию: видимость {}, до {} игроков, признаки {}",
                  kPrivateVisibility, kMaxPlayers, kPlainFlags);
 
     // Дальше — вызов вслепую. Что игра сделает без живого слоя Rockstar Online,
@@ -140,7 +140,7 @@ bool NetSession::host(Mode mode) {
     // ответ — «повисла внутри».
     host_(kPrivateVisibility, kMaxPlayers, kPlainFlags);
 
-    spdlog::info("вызов поднятия сессии вернул управление");
+    spdlog::debug("вызов поднятия сессии вернул управление");
 
     return true;
 }

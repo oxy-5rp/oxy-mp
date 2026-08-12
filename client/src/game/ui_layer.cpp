@@ -186,7 +186,7 @@ void UiLayer::pump() {
             state_->height = height;
 
             state_->browser->resize(width, height);
-            spdlog::info("страница интерфейса подогнана: {}x{}", width, height);
+            spdlog::debug("страница интерфейса подогнана: {}x{}", width, height);
         }
     }
 

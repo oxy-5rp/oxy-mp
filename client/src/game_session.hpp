@@ -8,7 +8,6 @@
 #include "game/hud.hpp"
 #include "game/nameplates.hpp"
 #include "game/net_session.hpp"
-#include "game/network_bail.hpp"
 #include "game/network_game.hpp"
 #include "game/noclip.hpp"
 #include "game/online_map.hpp"
@@ -19,6 +18,7 @@
 #include "game/session_state.hpp"
 #include "game/script_tick.hpp"
 #include "game/story.hpp"
+#include "game/streaming.hpp"
 #include "game/text_entry.hpp"
 #include "game/vehicles.hpp"
 #include "game/window.hpp"
@@ -157,6 +157,12 @@ private:
     /// Держит игру в поднятой сетевой сессии.
     void holdSession();
 
+    /// Переносит игрока и дожидается, пока вокруг точки появится мир.
+    ///
+    /// Пока мир не появился, персонаж держится замороженным: под ним нет земли,
+    /// и отпущенный он полетит сквозь неё.
+    void teleportSafely(int ped, shared::Vec3 destination, float heading);
+
 
     /// Применяет к своему персонажу урон, о котором сообщил сервер.
     void applyIncomingDamage(int ped);
@@ -191,6 +197,7 @@ private:
     game::Appearance appearance_;
     game::Respawn respawn_;
     game::Noclip noclip_;
+    game::Streaming streaming_;
 
     /// Объявлены в этом порядке не случайно: машины строятся раньше игроков,
     /// потому что игроки на них ссылаются.
@@ -212,11 +219,6 @@ private:
     /// может вызвать onFrame в любое мгновение.
     std::unique_ptr<game::ScriptTick> tick_;
 
-    /// Перехват выхода из сессии.
-    ///
-    /// Живёт, только пока сессию поднимаем: это он не даёт игре выйти из неё
-    /// через долю секунды после подъёма.
-    std::unique_ptr<game::NetworkBail> networkBail_;
 
     Stage stage_ = Stage::WaitingForPlayer;
 

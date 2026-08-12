@@ -43,6 +43,9 @@ std::string linesToJson(const std::vector<UiFeed::Line>& lines) {
     return collected;
 }
 
+/// Насколько давно должен был отработать кадр, чтобы счесть игру остановленной.
+constexpr auto kTickTimeout = std::chrono::milliseconds{250};
+
 } // namespace
 
 void UiFeed::trim(std::vector<Line>& lines) {
@@ -69,6 +72,11 @@ void UiFeed::setStage(shared::LoadStage stage) {
 void UiFeed::setReady() {
     const std::lock_guard guard{mutex_};
     ready_ = true;
+}
+
+void UiFeed::beat() {
+    const std::lock_guard guard{mutex_};
+    beatAt_ = std::chrono::steady_clock::now();
 }
 
 void UiFeed::setConnection(const Connection& connection) {
@@ -149,9 +157,16 @@ void UiFeed::forgetDelivered() {
 std::string UiFeed::takeUpdate() {
     const std::lock_guard guard{mutex_};
 
+    // Жива ли игра, видно по давности последнего кадра. Четверть секунды — это
+    // пятнадцать пропущенных кадров: столько не пропускает даже самая тяжёлая
+    // подгрузка, а меню паузы останавливает тик насовсем.
+    const bool alive = beatAt_ != std::chrono::steady_clock::time_point{} &&
+                       std::chrono::steady_clock::now() - beatAt_ < kTickTimeout;
+
     std::string message = std::format(
         R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
-        R"("consoleVisible":{},"inputActive":{},"inputText":"{}","stage":{},"ready":{})",
+        R"("consoleVisible":{},"inputActive":{},"inputText":"{}","stage":{},"ready":{},)"
+        R"("alive":{})",
         connection_.state, connection_.players, connection_.latencyMilliseconds,
         // Отсутствие номера доходит до страницы отрицательным числом, а не
         // огромным: наибольшее беззнаковое выглядит как настоящий номер игрока,
@@ -160,7 +175,8 @@ std::string UiFeed::takeUpdate() {
             ? -1
             : static_cast<std::int64_t>(connection_.playerId),
         connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0, inputActive_ ? 1 : 0,
-        escape(inputText_), static_cast<unsigned int>(stage_), ready_ ? 1 : 0);
+        escape(inputText_), static_cast<unsigned int>(stage_), ready_ ? 1 : 0,
+        alive ? 1 : 0);
 
     if (sessionChanged_) {
         sessionChanged_ = false;

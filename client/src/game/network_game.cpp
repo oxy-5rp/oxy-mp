@@ -35,7 +35,7 @@ NetworkGame::NetworkGame(const EngineAddresses& addresses) noexcept {
             continue;
         }
 
-        spdlog::info("признак «{}» найден по {:#x}, игра держит в нём {}", describe(flag),
+        spdlog::debug("признак «{}» найден по {:#x}, игра держит в нём {}", describe(flag),
                      reinterpret_cast<std::uintptr_t>(byte.address), *byte.address);
     }
 }
@@ -145,7 +145,7 @@ void NetworkGame::endHolding() {
         write(byte, byte.original, flag);
     }
 
-    spdlog::info("подделка сетевого состояния снята, признакам возвращены прежние значения");
+    spdlog::debug("подделка сетевого состояния снята, признакам возвращены прежние значения");
 }
 
 void NetworkGame::reportChanges() {
@@ -165,9 +165,9 @@ void NetworkGame::reportChanges() {
         // отдельное: иначе не отличить «игра выставила признак» от «мы впервые
         // посмотрели».
         if (!byte.lastSeenKnown) {
-            spdlog::info("признак «{}»: сейчас {}", describe(flag), now);
+            spdlog::debug("признак «{}»: сейчас {}", describe(flag), now);
         } else {
-            spdlog::info("признак «{}»: {} → {}{}", describe(flag), byte.lastSeen, now,
+            spdlog::debug("признак «{}»: {} → {}{}", describe(flag), byte.lastSeen, now,
                          holding_ ? " (при включённой подделке)" : "");
         }
 

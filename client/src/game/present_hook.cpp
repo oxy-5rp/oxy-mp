@@ -261,7 +261,7 @@ std::unique_ptr<PresentHook> PresentHook::install(Callback onPresent, ResizeCall
     // освобождать его состояние немедленно нельзя.
     state.release();
 
-    spdlog::info("перехват показа кадра поставлен");
+    spdlog::debug("перехват показа кадра поставлен");
     return hook;
 }
 
@@ -283,7 +283,7 @@ PresentHook::~PresentHook() {
     g_state->onPresent = nullptr;
     g_state->onResize = nullptr;
 
-    spdlog::info("рисование интерфейса в кадр прекращено");
+    spdlog::debug("рисование интерфейса в кадр прекращено");
 }
 
 } // namespace oxymp::client::game

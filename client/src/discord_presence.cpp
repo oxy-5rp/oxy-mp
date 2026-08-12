@@ -116,7 +116,7 @@ bool DiscordPresence::connect() {
             continue;
         }
 
-        spdlog::info("Discord найден на канале {}", index);
+        spdlog::debug("Discord найден на канале {}", index);
         return true;
     }
 
@@ -175,7 +175,7 @@ void DiscordPresence::pump() {
             spdlog::warn("Discord отказал: {}", body);
         } else if (!confirmed_) {
             confirmed_ = true;
-            spdlog::info("Discord принял показ: {}", body);
+            spdlog::debug("Discord принял показ: {}", body);
         }
     }
 }

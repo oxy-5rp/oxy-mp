@@ -472,6 +472,25 @@ inline constexpr std::uint64_t kSetBigmapActive = 0XC2F71CC2AB70CFB1;
 /// SET_PAUSE_MENU_ACTIVE, канонический хеш 0XDF47FC56C71569CF.
 inline constexpr std::uint64_t kSetPauseMenuActive = 0X915FA95E87D33FF5;
 
+/// SET_ENTITY_LOAD_COLLISION_FLAG, канонический хеш 0X0DC7CABAB1E9B67E.
+///
+/// Просит игру держать столкновения подгруженными вокруг сущности. Без этого
+/// мир вокруг игрока бывает нарисован, но не осязаем — и сквозь него проваливаются.
+inline constexpr std::uint64_t kSetEntityLoadCollisionFlag = 0X788F35D395511DFE;
+
+/// NEW_LOAD_SCENE_START_SPHERE, канонический хеш 0XACCFB4ACF53551B0.
+///
+/// Заставляет игру подгрузить всё вокруг точки, не дожидаясь, пока туда доедет
+/// игрок. Ради переносов и заведено: перенесённый в неподготовленное место
+/// оказывается над пустотой.
+inline constexpr std::uint64_t kNewLoadSceneStartSphere = 0X4A3280817398D754;
+
+/// IS_NEW_LOAD_SCENE_LOADED, канонический хеш 0X01B8247A7A8B9AD1.
+inline constexpr std::uint64_t kIsNewLoadSceneLoaded = 0X9E2D35FA908F57B4;
+
+/// NEW_LOAD_SCENE_STOP, канонический хеш 0XC197616D221FF4A4.
+inline constexpr std::uint64_t kNewLoadSceneStop = 0X6981C3213B841071;
+
 /// SET_PED_ARMOUR, канонический хеш 0XCEA04D83135264CC.
 inline constexpr std::uint64_t kSetPedArmour = 0X10A676E622A468AA;
 

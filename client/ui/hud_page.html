@@ -49,10 +49,20 @@
      около десятка секунд, и всё это время видна её собственная заставка. Так и
      задумано — закрывать её нечем, да и незачем. */
 
+  /* Угол под Social Club оставлен незакрытым.
+
+     Кнопка Home и уведомления Social Club рисуются самой игрой в левом верхнем
+     углу, а мы рисуемся поверх всего кадра — и закрывали их собой. Вырез
+     делается в фоне, а не в содержимом: брендинг и полоса стоят по центру и
+     угла не касаются. */
   .loading {
     position: fixed;
     inset: 0;
     background: #06080b;
+    clip-path: polygon(
+      0 150px, 460px 150px, 460px 0,
+      100% 0, 100% 100%, 0 100%
+    );
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -125,6 +135,15 @@
   .loading .meta b { color: #8894a8; font-weight: 500; }
 
   /* --- Уголок в правом верхнем углу ------------------------------------- */
+
+  /* Уголок появляется вместе с игроком в мире и исчезает, стоит игре
+     остановиться. Останавливается она на меню паузы: скриптовый тик при этом не
+     идёт, и уголок, оставленный на экране, застыл бы поверх меню на последнем
+     своём состоянии. */
+  body:not(.ready) .hud,
+  body:not(.alive) .hud,
+  body:not(.ready) .chat,
+  body:not(.alive) .chat { display: none; }
 
   .hud {
     position: fixed;
@@ -207,7 +226,7 @@
   .chat {
     position: fixed;
     left: 16px;
-    bottom: 16px;
+    top: 16px;
     width: 520px;
     max-height: 300px;
     display: flex;
@@ -217,7 +236,7 @@
 
   /* Пустой чат не рисуется вовсе: тёмный прямоугольник без единой строки
      закрывал бы собой угол экрана просто так. */
-  body:not(.has-chat):not(.typing) .chat { display: none; }
+  body:not(.has-chat):not(.typing) .chat { display: none !important; }
 
   .lines {
     overflow: hidden;
@@ -485,8 +504,10 @@
 
     // Список перестраивается, только когда он и правда изменился: меню
     // приходит целиком двадцать раз в секунду, а меняется от нажатия.
-    const signature = menu.title + ' ' + menu.selected + ' ' +
-      menu.items.map(item => item.label + '' + item.value).join('');
+    // Подпись списка — обычный JSON: собранная склейкой через служебные
+    // символы, она однажды уже принесла в страницу настоящие нулевые байты, а
+    // те обрывали её встроенный текст на середине.
+    const signature = JSON.stringify([menu.title, menu.selected, menu.items]);
 
     if (signature === menuSignature) {
       return;
@@ -569,6 +590,7 @@
       }
 
       document.body.classList.toggle('ready', !!s.ready);
+      document.body.classList.toggle('alive', !!s.alive);
       document.body.classList.toggle('console', !!s.consoleVisible);
       document.body.classList.toggle('typing', !!s.inputActive);
       document.getElementById('typed').textContent = s.inputText || '';

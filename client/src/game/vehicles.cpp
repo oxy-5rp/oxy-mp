@@ -200,7 +200,7 @@ int Vehicles::spawn(const shared::VehicleState& state) {
         invokeNative<void>(modelNoLongerNeeded_, state.model);
     }
 
-    spdlog::info("машина игрока {} показана номером {}", state.owner, vehicle);
+    spdlog::debug("машина игрока {} показана номером {}", state.owner, vehicle);
     return vehicle;
 }
 
@@ -265,7 +265,7 @@ void Vehicles::sync(const std::vector<shared::VehicleState>& vehicles) {
             continue;
         }
 
-        spdlog::info("игрок {} вышел из машины, номер {} убран", it->first, it->second.vehicle);
+        spdlog::debug("игрок {} вышел из машины, номер {} убран", it->first, it->second.vehicle);
         remove(it->second.vehicle);
         it = puppets_.erase(it);
     }

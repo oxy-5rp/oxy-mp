@@ -142,7 +142,19 @@ void setUpLogging() {
         logger->flush_on(spdlog::level::debug);
 
         spdlog::set_default_logger(std::move(logger));
+
+        // Подробности — только в отладочной сборке.
+        //
+        // Журнал попадает к людям: его присылают, когда что-то не работает. В
+        // нём не должно быть ни адресов внутренностей игры, ни разбора её кода,
+        // ни строчки на каждый кадр — всё это нужно тому, кто чинит, и никому
+        // больше. Игроку в нём нужны ровно две вещи: дошло ли дело до игры и что
+        // сломалось, если не дошло.
+#ifdef NDEBUG
+        spdlog::set_level(spdlog::level::info);
+#else
         spdlog::set_level(spdlog::level::debug);
+#endif
     } catch (const spdlog::spdlog_ex&) {
         // Без журнала работать можно, падать из-за него — нельзя.
     }
@@ -358,7 +370,11 @@ bool probeNatives(const game::EngineAddresses& addresses) {
     spdlog::info("в таблице зарегистрировано нативов: {} (ожидание {} мс)",
                  table.registeredCount(), elapsed.count());
 
+    // Список хешей рядом с журналом — тоже только для отладки: игроку он не
+    // нужен, а вопросов вызывает много.
+#ifndef NDEBUG
     dumpNativeHashes(table);
+#endif
 
     // Проба самого вызова.
     //

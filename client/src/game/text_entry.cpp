@@ -75,7 +75,7 @@ std::unique_ptr<TextEntry> TextEntry::install(HWND window, std::string& error) {
         return nullptr;
     }
 
-    spdlog::info("перехват клавиатуры поставлен на окно {:#x}",
+    spdlog::debug("перехват клавиатуры поставлен на окно {:#x}",
                  reinterpret_cast<std::uintptr_t>(window));
 
     return entry;
