@@ -1,6 +1,6 @@
 #pragma once
 
-#include "image_source.hpp"
+#include <oxymp/gamesig/image_source.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -12,7 +12,7 @@ namespace oxymp::sigcheck::peheaders {
 struct Headers {
     /// База загрузки, записанная в самом образе.
     std::uint64_t imageBase = 0;
-    std::vector<Section> sections;
+    std::vector<gamesig::Section> sections;
 };
 
 /// Разбирает заголовки PE из начала образа.

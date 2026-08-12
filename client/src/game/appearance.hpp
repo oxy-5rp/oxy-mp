@@ -1,0 +1,92 @@
+#pragma once
+
+#include "native_table.hpp"
+
+#include <cstdint>
+
+namespace oxymp::client::game {
+
+/// Внешность местного игрока.
+///
+/// Одиночная игра выдаёт готового сюжетного персонажа — Майкла, Франклина или
+/// Тревора. Мультиплееру он не годится сразу по двум причинам. Во-первых, все
+/// игроки оказались бы на одно лицо из троих. Во-вторых, и это важнее, сюжетный
+/// персонаж принадлежит скриптам игры: пока он у игрока, завершение сюжетных
+/// скриптов уносит персонажа вместе с собой.
+///
+/// Поэтому игроку выдаётся сетевая заготовка mp_m_freemode_01 — тот самый
+/// «лысик», с которого начинают в RAGE MP. Она никому не принадлежит, и после
+/// замены сюжет можно гасить, ничего не опасаясь.
+///
+/// Вызывать можно только изнутри скриптового тика.
+class Appearance {
+public:
+    /// Ход замены.
+    enum class Progress {
+        /// Модель заказана, идёт загрузка.
+        Loading,
+
+        /// Модель поставлена, персонаж заменён.
+        Done,
+
+        /// Модель не загрузилась за отведённое время.
+        Failed,
+    };
+
+    explicit Appearance(const NativeTable& table) noexcept;
+
+    [[nodiscard]] bool ready() const noexcept;
+
+    /// Пишет в журнал адреса нативов, которыми пользуется замена.
+    ///
+    /// Единственный способ потом сопоставить смещение вылета в GTA5.exe с тем,
+    /// какой натив на нём стоял.
+    void describeHandlers() const;
+
+    /// Продвигает замену на шаг. Вызывать каждый кадр, пока не Done или Failed.
+    ///
+    /// Разбито на шаги, а не сделано одним вызовом с ожиданием, потому что ждать
+    /// внутри кадра нельзя: загрузка модели занимает десятки кадров, и цикл
+    /// ожидания просто подвесил бы игру.
+    [[nodiscard]] Progress advance(int player);
+
+    /// Отбирает у персонажа сюжетный голос.
+    ///
+    /// Модель мы меняем, а голос за ней не следует: он остаётся тем, что был у
+    /// сюжетного персонажа, и заготовка кричит при падении голосом Франклина.
+    /// Голос — отдельное свойство персонажа, и назначать его нужно отдельно.
+    void silenceStoryVoice(int ped) const;
+
+private:
+    /// Шаг замены.
+    ///
+    /// Шагов два, а не один, потому что новый персонаж появляется не в тот же
+    /// миг: SET_PLAYER_MODEL заказывает замену, а сам персонаж существует только
+    /// со следующего кадра. Одевать его раньше — значит одевать прежнего.
+    enum class Step {
+        LoadModel,
+        DressUp,
+    };
+
+    [[nodiscard]] std::uint32_t modelHash();
+
+    NativeHandler hashKey_ = nullptr;
+    NativeHandler requestModel_ = nullptr;
+    NativeHandler hasModelLoaded_ = nullptr;
+    NativeHandler setPlayerModel_ = nullptr;
+    NativeHandler defaultVariation_ = nullptr;
+    NativeHandler releaseModel_ = nullptr;
+    NativeHandler playerPedId_ = nullptr;
+    NativeHandler ambientVoice_ = nullptr;
+
+    std::uint32_t model_ = 0;
+    Step step_ = Step::LoadModel;
+
+    /// Сколько кадров модель уже загружается.
+    unsigned int waitedFrames_ = 0;
+
+    /// Сколько кадров прошло с замены персонажа.
+    unsigned int settledFrames_ = 0;
+};
+
+} // namespace oxymp::client::game

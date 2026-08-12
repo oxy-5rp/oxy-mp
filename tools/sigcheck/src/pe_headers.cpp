@@ -100,7 +100,7 @@ std::optional<Headers> parse(memscan::ByteView data, std::string& error) {
 
         const char* rawName = reinterpret_cast<const char*>(data.data() + entry);
 
-        Section section;
+        gamesig::Section section;
         // Имя секции занимает до восьми байт, завершающий ноль не гарантирован.
         section.name.assign(rawName, ::strnlen(rawName, kSectionNameLength));
         section.virtualSize = *virtualSize;

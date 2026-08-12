@@ -57,6 +57,104 @@ FetchContent_Declare(spdlog
 )
 FetchContent_MakeAvailable(spdlog)
 
+# MinHook — перехват функций игры.
+#
+# Нужен только клиенту: чтобы наш код получал управление внутри чужого процесса,
+# начало функции игры подменяется переходом на наш обработчик. Делать это руками
+# нельзя — под x64 придётся разбирать инструкции в начале функции, чтобы
+# перенести их в трамплин, и ошибка здесь даёт вылет без объяснений.
+#
+# Как и у ENet, собственный CMakeLists не используется: он объявляет древнюю
+# совместимость. Исходники перечислены явно.
+if(WIN32)
+    FetchContent_Declare(minhook
+        GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+        GIT_TAG        v1.3.3
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  cmake-build-is-not-used
+    )
+    FetchContent_MakeAvailable(minhook)
+
+    add_library(minhook STATIC
+        "${minhook_SOURCE_DIR}/src/buffer.c"
+        "${minhook_SOURCE_DIR}/src/hook.c"
+        "${minhook_SOURCE_DIR}/src/trampoline.c"
+        "${minhook_SOURCE_DIR}/src/hde/hde64.c"
+    )
+    add_library(minhook::minhook ALIAS minhook)
+
+    target_include_directories(minhook SYSTEM PUBLIC "${minhook_SOURCE_DIR}/include")
+
+    if(MSVC)
+        target_compile_options(minhook PRIVATE /w)
+    endif()
+endif()
+
+# WebView2 — движок Edge, которым рисуется наш интерфейс.
+#
+# Свой интерфейс приходится строить не средствами игры, и это не прихоть.
+# Замеряно на живой игре: скриптовый тик, единственная точка, откуда доступны
+# нативы рисования, доходит до клиента через шесть секунд после запуска
+# стартовых скриптов — когда заставка Rockstar, реклама GTA Online и страница
+# выбора режима уже позади. Нарисовать поверх них нативами нельзя ничем.
+#
+# Движков интерфейса два, и у каждого своё место.
+#
+# WebView2 — там, где страница живёт в своём окне: окно подключения лаунчера и
+# экран загрузки поверх игры. Он уже установлен в системе как часть Windows и
+# ничего с собой не тянет.
+#
+# CEF — внутри игры. Единственный из двух, кто умеет рисовать не в окно, а в
+# память: OnPaint отдаёт готовые точки, и мы кладём их в кадр игры текстурой.
+# WebView2 так не умеет вовсе, и обходной путь — снимок закадрового окна
+# средствами Windows — работал, но оставался обходным: лишнее окно, лишний
+# снимок и прозрачность, добытая порогом яркости вместо настоящего четвёртого
+# канала. Так же устроен интерфейс у RAGE MP и alt:V, и по той же причине.
+#
+# Пакет WebView2 распространяется только через NuGet и представляет собой
+# обычный zip. Собственной сборки в нём нет: заголовки и библиотека-загрузчик
+# описываются здесь целью, как у ENet и MinHook.
+if(WIN32)
+    FetchContent_Declare(webview2
+        URL      https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2903.40
+        URL_HASH SHA256=ef128016dd1e51c59178c827ed5b8aa3322c57afa8675d930f8109505542ad74
+    )
+    FetchContent_MakeAvailable(webview2)
+
+    add_library(webview2 INTERFACE)
+    add_library(webview2::webview2 ALIAS webview2)
+
+    target_include_directories(webview2 SYSTEM INTERFACE
+        "${webview2_SOURCE_DIR}/build/native/include"
+    )
+    target_link_libraries(webview2 INTERFACE
+        "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
+    )
+
+    # CEF — тот самый Chromium, что стоит за интерфейсом FiveM, RAGE MP и alt:V.
+    #
+    # Берётся готовая сборка Spotify — та же, что берут они: собирать Chromium
+    # самим значит завести у себя многочасовую сборку ради того, что раздаётся
+    # готовым.
+    #
+    # Разновидность minimal: в ней нет отладочных двоичных файлов и примеров —
+    # только то, что нужно для работы, и исходники обёртки, которые обязан
+    # собрать сам потребитель. Обёртка потому и в исходниках, что разговаривает
+    # с libcef.dll по языку C: собранная чужим компилятором, она не подошла бы
+    # никому.
+    #
+    # Версия закреплена: CEF меняет свой прикладной язык от выпуска к выпуску, и
+    # «свежая» здесь означает «однажды перестанет собираться сама по себе».
+    FetchContent_Declare(cef
+        URL      https://cef-builds.spotifycdn.com/cef_binary_144.0.32%2Bg5ce7d26%2Bchromium-144.0.7559.258_windows64_minimal.tar.bz2
+        URL_HASH SHA1=75dd3287e44c7026f20f2d7d69ec3a4337b2656b
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(cef)
+
+    set(OXYMP_CEF_ROOT "${cef_SOURCE_DIR}" CACHE INTERNAL "Каталог дистрибутива CEF")
+endif()
+
 if(OXYMP_BUILD_TESTS)
     FetchContent_Declare(Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git

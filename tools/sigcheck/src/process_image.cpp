@@ -69,6 +69,43 @@ std::optional<DWORD> findProcessId(const std::wstring& processName) {
     return std::nullopt;
 }
 
+/// Имя нашего модуля внутри игры.
+constexpr const wchar_t* kClientModuleName = L"oxymp-client.dll";
+
+/// Внедрён ли в процесс наш модуль.
+///
+/// Спрашивается ради честности отчёта. Клиент правит код игры прямо на месте —
+/// например переписывает развилку страницы выбора режима на безусловный
+/// переход, — и после этого сигнатура, снятая с исходных байтов, там не
+/// находится. Сама по себе такая строка выглядит как сломавшаяся сигнатура,
+/// хотя сломали её мы сами и намеренно.
+///
+/// Молчать об этом нельзя: отчёт, в котором привычно горит красным заведомо
+/// исправная сигнатура, приучает не смотреть на красное вовсе — и настоящая
+/// поломка пройдёт незамеченной.
+bool clientModuleLoaded(DWORD processId) {
+    const UniqueHandle snapshot{
+        ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId)};
+    if (snapshot.get() == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+
+    if (!::Module32FirstW(snapshot.get(), &entry)) {
+        return false;
+    }
+
+    do {
+        if (::_wcsicmp(entry.szModule, kClientModuleName) == 0) {
+            return true;
+        }
+    } while (::Module32NextW(snapshot.get(), &entry));
+
+    return false;
+}
+
 /// Смещение поля ImageBaseAddress в PEB 64-разрядного процесса.
 constexpr std::size_t kPebImageBaseOffset = 0x10;
 
@@ -220,7 +257,7 @@ std::unique_ptr<ProcessImage> ProcessImage::attach(const std::wstring& processNa
     image->sections_ = std::move(headers->sections);
     image->data_.reserve(image->sections_.size());
 
-    for (const Section& section : image->sections_) {
+    for (const gamesig::Section& section : image->sections_) {
         std::vector<std::uint8_t> buffer(section.virtualSize);
 
         if (!buffer.empty()) {
@@ -233,11 +270,12 @@ std::unique_ptr<ProcessImage> ProcessImage::attach(const std::wstring& processNa
 
     image->origin_ = std::format("процесс {} (pid {}), модуль по адресу {:#x}", narrow(processName),
                                  *processId, *moduleBase);
+    image->clientLoaded_ = clientModuleLoaded(*processId);
 
     return image;
 }
 
-std::size_t ProcessImage::indexOf(const Section& section) const noexcept {
+std::size_t ProcessImage::indexOf(const gamesig::Section& section) const noexcept {
     for (std::size_t i = 0; i < sections_.size(); ++i) {
         if (sections_[i].rva == section.rva) {
             return i;
@@ -246,7 +284,7 @@ std::size_t ProcessImage::indexOf(const Section& section) const noexcept {
     return sections_.size();
 }
 
-memscan::ByteView ProcessImage::sectionData(const Section& section) const noexcept {
+memscan::ByteView ProcessImage::sectionData(const gamesig::Section& section) const noexcept {
     const std::size_t index = indexOf(section);
     if (index >= data_.size()) {
         return {};
@@ -257,7 +295,7 @@ memscan::ByteView ProcessImage::sectionData(const Section& section) const noexce
 
 const std::uint8_t* ProcessImage::rvaToPointer(std::uint64_t rva, std::size_t needed) const noexcept {
     for (std::size_t i = 0; i < sections_.size(); ++i) {
-        const Section& section = sections_[i];
+        const gamesig::Section& section = sections_[i];
         if (rva < section.rva) {
             continue;
         }

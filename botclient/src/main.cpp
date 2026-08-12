@@ -23,9 +23,14 @@
 
 namespace {
 
-/// Круг, по которому ходит бот. Координаты игровые, точка около Веспуччи.
-constexpr float kCircleRadius = 25.0F;
-constexpr float kGroundHeight = 70.0F;
+/// Круг, по которому ходит бот.
+///
+/// Середина взята там же, где появляется игрок, — у терминала аэропорта
+/// Лос-Сантоса. Иначе бота не увидеть: клиент показывает чужих игроков
+/// настоящими персонажами, а персонаж за километр от нас существует только в
+/// числах.
+constexpr oxymp::shared::Vec3 kCircleCentre{-1037.7F, -2738.0F, 20.2F};
+constexpr float kCircleRadius = 12.0F;
 
 /// Угловая скорость в радианах в секунду: полный круг примерно за 12 секунд.
 constexpr float kAngularSpeed = 0.5F;
@@ -114,8 +119,10 @@ int main(int argc, char** argv) {
             const float angle = elapsed * kAngularSpeed;
 
             oxymp::shared::PlayerState state;
-            state.position = oxymp::shared::Vec3{kCircleRadius * std::cos(angle),
-                                                 kCircleRadius * std::sin(angle), kGroundHeight};
+            state.position =
+                oxymp::shared::Vec3{kCircleCentre.x + kCircleRadius * std::cos(angle),
+                                    kCircleCentre.y + kCircleRadius * std::sin(angle),
+                                    kCircleCentre.z};
             state.velocity = oxymp::shared::Vec3{-kCircleRadius * kAngularSpeed * std::sin(angle),
                                                  kCircleRadius * kAngularSpeed * std::cos(angle),
                                                  0.0F};

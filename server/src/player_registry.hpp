@@ -29,12 +29,21 @@ public:
     using Storage = std::unordered_map<net::PeerId, Player>;
 
     /// Заводит игрока и выдаёт ему идентификатор.
+    ///
+    /// Идентификатор — наименьшее свободное место, а не следующее по счёту:
+    /// первый вошедший получает ноль, а место ушедшего достаётся следующему.
     const Player& add(net::PeerId peer, std::string nickname);
 
     /// Удаляет игрока по соединению. Возвращает его данные, если он был.
     std::optional<Player> removeByPeer(net::PeerId peer);
 
     [[nodiscard]] const Player* findByPeer(net::PeerId peer) const;
+
+    /// Находит игрока по выданному идентификатору.
+    ///
+    /// Нужно для сообщений, адресованных игроку, а не соединению: урон приходит
+    /// от того, кто попал, и назван в нём не сосед по сети, а жертва.
+    [[nodiscard]] const Player* findById(shared::PlayerId id) const;
 
     [[nodiscard]] bool nicknameTaken(std::string_view nickname) const;
 
@@ -44,8 +53,10 @@ public:
     [[nodiscard]] Storage::const_iterator end() const noexcept { return players_.end(); }
 
 private:
+    /// Наименьший незанятый идентификатор.
+    [[nodiscard]] shared::PlayerId freeId() const;
+
     Storage players_;
-    shared::PlayerId nextPlayerId_ = 1;
 };
 
 } // namespace oxymp::server

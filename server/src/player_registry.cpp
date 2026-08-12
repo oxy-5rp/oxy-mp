@@ -4,9 +4,25 @@
 
 namespace oxymp::server {
 
+shared::PlayerId PlayerRegistry::freeId() const {
+    // Перебором с нуля, а не счётчиком: список короток — мест на сервере
+    // десятки, — а взамен идентификаторы остаются маленькими и повторно
+    // используемыми. Игрок называет своё число в чате, и оно не должно расти до
+    // бесконечности оттого, что кто-то весь вечер переподключался.
+    for (shared::PlayerId candidate = 0;; ++candidate) {
+        const bool taken = std::ranges::any_of(players_, [candidate](const auto& entry) {
+            return entry.second.id == candidate;
+        });
+
+        if (!taken) {
+            return candidate;
+        }
+    }
+}
+
 const Player& PlayerRegistry::add(net::PeerId peer, std::string nickname) {
     Player player;
-    player.id = nextPlayerId_++;
+    player.id = freeId();
     player.peer = peer;
     player.nickname = std::move(nickname);
 
@@ -27,6 +43,14 @@ std::optional<Player> PlayerRegistry::removeByPeer(net::PeerId peer) {
 
 const Player* PlayerRegistry::findByPeer(net::PeerId peer) const {
     const auto it = players_.find(peer);
+    return it == players_.end() ? nullptr : &it->second;
+}
+
+const Player* PlayerRegistry::findById(shared::PlayerId id) const {
+    const auto it = std::ranges::find_if(players_, [id](const auto& entry) {
+        return entry.second.id == id;
+    });
+
     return it == players_.end() ? nullptr : &it->second;
 }
 

@@ -37,6 +37,28 @@ std::uint32_t packetFlagsFor(shared::Channel channel) noexcept {
                                                : ENET_PACKET_FLAG_UNSEQUENCED;
 }
 
+/// Через сколько молчание соединения считается разрывом.
+///
+/// Заметно больше того, что предлагает библиотека по умолчанию (5 и 30 секунд),
+/// и вот почему: клиент живёт внутри процесса игры и обслуживает сеть в
+/// собственном потоке. Пока GTA грузится, этот поток не получает управления
+/// секундами — не потому, что связь пропала, а потому, что процессу не до него.
+/// На умолчаниях библиотеки такая пауза выглядит как обрыв, и соединение рвётся
+/// прямо на загрузочном экране.
+///
+/// Плата за терпимость — мёртвый сервер обнаруживается позже. Это допустимо:
+/// клиент переподключается сам, а ложные разрывы на каждом запуске игры — нет.
+constexpr enet_uint32 kTimeoutMinimumMs = 15'000;
+constexpr enet_uint32 kTimeoutMaximumMs = 45'000;
+
+/// Множитель порога, считаемого от времени оборота. Значение библиотеки по
+/// умолчанию; меняются только границы в миллисекундах.
+constexpr enet_uint32 kTimeoutLimit = 32;
+
+void applyTimeoutPolicy(ENetPeer* peer) noexcept {
+    ::enet_peer_timeout(peer, kTimeoutLimit, kTimeoutMinimumMs, kTimeoutMaximumMs);
+}
+
 PeerId peerIdOf(const ENetPeer* peer) noexcept {
     return static_cast<PeerId>(reinterpret_cast<std::uintptr_t>(peer->data));
 }
@@ -89,11 +111,16 @@ std::unique_ptr<Host> Host::connect(const std::string& address, std::uint16_t po
         return nullptr;
     }
 
-    if (::enet_host_connect(host, &target, shared::kChannelCount, 0) == nullptr) {
+    ENetPeer* peer = ::enet_host_connect(host, &target, shared::kChannelCount, 0);
+    if (peer == nullptr) {
         ::enet_host_destroy(host);
         error = "не удалось начать подключение";
         return nullptr;
     }
+
+    // Терпимость задаётся до того, как соединение установлено: рукопожатие тоже
+    // может прийтись на загрузку игры.
+    applyTimeoutPolicy(peer);
 
     std::unique_ptr<Host> result{new Host};
     result->host_ = host;
@@ -102,6 +129,10 @@ std::unique_ptr<Host> Host::connect(const std::string& address, std::uint16_t po
 
 PeerId Host::registerPeer(ENetPeer* peer) {
     const PeerId id = nextPeerId_++;
+
+    // Сервер тоже обязан быть терпимым: иначе он выбросит игрока, у которого
+    // игра ушла в загрузку, хотя тот никуда не делся.
+    applyTimeoutPolicy(peer);
 
     peer->data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(id));
     peers_.emplace(id, peer);

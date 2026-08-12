@@ -1,16 +1,38 @@
+include(embed_text)
+
 add_executable(oxymp_launcher
+    src/connect_window.cpp
     src/game_locator.cpp
+    src/game_settings.cpp
     src/game_process.cpp
+    src/launcher_patch.cpp
     src/main.cpp
+    src/paths.cpp
+    src/process_inject.cpp
+    src/process_lookup.cpp
+    src/registry.cpp
+    src/rockstar_launcher.cpp
+    src/session.cpp
+
+    # Значок: лаунчер — это то, что игрок видит в проводнике и на панели задач.
+    oxymp.rc
 )
 
 set_target_properties(oxymp_launcher PROPERTIES OUTPUT_NAME oxymp)
 
+# Страница окна подключения лежит рядом с кодом обычным html и встраивается в
+# бинарник при сборке: рядом с исполняемым файлом ей делать нечего — потеряется
+# или будет заменена.
+oxymp_embed_text(oxymp_launcher ui/connect.html connectPage oxymp::launcher::ui)
+
 target_link_libraries(oxymp_launcher PRIVATE
     oxymp::shared
     oxymp::options
+    oxymp::webui
     spdlog::spdlog
 )
 
-# Лаунчер бесполезен без модуля, который он внедряет.
-add_dependencies(oxymp_launcher oxymp_client)
+# Лаунчер бесполезен без того, что он внедряет: модуля в игру, подмены звена
+# BattlEye в лаунчер Rockstar и хозяйства Chromium, которым модуль рисует
+# интерфейс изнутри игры.
+add_dependencies(oxymp_launcher oxymp_client oxymp_rglpatch oxymp_cefsub oxymp_cef_runtime)

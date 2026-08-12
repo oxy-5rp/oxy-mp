@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace oxymp::server {
 
@@ -18,6 +19,16 @@ struct Config {
     std::uint16_t port = shared::kDefaultServerPort;
     std::size_t maxPlayers = 32;
     std::string name = "oxyMP";
+
+    /// Кому позволено распоряжаться из админ-меню.
+    ///
+    /// По умолчанию — нулевому месту, то есть тому, кто вошёл первым. Обычно это
+    /// хозяин сервера, который его и запустил.
+    ///
+    /// Проверка здесь не от взломщиков: пакет умеет собрать кто угодно. Она от
+    /// обычного случая — чтобы гость, зашедший в сессию, не мог собрать к себе
+    /// всех остальных.
+    std::vector<shared::PlayerId> admins{0};
 };
 
 /// Сервер: владеет сетевым узлом и списком игроков.
@@ -44,6 +55,14 @@ private:
     void handleHello(net::PeerId peer, const shared::ClientHello& hello);
     void handlePing(net::PeerId peer, const shared::Ping& ping);
     void handlePlayerState(net::PeerId peer, shared::PlayerState state);
+    void handleVehicleState(net::PeerId peer, shared::VehicleState state);
+    void handleChatSay(net::PeerId peer, const shared::ChatSay& say);
+    void handleDamageReport(net::PeerId peer, const shared::DamageReport& report);
+    void handleAdminAction(net::PeerId peer, const shared::AdminAction& action);
+
+    /// Рассылает строку чата всем и записывает её в журнал сервера.
+    void announce(shared::ChatKind kind, shared::PlayerId author, std::string nickname,
+                  std::string text);
 
     /// Отправляет отказ и закрывает соединение.
     void reject(net::PeerId peer, shared::RejectReason reason);

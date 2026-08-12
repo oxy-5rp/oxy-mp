@@ -1,7 +1,8 @@
 #include "game_locator.hpp"
 
+#include "registry.hpp"
+
 #include <format>
-#include <vector>
 
 #include <windows.h>
 
@@ -13,27 +14,6 @@ namespace {
 constexpr const wchar_t* kRegistryPath = L"SOFTWARE\\WOW6432Node\\Rockstar Games\\Grand Theft Auto V";
 
 constexpr const wchar_t* kExecutableName = L"GTA5.exe";
-
-std::optional<std::wstring> readRegistryString(const wchar_t* path, const wchar_t* name) {
-    DWORD size = 0;
-    if (::RegGetValueW(HKEY_LOCAL_MACHINE, path, name, RRF_RT_REG_SZ, nullptr, nullptr, &size) !=
-        ERROR_SUCCESS) {
-        return std::nullopt;
-    }
-
-    std::wstring value(size / sizeof(wchar_t), L'\0');
-    if (::RegGetValueW(HKEY_LOCAL_MACHINE, path, name, RRF_RT_REG_SZ, nullptr, value.data(),
-                       &size) != ERROR_SUCCESS) {
-        return std::nullopt;
-    }
-
-    // RegGetValueW считает вместе с завершающим нулём, в std::wstring он лишний.
-    if (const std::size_t end = value.find(L'\0'); end != std::wstring::npos) {
-        value.resize(end);
-    }
-
-    return value;
-}
 
 std::string narrow(const std::wstring& text) {
     if (text.empty()) {
@@ -71,7 +51,7 @@ std::optional<GameLocation> gameInDirectory(const std::filesystem::path& directo
 }
 
 std::optional<GameLocation> locateGame(std::string& error) {
-    const auto installFolder = readRegistryString(kRegistryPath, L"InstallFolder");
+    const auto installFolder = readLocalMachineString(kRegistryPath, L"InstallFolder");
     if (!installFolder) {
         error = "игра не найдена в реестре — укажите каталог ключом --game";
         return std::nullopt;
@@ -82,7 +62,7 @@ std::optional<GameLocation> locateGame(std::string& error) {
         return std::nullopt;
     }
 
-    if (const auto version = readRegistryString(kRegistryPath, L"Version")) {
+    if (const auto version = readLocalMachineString(kRegistryPath, L"Version")) {
         location->version = narrow(*version);
     }
 

@@ -97,6 +97,12 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     sent.heading = 91.5F;
     sent.velocity = Vec3{1.5F, -2.25F, 0.0F};
     sent.health = 175;
+    sent.armour = 50;
+    sent.flags = PlayerFlag::Aiming | PlayerFlag::InVehicle;
+    sent.weapon = 0x1B06D571;
+    sent.aimAt = Vec3{10.0F, 20.0F, 30.0F};
+    sent.vehicleOwner = 3;
+    sent.seat = 1;
 
     const auto received = roundTrip(sent);
 
@@ -106,6 +112,145 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     CHECK(received->heading == 91.5F);
     CHECK(received->velocity == sent.velocity);
     CHECK(received->health == 175);
+    CHECK(received->armour == 50);
+    CHECK(has(received->flags, PlayerFlag::Aiming));
+    CHECK(has(received->flags, PlayerFlag::InVehicle));
+    CHECK_FALSE(has(received->flags, PlayerFlag::Dead));
+    CHECK(received->weapon == 0x1B06D571);
+    CHECK(received->aimAt == sent.aimAt);
+    CHECK(received->vehicleOwner == 3);
+    CHECK(received->seat == 1);
+}
+
+TEST_CASE("PlayerState keeps the driver seat negative", "[messages]") {
+    // Место водителя — минус единица, а по сети едет одним беззнаковым байтом.
+    // Приведи его обратно неверно — и водитель станет пассажиром на месте 255.
+    PlayerState sent;
+    sent.seat = kDriverSeat;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->seat == kDriverSeat);
+}
+
+TEST_CASE("VehicleState survives a round trip", "[messages]") {
+    VehicleState sent;
+    sent.owner = 2;
+    sent.model = 0x9B909C94;
+    sent.position = Vec3{100.5F, -200.25F, 30.0F};
+    sent.rotation = Vec3{1.0F, -2.0F, 175.5F};
+    sent.velocity = Vec3{12.0F, 0.5F, -0.25F};
+    sent.bodyHealth = 640;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->owner == 2);
+    CHECK(received->model == 0x9B909C94);
+    CHECK(received->position == sent.position);
+    CHECK(received->rotation == sent.rotation);
+    CHECK(received->velocity == sent.velocity);
+    CHECK(received->bodyHealth == 640);
+}
+
+TEST_CASE("chat messages survive a round trip", "[messages]") {
+    ChatSay say;
+    say.text = "привет, как дела";
+
+    const auto receivedSay = roundTrip(say);
+    REQUIRE(receivedSay.has_value());
+    CHECK(receivedSay->text == "привет, как дела");
+
+    ChatLine line;
+    line.kind = ChatKind::Join;
+    line.playerId = 0;
+    line.nickname = "player";
+    line.text = "player (id 0) зашёл на сервер";
+
+    const auto receivedLine = roundTrip(line);
+    REQUIRE(receivedLine.has_value());
+    CHECK(receivedLine->kind == ChatKind::Join);
+    CHECK(receivedLine->playerId == 0);
+    CHECK(receivedLine->nickname == "player");
+    CHECK(receivedLine->text == line.text);
+}
+
+TEST_CASE("damage messages survive a round trip", "[messages]") {
+    DamageReport report;
+    report.victim = 4;
+    report.amount = 35;
+    report.weapon = 0x1B06D571;
+
+    const auto receivedReport = roundTrip(report);
+    REQUIRE(receivedReport.has_value());
+    CHECK(receivedReport->victim == 4);
+    CHECK(receivedReport->amount == 35);
+    CHECK(receivedReport->weapon == 0x1B06D571);
+
+    DamageTaken taken;
+    taken.attacker = 1;
+    taken.amount = 35;
+    taken.weapon = 0x1B06D571;
+
+    const auto receivedTaken = roundTrip(taken);
+    REQUIRE(receivedTaken.has_value());
+    CHECK(receivedTaken->attacker == 1);
+    CHECK(receivedTaken->amount == 35);
+    CHECK(receivedTaken->weapon == 0x1B06D571);
+}
+
+TEST_CASE("admin messages survive a round trip", "[messages]") {
+    AdminAction action;
+    action.command = AdminCommand::Summon;
+    action.target = 2;
+    action.position = Vec3{10.5F, -20.25F, 30.0F};
+
+    const auto receivedAction = roundTrip(action);
+    REQUIRE(receivedAction.has_value());
+    CHECK(receivedAction->command == AdminCommand::Summon);
+    CHECK(receivedAction->target == 2);
+    CHECK(receivedAction->position == action.position);
+
+    AdminOrder order;
+    order.command = AdminCommand::Summon;
+    order.issuer = 0;
+    order.position = action.position;
+
+    const auto receivedOrder = roundTrip(order);
+    REQUIRE(receivedOrder.has_value());
+    CHECK(receivedOrder->command == AdminCommand::Summon);
+    CHECK(receivedOrder->issuer == 0);
+    CHECK(receivedOrder->position == order.position);
+}
+
+TEST_CASE("an admin action for everyone keeps its empty target", "[messages]") {
+    // Пустая цель означает «всем» и обязана дожить до сервера именно пустой:
+    // принятая за настоящий номер, она собрала бы к себе одного игрока вместо
+    // всех — и никто бы не понял, почему.
+    AdminAction sent;
+    sent.target = kInvalidPlayerId;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->target == kInvalidPlayerId);
+}
+
+TEST_CASE("player zero is a real player", "[messages]") {
+    // Номера выдаются с нуля: первый вошедший получает ноль. Значит, «игрока
+    // нет» обязано быть чем-то другим — иначе первый же игрок сессии считался
+    // бы несуществующим везде, где его номер сверяют с пустым.
+    CHECK(kInvalidPlayerId != 0);
+
+    PlayerJoined joined;
+    joined.playerId = 0;
+
+    const auto received = roundTrip(joined);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 0);
+    CHECK(received->playerId != kInvalidPlayerId);
 }
 
 TEST_CASE("peekMessageId reads the type without decoding", "[messages]") {

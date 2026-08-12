@@ -55,11 +55,11 @@ std::unique_ptr<PeImage> PeImage::load(const std::filesystem::path& path, std::s
     return image;
 }
 
-std::uint32_t PeImage::availableSize(const Section& section) noexcept {
+std::uint32_t PeImage::availableSize(const gamesig::Section& section) noexcept {
     return section.virtualSize < section.rawSize ? section.virtualSize : section.rawSize;
 }
 
-memscan::ByteView PeImage::sectionData(const Section& section) const noexcept {
+memscan::ByteView PeImage::sectionData(const gamesig::Section& section) const noexcept {
     const std::uint32_t size = availableSize(section);
 
     if (section.fileOffset > bytes_.size() || bytes_.size() - section.fileOffset < size) {
@@ -70,7 +70,7 @@ memscan::ByteView PeImage::sectionData(const Section& section) const noexcept {
 }
 
 const std::uint8_t* PeImage::rvaToPointer(std::uint64_t rva, std::size_t needed) const noexcept {
-    for (const Section& section : sections_) {
+    for (const gamesig::Section& section : sections_) {
         if (rva < section.rva) {
             continue;
         }

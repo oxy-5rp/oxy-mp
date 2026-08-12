@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>oxyMP</title>
+<style>
+  /* Игровой интерфейс oxyMP.
+     Страница рисуется CEF прямо в память и попадает в кадр игры текстурой.
+     Окна у неё нет вовсе, а размер равен размеру кадра игры — поэтому разметка
+     раскладывается по углам экрана, как в любой игре.
+
+     Фон прозрачный по-настоящему, четвёртым каналом: панели могут быть какими
+     угодно тёмными и полупрозрачными, сквозь них будет видно игру. Прежнему
+     движку это было недоступно — там прозрачность выводилась из яркости, и
+     тёмное считалось пустотой. */
+
+  :root {
+    --accent: #4cc2ff;
+    --text: #e6ebf3;
+    --muted: #808b9f;
+    --panel: rgba(11, 14, 20, .86);
+    --line: #1b212c;
+    --bad: #ff7a70;
+    --good: #6ee7a8;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    color: var(--text);
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+    user-select: none;
+    cursor: none;
+  }
+
+  body:not(.console) .console-view { display: none; }
+
+  /* --- Экран загрузки ---------------------------------------------------- */
+
+  /* Живёт на той же странице, что и интерфейс, и уходит, когда игрок в мире.
+     Отдельным процессом он был ровно до тех пор, пока рисовать в кадр игры было
+     нечем; теперь есть, и второй браузер ради него держать незачем.
+
+     Появляется он не с первой секунды: до Chromium и перехвата кадра игра идёт
+     около десятка секунд, и всё это время видна её собственная заставка. Так и
+     задумано — закрывать её нечем, да и незачем. */
+
+  .loading {
+    position: fixed;
+    inset: 0;
+    background: #06080b;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    transition: opacity .6s;
+  }
+
+  body.ready .loading { opacity: 0; pointer-events: none; }
+
+  /* Медленно плывущее пятно света. Единственная движущаяся деталь фона —
+     этого хватает, чтобы экран не выглядел зависшим. */
+  .loading .glow {
+    position: absolute;
+    width: 120vmax;
+    height: 120vmax;
+    left: 50%;
+    top: 50%;
+    background: radial-gradient(circle, rgba(76, 194, 255, .10) 0%, transparent 60%);
+    transform: translate(-50%, -50%);
+    animation: drift 24s ease-in-out infinite;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translate(-58%, -54%) scale(1); }
+    50%      { transform: translate(-42%, -46%) scale(1.15); }
+  }
+
+  .loading .brand {
+    position: relative;
+    font-size: 46px;
+    font-weight: 300;
+    letter-spacing: 10px;
+    text-transform: uppercase;
+  }
+  .loading .brand b { color: var(--accent); font-weight: 500; }
+
+  .loading .stage {
+    position: relative;
+    font-size: 13px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .loading .bar {
+    position: relative;
+    width: 340px;
+    height: 2px;
+    background: rgba(255, 255, 255, .08);
+    overflow: hidden;
+  }
+
+  .loading .bar i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width .5s ease-out;
+  }
+
+  .loading .meta {
+    position: absolute;
+    bottom: 26px;
+    display: flex;
+    gap: 26px;
+    font-size: 11px;
+    letter-spacing: .3px;
+    color: #4d5769;
+  }
+  .loading .meta b { color: #8894a8; font-weight: 500; }
+
+  /* --- Уголок в правом верхнем углу ------------------------------------- */
+
+  .hud {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .server {
+    padding: 9px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .server .top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .brand { font-size: 15px; font-weight: 600; letter-spacing: .4px; }
+  .brand b { color: var(--accent); font-weight: 600; }
+
+  .state { font-size: 11px; color: var(--good); }
+  .state.off { color: var(--bad); }
+
+  .meta {
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* --- Список игроков --------------------------------------------------- */
+
+  .roster { padding: 8px 12px; max-height: 200px; overflow: hidden; }
+
+  .roster h4 {
+    margin: 0 0 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .roster ul { margin: 0; padding: 0; list-style: none; }
+
+  .roster li {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 1px 0;
+  }
+
+  .roster li.self { color: var(--accent); }
+  .roster .id { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .hint {
+    font-size: 10px;
+    color: #59637a;
+    letter-spacing: .3px;
+    text-align: right;
+    padding-right: 2px;
+  }
+
+  /* --- Чат в левом нижнем углу ------------------------------------------ */
+
+  .chat {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    width: 520px;
+    max-height: 300px;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px 10px;
+  }
+
+  /* Пустой чат не рисуется вовсе: тёмный прямоугольник без единой строки
+     закрывал бы собой угол экрана просто так. */
+  body:not(.has-chat):not(.typing) .chat { display: none; }
+
+  .lines {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+  }
+
+  .lines div { word-wrap: break-word; }
+  .lines .join { color: var(--good); }
+  .lines .leave { color: var(--bad); }
+  .lines .system { color: var(--muted); font-style: italic; }
+
+  .entry {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    display: none;
+  }
+  body.typing .entry { display: block; }
+
+  .entry .caret {
+    display: inline-block;
+    width: 7px;
+    margin-left: 1px;
+    border-bottom: 1.5px solid var(--accent);
+    animation: blink 1.05s steps(1, end) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* --- Админ-меню -------------------------------------------------------- */
+
+  .menu {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 460px;
+    max-height: 78%;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body:not(.menu-open) .menu { display: none; }
+
+  .menu h3 {
+    margin: 0;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    border-bottom: 1px solid var(--line);
+  }
+  .menu h3 b { color: var(--accent); font-weight: 600; }
+
+  .menu ul {
+    margin: 0;
+    padding: 6px 0;
+    list-style: none;
+    overflow: hidden;
+  }
+
+  .menu li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 16px;
+    font-size: 13px;
+    color: #c3cbd9;
+  }
+
+  /* Подсвеченный пункт — полосой слева, а не заливкой во всю строку: заливка
+     поверх игры читается как окно, а полоса как выбор. */
+  .menu li.on {
+    color: var(--text);
+    background: rgba(76, 194, 255, .10);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .menu li .value { color: var(--muted); font-size: 11px; align-self: center; }
+
+  .menu footer {
+    padding: 9px 16px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .menu footer .note { color: var(--good); }
+
+  /* --- Консоль ---------------------------------------------------------- */
+
+  .console-view {
+    position: fixed;
+    inset: 0;
+    padding: 26px 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(6, 8, 11, .93);
+  }
+
+  .console-view header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+  }
+
+  .console-view h3 { margin: 0; font-size: 15px; font-weight: 600; }
+
+  .log {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    font: 12px/1.55 "Cascadia Mono", Consolas, monospace;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  .log div { white-space: pre-wrap; word-break: break-word; color: #b9c3d4; }
+  .log .warn { color: #ffcc66; }
+  .log .err  { color: var(--bad); }
+  .log .dbg  { color: #6d7688; }
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="glow"></div>
+  <div class="brand">oxy<b>mp</b></div>
+  <div class="stage" id="loading-stage">запуск игры</div>
+  <div class="bar"><i id="loading-bar"></i></div>
+  <div class="meta">
+    <span>сервер <b id="loading-address">—</b></span>
+    <span>игрок <b id="loading-nickname">—</b></span>
+  </div>
+</div>
+
+<div class="hud">
+  <div class="card server">
+    <div class="top">
+      <span class="brand">oxy<b>MP</b></span>
+      <span class="state" id="state">ожидание</span>
+    </div>
+    <div class="meta">
+      <span id="address">—</span>
+      <span id="ping"></span>
+      <span id="me"></span>
+    </div>
+  </div>
+
+  <div class="card roster">
+    <h4>В сессии</h4>
+    <ul id="roster"></ul>
+  </div>
+
+  <div class="hint">ё — меню · T — чат · F8 — консоль · F5 — полёт</div>
+</div>
+
+<div class="card chat">
+  <div class="lines" id="lines"></div>
+  <div class="entry"><span id="typed"></span><span class="caret"></span></div>
+</div>
+
+<div class="card menu">
+  <h3 id="menu-title">oxy<b>MP</b></h3>
+  <ul id="menu-items"></ul>
+  <footer>
+    <span>↑↓ — выбор · Enter — применить · ← — назад · ё — закрыть</span>
+    <span class="note" id="menu-note"></span>
+  </footer>
+</div>
+
+<div class="console-view">
+  <header>
+    <h3>Консоль oxyMP</h3>
+    <span class="hint">F8 — закрыть</span>
+  </header>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+  const CONNECTION = ['ожидание', 'подключение', 'представляемся', 'в сессии', 'отказано'];
+
+  // Порядок и число совпадают с LoadStage на стороне клиента.
+  const STAGES = [
+    'запуск игры',
+    'опознание движка',
+    'загрузка мира',
+    'выбор режима',
+    'подготовка персонажа',
+    'готово'
+  ];
+  const KIND = ['say', 'join', 'leave', 'system'];
+
+  // Уровни spdlog: trace, debug, info, warn, err, critical, off.
+  const LEVEL = ['dbg', 'dbg', '', 'warn', 'err', 'err', ''];
+
+  // Сколько строк держится на экране. Больше не нужно: чат читают на ходу, а
+  // историю целиком хранит журнал клиента.
+  const CHAT_KEEP = 12;
+  const LOG_KEEP = 400;
+
+  const lines = document.getElementById('lines');
+  const log = document.getElementById('log');
+
+  function append(box, text, className, keep) {
+    const row = document.createElement('div');
+    row.textContent = text;
+    if (className) {
+      row.className = className;
+    }
+
+    box.appendChild(row);
+
+    while (box.childElementCount > keep) {
+      box.removeChild(box.firstElementChild);
+    }
+  }
+
+  function renderRoster(players, own) {
+    const box = document.getElementById('roster');
+    box.textContent = '';
+
+    for (const player of players) {
+      const row = document.createElement('li');
+      if (player.id === own) {
+        row.className = 'self';
+      }
+
+      const name = document.createElement('span');
+      name.textContent = player.name;
+
+      const id = document.createElement('span');
+      id.className = 'id';
+      id.textContent = player.id;
+
+      row.appendChild(name);
+      row.appendChild(id);
+      box.appendChild(row);
+    }
+  }
+
+  let menuSignature = '';
+
+  function renderMenu(menu) {
+    document.body.classList.toggle('menu-open', !!menu.open);
+
+    if (!menu.open) {
+      menuSignature = '';
+      return;
+    }
+
+    document.getElementById('menu-note').textContent = menu.note || '';
+
+    // Список перестраивается, только когда он и правда изменился: меню
+    // приходит целиком двадцать раз в секунду, а меняется от нажатия.
+    const signature = menu.title + ' ' + menu.selected + ' ' +
+      menu.items.map(item => item.label + '' + item.value).join('');
+
+    if (signature === menuSignature) {
+      return;
+    }
+    menuSignature = signature;
+
+    document.getElementById('menu-title').textContent = menu.title;
+
+    const box = document.getElementById('menu-items');
+    box.textContent = '';
+
+    menu.items.forEach((item, index) => {
+      const row = document.createElement('li');
+      if (index === menu.selected) {
+        row.className = 'on';
+      }
+
+      const label = document.createElement('span');
+      label.textContent = item.label;
+
+      const value = document.createElement('span');
+      value.className = 'value';
+      value.textContent = item.value || '';
+
+      row.appendChild(label);
+      row.appendChild(value);
+      box.appendChild(row);
+    });
+  }
+
+  // Канал к клиенту. CEF доставляет состояние вызовом на самой странице: своего
+  // «наружу → страница» у него нет, зато есть выполнение кода в её окружении.
+  window.oxymp = {
+    receive(s) {
+
+      const connected = s.connection === 3;
+
+      const state = document.getElementById('state');
+      state.textContent = CONNECTION[s.connection] || '—';
+      // Красным — только когда молчание затянулось. Первые секунды после входа
+      // соединения ещё нет, и это не беда, а обычный ход дела: пугать словом
+      // «не отвечает» того, кто только что зашёл, не за что.
+      state.className = 'state' + (!connected && s.troubled ? ' off' : '');
+
+      if (s.address !== undefined) {
+        document.getElementById('address').textContent = s.address || '—';
+      }
+
+      document.getElementById('ping').textContent = s.latency >= 0 ? s.latency + ' мс' : '';
+      document.getElementById('me').textContent = s.playerId >= 0 ? 'id ' + s.playerId : '';
+
+      if (s.roster) {
+        renderRoster(s.roster, s.playerId);
+      }
+
+      for (const line of s.chat || []) {
+        append(lines, line.text, KIND[line.kind] || 'say', CHAT_KEEP);
+        document.body.classList.add('has-chat');
+      }
+
+      for (const line of s.console || []) {
+        append(log, line.text, LEVEL[line.kind] || '', LOG_KEEP);
+      }
+
+      if (s.menu) {
+        renderMenu(s.menu);
+      }
+
+      // Полоса идёт по стадиям и никогда не стоит на нуле: нулевая полоса
+      // выглядит сломанной, а первая стадия длится дольше остальных вместе
+      // взятых.
+      document.getElementById('loading-stage').textContent =
+        STAGES[s.stage] || STAGES[0];
+      document.getElementById('loading-bar').style.width =
+        Math.round(((s.stage + 1) / STAGES.length) * 100) + '%';
+
+      if (s.address !== undefined) {
+        document.getElementById('loading-address').textContent = s.address || '—';
+        document.getElementById('loading-nickname').textContent = s.nickname || '—';
+      }
+
+      document.body.classList.toggle('ready', !!s.ready);
+      document.body.classList.toggle('console', !!s.consoleVisible);
+      document.body.classList.toggle('typing', !!s.inputActive);
+      document.getElementById('typed').textContent = s.inputText || '';
+    }
+  };
+</script>
+</body>
+</html>

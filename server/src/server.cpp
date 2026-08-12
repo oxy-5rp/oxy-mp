@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <format>
 #include <vector>
 
 namespace oxymp::server {
@@ -23,8 +24,18 @@ std::string_view describe(shared::RejectReason reason) {
         return "сервер заполнен";
     case shared::RejectReason::InvalidNickname:
         return "недопустимое имя";
+    case shared::RejectReason::NicknameTaken:
+        return "имя занято";
     }
     return "причина не указана";
+}
+
+std::string_view describe(shared::AdminCommand command) {
+    switch (command) {
+    case shared::AdminCommand::Summon:
+        return "перенести к себе";
+    }
+    return "?";
 }
 
 bool nicknameLooksValid(const std::string& nickname) {
@@ -97,6 +108,9 @@ void Server::handleDisconnected(net::PeerId peer) {
     shared::PlayerLeft left;
     left.playerId = player->id;
     broadcast(left);
+
+    announce(shared::ChatKind::Leave, player->id, player->nickname,
+             std::format("{} (id {}) вышел", player->nickname, player->id));
 }
 
 void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& payload) {
@@ -127,6 +141,30 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::VehicleState:
+        if (const auto state = shared::decode<shared::VehicleState>(packet)) {
+            handleVehicleState(peer, *state);
+        }
+        return;
+
+    case shared::MessageId::ChatSay:
+        if (const auto say = shared::decode<shared::ChatSay>(packet)) {
+            handleChatSay(peer, *say);
+        }
+        return;
+
+    case shared::MessageId::DamageReport:
+        if (const auto report = shared::decode<shared::DamageReport>(packet)) {
+            handleDamageReport(peer, *report);
+        }
+        return;
+
+    case shared::MessageId::AdminAction:
+        if (const auto action = shared::decode<shared::AdminAction>(packet)) {
+            handleAdminAction(peer, *action);
+        }
+        return;
+
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -134,6 +172,9 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::Pong:
     case shared::MessageId::PlayerJoined:
     case shared::MessageId::PlayerLeft:
+    case shared::MessageId::ChatLine:
+    case shared::MessageId::DamageTaken:
+    case shared::MessageId::AdminOrder:
         spdlog::warn("соединение {} прислало серверное сообщение", peer);
         return;
     }
@@ -152,8 +193,17 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         return;
     }
 
-    if (!nicknameLooksValid(hello.nickname) || players_.nicknameTaken(hello.nickname)) {
+    if (!nicknameLooksValid(hello.nickname)) {
         reject(peer, shared::RejectReason::InvalidNickname);
+        return;
+    }
+
+    // Занятое имя — не то же самое, что недопустимое, и разделены они не ради
+    // порядка: игрок, переподключившийся раньше, чем сервер похоронил его
+    // прошлое соединение, натыкается на собственное имя. Отказ здесь временный,
+    // и клиент обязан узнать об этом, иначе повторять попытки он перестанет.
+    if (players_.nicknameTaken(hello.nickname)) {
+        reject(peer, shared::RejectReason::NicknameTaken);
         return;
     }
 
@@ -193,6 +243,11 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
 
     spdlog::info("игрок \"{}\" (id {}) подключился, всего: {}", player.nickname, player.id,
                  players_.size());
+
+    // После рассылки о входе, а не вместо неё: PlayerJoined ведёт список
+    // игроков, а строка чата — лента событий. Одно другое не заменяет.
+    announce(shared::ChatKind::Join, player.id, player.nickname,
+             std::format("{} (id {}) зашёл на сервер", player.nickname, player.id));
 }
 
 void Server::handlePing(net::PeerId peer, const shared::Ping& ping) {
@@ -216,6 +271,123 @@ void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
 
     const auto packet = shared::encode(state);
     host_->broadcast(shared::Channel::State, shared::ByteView{packet}, peer);
+}
+
+void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
+    const Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        return;
+    }
+
+    // Хозяин машины проставляется сервером по той же причине, что и
+    // идентификатор игрока: иначе достаточно назвать чужой номер, чтобы возить
+    // чужую машину.
+    state.owner = player->id;
+
+    const auto packet = shared::encode(state);
+    host_->broadcast(shared::Channel::State, shared::ByteView{packet}, peer);
+}
+
+void Server::handleChatSay(net::PeerId peer, const shared::ChatSay& say) {
+    const Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        return;
+    }
+
+    // Пустое сообщение отправить нельзя, а слишком длинное — обрезается.
+    // Отвергать его целиком незачем: длина ничего не ломает, а игрок, у
+    // которого реплика пропала без следа, решит, что сломан чат.
+    std::string text = say.text;
+    if (text.size() > shared::kMaxChatLength) {
+        text.resize(shared::kMaxChatLength);
+    }
+
+    if (text.empty()) {
+        return;
+    }
+
+    announce(shared::ChatKind::Say, player->id, player->nickname, std::move(text));
+}
+
+void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& report) {
+    const Player* attacker = players_.findByPeer(peer);
+    if (attacker == nullptr) {
+        return;
+    }
+
+    // Себе урон через сервер не наносят: свой урон игрок применяет сам, и такое
+    // сообщение означает либо ошибку, либо попытку что-то выгадать.
+    if (report.victim == attacker->id) {
+        return;
+    }
+
+    const Player* victim = players_.findById(report.victim);
+    if (victim == nullptr) {
+        return;
+    }
+
+    shared::DamageTaken taken;
+    taken.attacker = attacker->id;
+    taken.amount = report.amount;
+    taken.weapon = report.weapon;
+
+    // Надёжным каналом, в отличие от снимков состояния: потерянный снимок
+    // заменит следующий, а потерянное попадание не повторится никогда.
+    const auto packet = shared::encode(taken);
+    host_->send(victim->peer, shared::Channel::Control, shared::ByteView{packet});
+}
+
+void Server::handleAdminAction(net::PeerId peer, const shared::AdminAction& action) {
+    const Player* issuer = players_.findByPeer(peer);
+    if (issuer == nullptr) {
+        return;
+    }
+
+    if (std::ranges::find(config_.admins, issuer->id) == config_.admins.end()) {
+        spdlog::warn("игрок \"{}\" (id {}) распоряжается, не имея на то права", issuer->nickname,
+                     issuer->id);
+        return;
+    }
+
+    shared::AdminOrder order;
+    order.command = action.command;
+    order.issuer = issuer->id;
+    order.position = action.position;
+
+    const auto packet = shared::encode(order);
+
+    // Пустая цель означает «всем», и это не мелочь: собрать к себе всю сессию —
+    // отдельное распоряжение, а не двадцать одинаковых.
+    if (action.target == shared::kInvalidPlayerId) {
+        host_->broadcast(shared::Channel::Control, shared::ByteView{packet}, peer);
+
+        spdlog::info("игрок \"{}\" распорядился всеми: {}", issuer->nickname,
+                     describe(action.command));
+        return;
+    }
+
+    const Player* target = players_.findById(action.target);
+    if (target == nullptr) {
+        return;
+    }
+
+    host_->send(target->peer, shared::Channel::Control, shared::ByteView{packet});
+
+    spdlog::info("игрок \"{}\" распорядился игроком \"{}\": {}", issuer->nickname,
+                 target->nickname, describe(action.command));
+}
+
+void Server::announce(shared::ChatKind kind, shared::PlayerId author, std::string nickname,
+                      std::string text) {
+    shared::ChatLine line;
+    line.kind = kind;
+    line.playerId = author;
+    line.nickname = std::move(nickname);
+    line.text = std::move(text);
+
+    spdlog::info("чат: [{}] {}", line.nickname.empty() ? "сервер" : line.nickname, line.text);
+
+    broadcast(line);
 }
 
 void Server::reject(net::PeerId peer, shared::RejectReason reason) {
