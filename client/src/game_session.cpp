@@ -13,23 +13,21 @@
 namespace oxymp::client {
 namespace {
 
-/// Точка появления: международный аэропорт Лос-Сантоса, у терминала.
-constexpr shared::Vec3 kSpawnPoint{-1037.7F, -2738.0F, 20.2F};
+/// Точка появления на случай, если сервер её не назвал.
+///
+/// Запасная, а не главная: где появляться, решает сервер — это свойство сессии,
+/// и хозяин меняет её одной строкой в server.cfg. Здесь она нужна для того
+/// мгновения, когда игрок уже в мире, а приветствие ещё не пришло: поставить его
+/// в начало координат означало бы уронить под карту.
+constexpr shared::Vec3 kFallbackSpawn{-1037.7F, -2738.0F, 20.2F};
 constexpr float kSpawnHeading = 328.0F;
 
 /// Радиус, в котором убирается население при появлении и после смерти.
 constexpr float kClearRadius = 400.0F;
 
-/// Клавиша переключения свободного полёта.
-constexpr int kNoclipKey = VK_F5;
-
 /// Клавиша чата и клавиша консоли.
 constexpr int kChatKey = 'T';
 constexpr int kConsoleKey = VK_F8;
-
-/// Клавиша админ-меню — та, что над Tab: «ё» в русской раскладке, обратный
-/// апостроф в латинской. Так же устроено во всех знакомых играх.
-constexpr int kMenuKey = VK_OEM_3;
 
 /// Как часто гасятся ненужные скрипты игры.
 ///
@@ -59,6 +57,13 @@ constexpr auto kSweepReportInterval = std::chrono::seconds{30};
 /// бедой: игрок должен успеть прочитать «сервер не отвечает» на экране загрузки,
 /// а не увидеть эту надпись мельком перед самым её уходом.
 constexpr auto kConnectWaitLimit = std::chrono::seconds{12};
+
+/// Как часто пересматривается внешность машины, которую мы ведём.
+///
+/// Цвет, номер и тюнинг за сессию меняются считанные разы, а стоит их опрос
+/// полусотни вызовов нативов. Раз в две секунды — это незаметно для кадра и
+/// заведомо быстрее, чем игрок успеет доехать от мастерской до чужих глаз.
+constexpr auto kAppearanceInterval = std::chrono::seconds{2};
 
 /// За сколько проявляется картинка игры, в миллисекундах.
 constexpr int kFadeIn = 500;
@@ -98,14 +103,13 @@ bool pressedOnce(int key) {
 GameSession::GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
-                         UiFeed& feed, UiMail& clicks)
+                         UiFeed& feed)
     : settings_(std::move(settings)),
       status_(status),
       roster_(roster),
       localState_(localState),
       mail_(mail),
       feed_(feed),
-      clicks_(clicks),
       hud_(table),
       player_(table),
       screen_(table),
@@ -116,12 +120,11 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       onlineMap_(table),
       appearance_(table),
       respawn_(table),
-      noclip_(table),
       streaming_(table),
       vehicles_(table),
       remotePlayers_(table, vehicles_),
+      objects_(table),
       nameplates_(table, hud_),
-      adminMenu_(table),
       sessionState_(addresses),
       networkGame_(addresses),
       netSession_(addresses, table) {
@@ -131,20 +134,13 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
         [&mail = mail_](shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon) {
             mail.postDamage(victim, amount, weapon);
         });
-
-    // Распоряжения меню уходят той же почтой: составляет их игровой поток, а
-    // отправляет сетевой.
-    adminMenu_.requestThrough(
-        [&mail = mail_](shared::AdminCommand command, shared::PlayerId target,
-                        shared::Vec3 position) { mail.postAdmin(command, target, position); });
 }
 
 std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& addresses,
                                                  Settings settings, const SessionStatus& status,
                                                  const RemoteRoster& roster,
                                                  LocalState& localState, SessionMail& mail,
-                                                 UiFeed& feed, UiMail& clicks,
-                                                 std::string& error) {
+                                                 UiFeed& feed, std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
         return nullptr;
@@ -157,7 +153,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     }
 
     std::unique_ptr<GameSession> session{new GameSession{
-        addresses, table, std::move(settings), status, roster, localState, mail, feed, clicks}};
+        addresses, table, std::move(settings), status, roster, localState, mail, feed}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -385,6 +381,17 @@ void GameSession::suppressGame() {
     world_.suppressPopulation();
     world_.suppressWanted(player_.id());
 
+    // И вдогонку — уборка того, что просочилось. Запреты останавливают почти
+    // всё, но не всё: машины с водителями заводят и сюжетные скрипты игры,
+    // которые продолжают работать. По одной за кадр, вокруг игрока: перебирать
+    // весь мир незачем, а лишняя машина, прожившая лишние полсекунды, никому не
+    // мешает.
+    if (const int ped = player_.ped(); ped != 0) {
+        constexpr float kStrayRadius = 200.0F;
+
+        world_.sweepStrayVehicle(player_.coords(ped), kStrayRadius);
+    }
+
     // Счётчик денег игры прячется каждый кадр: он показывает баланс настоящего
     // GTA Online, а тот к нашей сессии отношения не имеет. Свои деньги считает
     // сервер, и показывает их наш интерфейс.
@@ -532,11 +539,10 @@ void GameSession::advance() {
             }
         }
 
-        handleMenu(player, ped);
-        applyOrders(ped);
+        applyServerEvents(ped);
         applyIncomingDamage(ped);
+        applyServerState(ped);
         handleDeath(player);
-        handleInput(ped);
         publishLocalState(player, ped, dead);
         showRemotePlayers(ped);
         return;
@@ -573,55 +579,29 @@ void GameSession::handleTyping() {
         feed_.setConsoleVisible(consoleVisible_);
     }
 
-    typingJustEnded_ = false;
-
     if (textEntry_ == nullptr) {
         return;
     }
 
     // Порядок здесь обязателен: сперва итог прошлого набора, и только потом
-    // начало нового.
-    //
-    // Раньше было наоборот, и на этом терялось всё набранное для меню. Набор
-    // заканчивается вводом, а меню до этого мгновения всё ещё просит строку:
-    // видя просьбу, клиент начинал набор заново — и стирал итог, до которого не
-    // дошёл. Со стороны это выглядело так, что название модели ввести нельзя:
-    // строка набирается, ввод нажимается, и ничего не происходит.
+    // начало нового. Иначе клавиша, которой набор закончили, в том же кадре
+    // открыла бы его заново — и стёрла бы то, что успели набрать.
     if (!textEntry_->active()) {
         std::string typed;
         const game::TextEntry::Outcome outcome = textEntry_->takeOutcome(typed);
 
         if (outcome != game::TextEntry::Outcome::Typing) {
             if (outcome == game::TextEntry::Outcome::Submitted) {
-                if (typingFor_ == Typing::Menu) {
-                    adminMenu_.supplyText(std::move(typed));
-                } else {
-                    mail_.postChat(std::move(typed));
-                }
-            } else if (typingFor_ == Typing::Menu) {
-                adminMenu_.cancelText();
+                mail_.postChat(std::move(typed));
             }
 
-            typingFor_ = Typing::Chat;
-            typingJustEnded_ = true;
             feed_.setInput(false, {});
         }
     }
 
-    if (!textEntry_->active()) {
-        // Строку может попросить меню — например, для названия машины. Его
-        // просьба идёт первой: раз меню открыто, чат сейчас не при чём.
-        if (adminMenu_.wantsText()) {
-            typingFor_ = Typing::Menu;
-
-            // Название модели набирается латиницей по местам клавиш: раскладку
-            // в GTA не переключить, а `adder` в русской раскладке набирается
-            // как `фввук`.
-            textEntry_->begin(game::TextEntry::Mode::Latin);
-        } else if (pressedOnce(kChatKey)) {
-            typingFor_ = Typing::Chat;
-            textEntry_->begin(game::TextEntry::Mode::Free);
-        }
+    // Строку просит один только чат: больше её просить в клиенте некому.
+    if (!textEntry_->active() && pressedOnce(kChatKey)) {
+        textEntry_->begin(game::TextEntry::Mode::Free);
     }
 
     if (textEntry_->active()) {
@@ -633,157 +613,23 @@ void GameSession::handleTyping() {
     }
 }
 
-void GameSession::applyClicks(int player, int ped) {
-    for (const UiClick& click : clicks_.take()) {
-        // Нажатие мышью где угодно, кроме самого поля, прекращает набор: игрок
-        // ушёл из поля, и держать клавиатуру за ним значит отбирать её у того,
-        // чем он занялся вместо этого.
-        if (click.kind != UiClick::Kind::Point && click.kind != UiClick::Kind::Ask &&
-            typingFor_ == Typing::Menu && textEntry_ != nullptr && textEntry_->active()) {
-            textEntry_->cancel();
-        }
-
-        switch (click.kind) {
-        case UiClick::Kind::Point:
-            adminMenu_.select(click.index);
-            break;
-
-        case UiClick::Kind::Press:
-            adminMenu_.select(click.index);
-            adminMenu_.press(game::AdminMenu::Key::Enter, player, ped);
-            break;
-
-        case UiClick::Kind::Alternate:
-            adminMenu_.select(click.index);
-            adminMenu_.press(game::AdminMenu::Key::Alternate, player, ped);
-            break;
-
-        case UiClick::Kind::Back:
-            adminMenu_.press(game::AdminMenu::Key::Back, player, ped);
-            break;
-
-        case UiClick::Kind::Close:
-            adminMenu_.close();
-            break;
-
-        case UiClick::Kind::Ask:
-            adminMenu_.askForModel();
-            break;
+void GameSession::applyServerEvents(int ped) {
+    // Перенос — единственное распоряжение сервера, которое исполняет игра:
+    // персонаж живёт здесь, и переставить его больше некому.
+    if (ped != 0) {
+        for (const shared::Vec3& destination : mail_.takeTeleports()) {
+            player_.teleport(ped, destination);
+            spdlog::info("сервер перенёс нас");
         }
     }
-}
 
-void GameSession::handleMenu(int player, int ped) {
-    applyClicks(player, ped);
-
-    // Пока набирается текст, клавиши принадлежат чату: «ё» в реплике не должна
-    // открывать меню. Кадр, в котором набор кончился, — тоже: клавиша, которой
-    // его закончили, ещё зажата, и меню приняло бы её за своё нажатие.
-    const bool typing = (textEntry_ != nullptr && textEntry_->active()) || typingJustEnded_;
-
-    // Клавиши опрашиваются каждый кадр, даже когда меню их не слушает.
+    // Именованные события забираются, но пока никому не достаются: их адресат —
+    // клиентская часть ресурса, а её ещё нет. Забирать при этом обязательно,
+    // иначе они копились бы в почте до конца сессии.
     //
-    // Опрос ведёт счёт нажатиям, и пропущенный кадр оставляет в нём вчерашнее
-    // состояние: клавиша, нажатая во время набора и всё ещё зажатая после него,
-    // выглядела бы нажатой заново. Ввод в чате отзывался бы в меню.
-    const bool menuKey = pressedOnce(kMenuKey);
-    const bool up = pressedOnce(VK_UP);
-    const bool down = pressedOnce(VK_DOWN);
-    const bool enter = pressedOnce(VK_RETURN);
-    const bool alternate = pressedOnce(VK_RIGHT);
-    const bool left = pressedOnce(VK_LEFT);
-    const bool backspace = pressedOnce(VK_BACK);
-    const bool escape = pressedOnce(VK_ESCAPE);
-
-    if (!typing && menuKey) {
-        adminMenu_.toggle();
-    }
-
-    if (adminMenu_.open() && !typing) {
-        // Пока меню открыто, игра не должна видеть ни одного нажатия: стрелки
-        // ведут по пунктам, а не персонажа.
-        controls_.suppressEverything();
-
-        if (up) {
-            adminMenu_.press(game::AdminMenu::Key::Up, player, ped);
-        }
-        if (down) {
-            adminMenu_.press(game::AdminMenu::Key::Down, player, ped);
-        }
-        if (enter) {
-            adminMenu_.press(game::AdminMenu::Key::Enter, player, ped);
-        }
-        if (alternate) {
-            adminMenu_.press(game::AdminMenu::Key::Alternate, player, ped);
-        }
-        if (left || backspace) {
-            adminMenu_.press(game::AdminMenu::Key::Back, player, ped);
-        }
-
-        // Escape закрывает меню целиком, а не на шаг назад.
-        //
-        // Без этого выйти было нечем, кроме стрелки влево и Backspace, а
-        // человек жмёт Escape — это первое, что приходит в голову, и до сих пор
-        // оно не делало ничего.
-        if (escape) {
-            adminMenu_.close();
-        }
-    }
-
-    // Список игроков берётся тот же, что и для показа их в мире: меню
-    // переносит к ним и вызывает их к себе, и точка нужна свежая.
-    std::vector<game::AdminMenu::Participant> participants;
-
-    for (const RemoteView& remote : roster_.snapshot()) {
-        participants.push_back(game::AdminMenu::Participant{
-            .id = remote.id,
-            .nickname = remote.nickname,
-            .position = remote.state.position,
-        });
-    }
-
-    adminMenu_.update(std::move(participants), player, ped);
-
-    const game::AdminMenu::View view = adminMenu_.view();
-
-    std::vector<UiFeed::MenuItem> items;
-    items.reserve(view.items.size());
-
-    for (const game::AdminMenu::Item& item : view.items) {
-        items.push_back(UiFeed::MenuItem{
-            .label = item.label,
-            .value = item.value,
-            .kind = static_cast<unsigned int>(item.kind),
-            .on = item.on,
-        });
-    }
-
-    feed_.setMenu(UiFeed::Menu{
-        .open = view.open,
-        .title = view.title,
-        .items = std::move(items),
-        .selected = view.selected,
-        .note = view.note,
-        // Набор для меню виден странице как живое поле ввода: и пока меню ждёт
-        // строку, и пока игрок её набирает. Строка чата в это время молчит —
-        // набранное показывается в самом меню.
-        .asking = adminMenu_.wantsText() ||
-                  (typingFor_ == Typing::Menu && textEntry_ != nullptr && textEntry_->active()),
-    });
-}
-
-void GameSession::applyOrders(int ped) {
-    if (ped == 0) {
-        return;
-    }
-
-    for (const shared::AdminOrder& order : mail_.takeIncomingAdmin()) {
-        switch (order.command) {
-        case shared::AdminCommand::Summon:
-            player_.teleport(ped, order.position);
-            spdlog::info("игрок {} перенёс нас к себе", order.issuer);
-            break;
-        }
+    // Толковать их здесь не будет и потом. Что значит имя и что значит нагрузка,
+    // знает написавший ресурс; клиент только доставляет.
+    for ([[maybe_unused]] const shared::ServerEvent& event : mail_.takeIncomingEvents()) {
     }
 }
 
@@ -793,8 +639,13 @@ void GameSession::applyIncomingDamage(int ped) {
     }
 
     for (const shared::DamageTaken& taken : mail_.takeIncomingDamage()) {
-        player_.applyDamage(ped, taken.amount);
-
+        // Здоровье отсюда больше не отнимается, и это главная перемена. Сколько
+        // снять, решил сервер, и он же уже снял — его число придёт отдельным
+        // сообщением. Отними мы урон ещё и здесь, попадание стоило бы вдвое
+        // дороже, чем стоит.
+        //
+        // Само сообщение при этом никуда не делось и делось быть не могло: из
+        // него видно, кто попал и из чего, а из числа здоровья — не видно.
         spdlog::info("игрок {} попал по нам на {}", taken.attacker, taken.amount);
     }
 }
@@ -838,14 +689,15 @@ void GameSession::spawn() {
     // Пока это не снято, он стоит на месте, что бы игрок ни нажимал.
     player_.release(ped);
 
-    teleportSafely(ped, kSpawnPoint, kSpawnHeading);
+    const shared::Vec3 point = spawnPoint();
+
+    teleportSafely(ped, point, kSpawnHeading);
 
     // Запрет населения касается только новых прохожих и машин: созданные до
     // него остаются на местах, и убрать их нужно отдельно.
-    world_.clearArea(kSpawnPoint, kClearRadius);
+    world_.clearArea(point, kClearRadius);
 
-    spdlog::info("игрок появился в аэропорту: {:.1f} {:.1f} {:.1f}", kSpawnPoint.x, kSpawnPoint.y,
-                 kSpawnPoint.z);
+    spdlog::info("игрок появился в точке сервера: {:.1f} {:.1f} {:.1f}", point.x, point.y, point.z);
 }
 
 void GameSession::sweepScripts() {
@@ -921,15 +773,11 @@ void GameSession::handleDeath(int player) {
         return;
     }
 
-    // Свободный полёт снимается до подъёма: он держит выключенной физику
-    // персонажа, которого сейчас не станет.
-    if (noclip_.active()) {
-        noclip_.setActive(player_.ped(), false);
-    }
+    const shared::Vec3 point = spawnPoint();
 
-    respawn_.resurrect(kSpawnPoint, kSpawnHeading, player);
-    streaming_.beginLoad(kSpawnPoint);
-    world_.clearArea(kSpawnPoint, kClearRadius);
+    respawn_.resurrect(point, kSpawnHeading, player);
+    streaming_.beginLoad(point);
+    world_.clearArea(point, kClearRadius);
 
     player_.release(player_.ped());
 
@@ -951,49 +799,119 @@ void GameSession::publishLocalState(int player, int ped, bool dead) {
     // прислали.
     shared::PlayerState state = player_.snapshot(player, ped, dead);
 
-    std::optional<shared::VehicleState> vehicle;
+    // Машина, до которой нам есть дело: та, в которой сидим, а если ни в какой,
+    // то та, в которую лезем. Второе объявляется наравне с первым и не для
+    // красоты: остальные по этому признаку показывают вход целиком — как
+    // персонаж подходит к двери, открывает её и садится, — а показывать его
+    // некуда, пока машины у них нет.
+    int handle = 0;
 
     if (const auto seat = vehicles_.seatOf(ped)) {
         state.flags |= static_cast<std::uint32_t>(shared::PlayerFlag::InVehicle);
         state.seat = seat->index;
 
-        // Хозяин машины — её водитель. Пассажир узнаёт его по персонажу за
-        // рулём, и другого пути нет: сервер о машинах знает ровно то, что ему
-        // рассказали, а рассказывает о них водитель.
-        state.vehicleOwner = ownerOfVehicle(*seat);
+        handle = seat->vehicle;
+    } else if (const auto climbing = player_.entering(ped); climbing.vehicle != 0) {
+        state.flags |= static_cast<std::uint32_t>(shared::PlayerFlag::EnteringVehicle);
+        state.seat = climbing.seat;
 
-        if (seat->index == shared::kDriverSeat) {
-            // За рулём мы сами — значит и снимок машины рассылать нам.
-            vehicle = vehicles_.describe(seat->vehicle);
-        }
+        handle = climbing.vehicle;
     }
 
-    localState_.set(state, vehicle);
+    // Номер машины не выдаётся, а узнаётся: машины заводит сервер, и у той, в
+    // которую мы сели, номер уже есть. Ноль означает, что мы сидим в машине, о
+    // которой сессия не знает, — такого быть не должно, но сказать об этом
+    // серверу честнее, чем выдумать номер.
+    state.vehicleId = handle != 0 ? vehicles_.idOf(handle) : shared::kInvalidVehicleId;
+
+    // Какие машины рассылать, здесь больше не решается — это решил сервер,
+    // назначив нас ведущим. Раньше правило считалось на месте: «рассылает тот,
+    // кто занял в машине младшее место». Оно было верным ровно до тех пор, пока
+    // в машине кто-то сидел, а брошенную машину не вёл никто.
+    localState_.set(state, vehicles_.describeOwned(ped),
+                    vehicles_.describeOwnedAppearances(ped, appearanceDue()));
 }
 
-shared::PlayerId GameSession::ownerOfVehicle(const game::Vehicles::Seat& seat) const {
-    if (seat.driverPed == 0) {
-        // Машина без водителя. Числить её за собой нельзя — уедем на ней вдвоём
-        // с тем, кто сядет за руль позже.
-        return shared::kInvalidPlayerId;
+bool GameSession::appearanceDue() {
+    // Внешность снимается редко и намеренно: полсотни вызовов нативов ради
+    // цвета, который не менялся с начала сессии, — это дорого за кадр и дёшево
+    // раз в пару секунд. Отправит её сеть всё равно только при изменении.
+    const auto now = Clock::now();
+
+    if (now - vehicleAppearanceAt_ < kAppearanceInterval) {
+        return false;
     }
 
-    if (seat.driverPed == player_.ped()) {
-        return status_.snapshot().playerId;
+    vehicleAppearanceAt_ = now;
+    return true;
+}
+
+shared::Vec3 GameSession::spawnPoint() const {
+    // Названная сервером, а не зашитая здесь. Пока он молчит — запасная: игрок,
+    // уже оказавшийся в мире, должен где-то стоять, и начало координат для этого
+    // не годится.
+    return status_.snapshot().spawn.value_or(kFallbackSpawn);
+}
+
+void GameSession::applyServerState(int ped) {
+    // Здоровье назначает сервер, и клиент о нём больше не свидетельствует — он о
+    // нём узнаёт. Ставится оно прямо, а не отниманием урона: урон мог потеряться
+    // по дороге, а число, пришедшее от сервера, верно само по себе.
+    if (const auto health = mail_.takeIncomingHealth()) {
+        player_.applyHealth(ped, health->health, health->armour);
     }
 
-    return remotePlayers_.ownerOf(seat.driverPed);
+    // Снаряжение приходит редко — при входе, при выдаче и после смерти. Игра при
+    // смерти отбирает оружие, и без этого воскресший поднимался бы с пустыми
+    // руками.
+    if (const auto loadout = mail_.takeIncomingLoadout()) {
+        player_.applyLoadout(ped, loadout->weapons, loadout->replace);
+    }
+
+    // Предметы: сперва появившиеся, потом пропавшие. Порядок здесь не важен —
+    // они друг с другом не связаны никак, — но пропавшие идут вторыми, чтобы
+    // предмет, объявленный и убранный в одном пакете, не остался в мире.
+    for (const shared::ObjectAdded& object : mail_.takeIncomingObjects()) {
+        objects_.add(object);
+    }
+    for (const shared::ObjectId id : mail_.takeRemovedObjects()) {
+        objects_.remove(id);
+    }
+
+    objects_.sync();
 }
 
 void GameSession::showRemotePlayers(int ped) {
-    // Машины идут первыми: игроков в них сажать, а посадить некуда, пока машины
-    // нет. Порядок здесь — не вкус, а зависимость.
-    std::vector<shared::VehicleState> vehicles;
-    for (const RemoteVehicleView& vehicle : roster_.vehicles()) {
-        vehicles.push_back(vehicle.state);
+    // Погода и время — раньше всего остального: они касаются мира целиком, а не
+    // того, кто в нём стоит, и ставить их после расстановки людей незачем.
+    if (const auto world = mail_.takeIncomingWorld()) {
+        world_.applyWorldState(*world);
     }
 
-    vehicles_.sync(vehicles);
+    // Внешность — раньше самих машин: она может прийти до первого снимка, и
+    // машина, созданная в этом же кадре, должна оказаться уже покрашенной.
+    for (const shared::VehicleAppearance& appearance : mail_.takeIncomingVehicleAppearances()) {
+        vehicles_.applyAppearance(appearance);
+    }
+
+    // Машины появляются раньше людей: чужого игрока некуда сажать, пока его
+    // машины нет. А убираются позже них, и это не симметрия ради красоты:
+    // машина, убранная раньше сидящего в ней, оставляет игре персонажа внутри
+    // несуществующей сущности. Падает она при этом не здесь, а на ближайшей
+    // отрисовке, и след ведёт в d3d11 — туда, где искать нечего.
+    std::vector<game::Vehicles::View> vehicles;
+
+    for (const SessionVehicleView& vehicle : roster_.vehicles()) {
+        vehicles.push_back(game::Vehicles::View{
+            .state = vehicle.state,
+            .owner = vehicle.owner,
+        });
+    }
+
+    // Список полный, включая машины, которые ведём мы: сервер знает обо всех, и
+    // отличить свои от чужих можно по ведущему. Раньше свою приходилось называть
+    // отдельно — её не присылали, и без напоминания её сочли бы пропавшей.
+    vehicles_.sync(vehicles, status_.snapshot().playerId);
 
     const std::vector<RemoteView> players = roster_.snapshot();
 
@@ -1009,26 +927,13 @@ void GameSession::showRemotePlayers(int ped) {
     }
 
     remotePlayers_.sync(views, ped);
-    nameplates_.draw(views, player_.coords(ped));
-}
 
-void GameSession::handleInput(int ped) {
-    if (ped == 0) {
-        return;
-    }
+    // И только теперь — уборка машин, которых не стало. Люди уже расставлены:
+    // те, кто вышел из сессии, убраны, а оставшиеся сидят там, где сидят. Машина
+    // с седоком до следующего кадра не тронется — она помечена и подождёт.
+    vehicles_.sweep();
 
-    // Пока набирается текст или открыто меню, клавиши принадлежат им: буква F5
-    // в реплике не должна поднимать игрока в воздух.
-    if ((textEntry_ != nullptr && textEntry_->active()) || adminMenu_.open()) {
-        return;
-    }
-
-    if (pressedOnce(kNoclipKey)) {
-        noclip_.setActive(ped, !noclip_.active());
-        spdlog::info("свободный полёт: {}", noclip_.active() ? "включён" : "выключен");
-    }
-
-    noclip_.update(ped);
+    nameplates_.draw(views, remotePlayers_, player_.coords(ped));
 }
 
 bool GameSession::running() const noexcept {

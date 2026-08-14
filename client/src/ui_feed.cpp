@@ -141,16 +141,6 @@ void UiFeed::setInput(bool active, std::string text) {
     inputText_ = std::move(text);
 }
 
-void UiFeed::setMenu(Menu menu) {
-    const std::lock_guard guard{mutex_};
-    menu_ = std::move(menu);
-}
-
-bool UiFeed::menuOpen() const {
-    const std::lock_guard guard{mutex_};
-    return menu_.open;
-}
-
 void UiFeed::setConsoleVisible(bool visible) {
     const std::lock_guard guard{mutex_};
     consoleVisible_ = visible;
@@ -175,7 +165,8 @@ std::string UiFeed::takeUpdate() {
     std::string message = std::format(
         R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
         R"("consoleVisible":{},"inputActive":{},"inputText":"{}",)"
-        R"("stage":{},"ready":{},"alive":{},"money":{})",
+        R"("stage":{},"ready":{},"alive":{},"money":{},)"
+        R"("disconnect":{},"disconnectDetail":"{}")",
         connection_.state, connection_.players, connection_.latencyMilliseconds,
         // Отсутствие номера доходит до страницы отрицательным числом, а не
         // огромным: наибольшее беззнаковое выглядит как настоящий номер игрока,
@@ -188,7 +179,8 @@ std::string UiFeed::takeUpdate() {
         ready_ ? 1 : 0, alive ? 1 : 0,
         // Неизвестные деньги доходят до страницы как null, а не как ноль: ноль —
         // это разорение, а нам нужно «сервер ещё не сказал».
-        connection_.money.has_value() ? std::format("{}", *connection_.money) : "null");
+        connection_.money.has_value() ? std::format("{}", *connection_.money) : "null",
+        connection_.disconnect, escape(connection_.disconnectDetail));
 
     if (sessionChanged_) {
         sessionChanged_ = false;
@@ -223,33 +215,7 @@ std::string UiFeed::takeUpdate() {
         console_.clear();
     }
 
-    // Меню отдаётся целиком и каждый раз, но только пока открыто: закрытое, оно
-    // сводится к одному признаку, а открытое живёт секунды и меняется от каждого
-    // нажатия — собирать его разницу дороже, чем переслать заново.
-    message += std::format(R"(,"menu":{{"open":{})", menu_.open ? 1 : 0);
-
-    if (menu_.open) {
-        message += std::format(R"(,"title":"{}","selected":{},"note":"{}","asking":{},"items":[)",
-                               escape(menu_.title), menu_.selected, escape(menu_.note),
-                               menu_.asking ? 1 : 0);
-
-        for (std::size_t i = 0; i < menu_.items.size(); ++i) {
-            if (i != 0) {
-                message += ',';
-            }
-
-            const MenuItem& item = menu_.items[i];
-
-            message += std::format(R"({{"label":"{}","value":"{}","kind":{},"on":{}}})",
-                                   escape(item.label), escape(item.value), item.kind,
-                                   item.on ? 1 : 0);
-        }
-
-        message += ']';
-    }
-
-    // Две скобки подряд: первая закрывает меню, вторая — всё сообщение.
-    message += "}}";
+    message += '}';
     return message;
 }
 

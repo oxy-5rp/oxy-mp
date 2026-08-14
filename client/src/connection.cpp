@@ -1,5 +1,7 @@
 #include <oxymp/client/connection.hpp>
 
+#include "interpolation.hpp"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -18,21 +20,52 @@ constexpr auto kPingInterval = std::chrono::seconds{2};
 /// заметно отставать от настоящего движения.
 constexpr auto kStateInterval = std::chrono::milliseconds{50};
 
-/// Насколько далеко разрешено достраивать движение за последним снимком.
+/// Отстал ли пришедший снимок от уже принятого.
 ///
-/// Без ограничения потерянная связь уводила бы модель игрока в бесконечность.
-constexpr auto kMaxExtrapolation = std::chrono::milliseconds{250};
+/// Отметки времени ходят по кругу, поэтому сравниваются не как числа, а как
+/// последовательные номера: берётся беззнаковая разница, и если она больше
+/// половины круга — значит снимок не обогнал предыдущий, а отстал от него.
+/// Обычное «меньше» на переходе счётчика через край решило бы, что весь
+/// дальнейший поток пришёл из прошлого, и движение встало бы намертво.
+///
+/// Одинаковые отметки тоже считаются отставшими: это тот же снимок, пришедший
+/// дважды, а промежуток нулевой длины ничего не описывает.
+[[nodiscard]] bool stale(shared::Timestamp accepted, shared::Timestamp arrived) noexcept {
+    constexpr std::uint32_t kHalfCircle = 0x8000'0000U;
 
-/// На сколько чужие игроки показываются позади настоящего времени.
-///
-/// Плата за плавность: столько времени нужно, чтобы в запасе всегда была пара
-/// снимков, между которыми можно считать положение. Примерно два интервала
-/// отправки — этого хватает, чтобы пережить одиночную потерю пакета.
-constexpr auto kInterpolationDelay = std::chrono::milliseconds{100};
+    const std::uint32_t ahead = shared::elapsedSince(accepted, arrived);
+    return ahead == 0 || ahead >= kHalfCircle;
+}
 
 /// Границы задержки между попытками подключения.
 constexpr auto kMinRetryDelay = std::chrono::milliseconds{500};
 constexpr auto kMaxRetryDelay = std::chrono::seconds{10};
+
+/// Сколько молчания сервера считается разрывом.
+///
+/// Считается здесь, а не транспортом, и это не дублирование. Пороги транспорта
+/// нарочно подняты до полуминуты: клиент живёт внутри процесса игры, и пока GTA
+/// грузится, его сетевой поток не получает управления секундами — на коротких
+/// порогах соединение рвалось прямо на загрузочном экране. Опустить их обратно
+/// значило бы вернуть ту поломку.
+///
+/// Но игроку, у которого сервер умер, ждать полминуты нельзя: он всё это время
+/// ходит по мёртвому миру, не зная об этом. Отсюда второй, короткий счёт —
+/// здесь, где известно то, чего не знает транспорт: работал ли в это время сам
+/// клиент.
+///
+/// Пять секунд — это два с половиной пропущенных обмена ping-pong. Меньше брать
+/// нельзя: одиночная потеря пакета не должна выглядеть смертью сервера.
+constexpr auto kServerSilenceLimit = std::chrono::seconds{5};
+
+/// Промежуток между двумя оборотами цикла, после которого он считается
+/// проспавшим.
+///
+/// Тишина засчитывается только за то время, что мы её слушали. Проспал поток
+/// двадцать секунд на подгрузке мира — эти двадцать секунд не в счёт: сервер мог
+/// говорить всё это время, а не услышали мы. Без этой поправки первая же тяжёлая
+/// подгрузка объявляла бы разрыв на ровном месте.
+constexpr auto kLoopStall = std::chrono::milliseconds{500};
 
 /// Отметка времени для проверки связи.
 ///
@@ -76,85 +109,69 @@ std::string_view describe(ConnectionState state) noexcept {
     return "?";
 }
 
-shared::Vec3 RemotePlayer::interpolatedPosition(std::chrono::steady_clock::time_point now) const {
-    if (!hasState) {
+shared::PlayerState RemotePlayer::at(std::chrono::steady_clock::time_point now) const {
+    if (snapshots == 0) {
         return {};
     }
 
-    // Рисуем чужих игроков с небольшой задержкой относительно настоящего времени.
-    //
-    // Это принципиальный момент: если показывать самый свежий снимок, между
-    // снимками показывать будет нечего, и движение превратится в рывки. Отставая
-    // на kInterpolationDelay, мы почти всегда оказываемся между двумя уже
-    // полученными снимками и можем считать положение между ними.
-    const auto renderAt = now - kInterpolationDelay;
-
-    const auto span = std::chrono::duration<float>{latestAt - previousAt}.count();
-    const auto ahead = std::chrono::duration<float>{renderAt - latestAt}.count();
-
-    if (ahead <= 0.0F) {
-        if (span <= 0.0F) {
-            // Снимок пока один — интерполировать не между чем.
-            return latest.position;
-        }
-
-        const float progress = 1.0F + ahead / span;
-        const float clamped = std::clamp(progress, 0.0F, 1.0F);
-
-        return shared::Vec3{
-            std::lerp(previous.position.x, latest.position.x, clamped),
-            std::lerp(previous.position.y, latest.position.y, clamped),
-            std::lerp(previous.position.z, latest.position.z, clamped),
-        };
+    // Снимок один: отрезка ещё нет, смешивать не с чем. Показываем как есть —
+    // это верно ровно один раз, до прихода второго.
+    if (snapshots < 2) {
+        return latest;
     }
 
-    // Свежих снимков нет дольше задержки: достраиваем движение по последней
-    // известной скорости, но не бесконечно — иначе потеря связи унесёт игрока.
-    const float limit = std::chrono::duration<float>{kMaxExtrapolation}.count();
-    const float elapsed = std::min(ahead, limit);
+    // Всё, кроме плавно меняющегося, берётся из последнего снимка как есть:
+    // достраивать по времени имеет смысл только то, что меняется плавно, а
+    // «целится» и «стреляет» плавно не меняются.
+    shared::PlayerState state = latest;
 
-    return shared::Vec3{
-        latest.position.x + latest.velocity.x * elapsed,
-        latest.position.y + latest.velocity.y * elapsed,
-        latest.position.z + latest.velocity.z * elapsed,
-    };
+    const auto blend = interpolation::blend(
+        std::chrono::milliseconds{shared::elapsedSince(previous.sentAt, latest.sentAt)},
+        now - latestAt);
+
+    if (blend.ahead > 0.0F) {
+        state.position = interpolation::advance(latest.position, latest.velocity, blend.ahead);
+        return state;
+    }
+
+    state.position = interpolation::mix(previous.position, latest.position, blend.progress);
+    state.heading = interpolation::mixAngle(previous.heading, latest.heading, blend.progress);
+    state.aimAt = interpolation::mix(previous.aimAt, latest.aimAt, blend.progress);
+
+    return state;
 }
 
-shared::Vec3 RemoteVehicle::interpolatedPosition(std::chrono::steady_clock::time_point now) const {
-    if (!hasState) {
-        return {};
+shared::VehicleState SessionVehicle::at(std::chrono::steady_clock::time_point now) const {
+    // Машину без ведущего считать не по чему и незачем: снимков о ней больше не
+    // будет, и достраивать движение — значит уводить стоящую машину в сторону
+    // по последней запомненной скорости. То же и пока снимков меньше двух:
+    // отрезка нет, показываем объявленное состояние как есть.
+    if (snapshots < 2 || owner == shared::kInvalidPlayerId) {
+        return latest;
     }
 
     // Тот же расчёт, что и у игрока, и по той же причине: снимки приходят реже
-    // кадров. Разница только в том, что машина проходит между снимками не
-    // полметра, а десяток, — и отставание на них видно вдесятеро отчётливее.
-    const auto renderAt = now - kInterpolationDelay;
+    // кадров. Разница в том, что машина проходит между снимками не полметра, а
+    // десяток, — и отставание на ней видно вдесятеро отчётливее.
+    shared::VehicleState state = latest;
 
-    const auto span = std::chrono::duration<float>{latestAt - previousAt}.count();
-    const auto ahead = std::chrono::duration<float>{renderAt - latestAt}.count();
+    const auto blend = interpolation::blend(
+        std::chrono::milliseconds{shared::elapsedSince(previous.sentAt, latest.sentAt)},
+        now - latestAt);
 
-    if (ahead <= 0.0F) {
-        if (span <= 0.0F) {
-            return latest.position;
-        }
-
-        const float clamped = std::clamp(1.0F + ahead / span, 0.0F, 1.0F);
-
-        return shared::Vec3{
-            std::lerp(previous.position.x, latest.position.x, clamped),
-            std::lerp(previous.position.y, latest.position.y, clamped),
-            std::lerp(previous.position.z, latest.position.z, clamped),
-        };
+    if (blend.ahead > 0.0F) {
+        state.position = interpolation::advance(latest.position, latest.velocity, blend.ahead);
+        state.rotation =
+            interpolation::advanceAngles(latest.rotation, latest.angularVelocity, blend.ahead);
+        return state;
     }
 
-    const float limit = std::chrono::duration<float>{kMaxExtrapolation}.count();
-    const float elapsed = std::min(ahead, limit);
+    state.position = interpolation::mix(previous.position, latest.position, blend.progress);
+    state.rotation = interpolation::mixAngles(previous.rotation, latest.rotation, blend.progress);
+    state.velocity = interpolation::mix(previous.velocity, latest.velocity, blend.progress);
+    state.steer = std::lerp(previous.steer, latest.steer, blend.progress);
 
-    return shared::Vec3{
-        latest.position.x + latest.velocity.x * elapsed,
-        latest.position.y + latest.velocity.y * elapsed,
-        latest.position.z + latest.velocity.z * elapsed,
-    };
+    return state;
 }
 
 Connection::Connection(Settings settings) : settings_(std::move(settings)) {}
@@ -187,6 +204,39 @@ void Connection::update(std::chrono::milliseconds budget) {
     sendPingIfDue();
     sendStateIfDue();
     sendQueued();
+
+    noticeSilence();
+}
+
+void Connection::noticeSilence() {
+    const auto now = Clock::now();
+
+    // Сколько мы отсутствовали между этим оборотом и прошлым. Всё, что дольше
+    // обычного, — не тишина сервера, а наше беспамятство, и отсчёт сдвигается
+    // на эту величину.
+    if (loopSeenAt_ != Clock::time_point{}) {
+        const auto asleep = now - loopSeenAt_;
+
+        if (asleep > kLoopStall && heardAt_ != Clock::time_point{}) {
+            heardAt_ += asleep;
+        }
+    }
+
+    loopSeenAt_ = now;
+
+    if (state_ != ConnectionState::Connected || heardAt_ == Clock::time_point{}) {
+        return;
+    }
+
+    if (now - heardAt_ < kServerSilenceLimit) {
+        return;
+    }
+
+    // Соединение транспорт всё ещё считает живым — он ждёт дольше. Разрываем
+    // сами: сервер, молчащий пять секунд подряд, для игры уже мёртв, а
+    // повторные попытки начнутся тем раньше, чем раньше мы это признаем.
+    disconnect_ = DisconnectReason::Lost;
+    fallBackToWaiting("сервер замолчал");
 }
 
 void Connection::beginAttempt() {
@@ -213,6 +263,14 @@ void Connection::handleEvent(const net::Event& event) {
         return;
 
     case net::Event::Type::Disconnected:
+        // Игрока, который был в сессии, разрыв выбрасывает из игры — и об этом
+        // ему говорят сразу, окном поверх всего. Разрыв на пути к сессии — дело
+        // другое: там ещё нечего терять, и о ходе подключения рассказывает экран
+        // загрузки.
+        if (state_ == ConnectionState::Connected) {
+            disconnect_ = DisconnectReason::Lost;
+        }
+
         // Разрыв на этапе представления почти всегда означает отказ сервера,
         // но точную причину мы уже могли получить отдельным сообщением.
         fallBackToWaiting(state_ == ConnectionState::Connecting ? "сервер недоступен"
@@ -226,6 +284,11 @@ void Connection::handleEvent(const net::Event& event) {
 }
 
 void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
+    // Отметка ставится на любом пакете, а не только на ответе ping. Сервер,
+    // рассылающий снимки, говорит с нами постоянно, и ждать от него отдельного
+    // подтверждения жизни, когда он и так не молчит, незачем.
+    heardAt_ = Clock::now();
+
     const shared::ByteView packet{payload};
 
     const auto id = shared::peekMessageId(packet);
@@ -270,10 +333,10 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         if (const auto left = shared::decode<shared::PlayerLeft>(packet)) {
             remotePlayers_.erase(left->playerId);
 
-            // Машина уходит вместе с хозяином: она числится за ним, и без него
-            // ею некому распоряжаться.
-            remoteVehicles_.erase(left->playerId);
-
+            // Машины ушедшего остаются, и это перемена. Машина больше не
+            // числится за игроком — у неё свой номер, и в ней могли остаться
+            // пассажиры. Она уйдёт сама, когда о ней перестанут приходить
+            // снимки, то есть когда её и правда некому станет вести.
             spdlog::info("игрок id {} вышел", left->playerId);
         }
         return;
@@ -290,6 +353,61 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::VehicleAppearance:
+        if (const auto appearance = shared::decode<shared::VehicleAppearance>(packet)) {
+            vehicleAppearances_.push_back(*appearance);
+        }
+        return;
+
+    case shared::MessageId::VehicleAdded:
+        if (const auto added = shared::decode<shared::VehicleAdded>(packet)) {
+            handleVehicleAdded(*added);
+        }
+        return;
+
+    case shared::MessageId::VehicleRemoved:
+        if (const auto removed = shared::decode<shared::VehicleRemoved>(packet)) {
+            vehicles_.erase(removed->id);
+            sentAppearances_.erase(removed->id);
+        }
+        return;
+
+    case shared::MessageId::VehicleAuthority:
+        if (const auto authority = shared::decode<shared::VehicleAuthority>(packet)) {
+            handleVehicleAuthority(*authority);
+        }
+        return;
+
+    case shared::MessageId::WorldState:
+        if (auto state = shared::decode<shared::WorldState>(packet)) {
+            world_ = std::move(*state);
+        }
+        return;
+
+    case shared::MessageId::PlayerLoadout:
+        if (auto loadout = shared::decode<shared::PlayerLoadout>(packet)) {
+            loadout_ = std::move(*loadout);
+        }
+        return;
+
+    case shared::MessageId::HealthChanged:
+        if (const auto health = shared::decode<shared::HealthChanged>(packet)) {
+            health_ = *health;
+        }
+        return;
+
+    case shared::MessageId::ObjectAdded:
+        if (const auto object = shared::decode<shared::ObjectAdded>(packet)) {
+            objects_.push_back(*object);
+        }
+        return;
+
+    case shared::MessageId::ObjectRemoved:
+        if (const auto object = shared::decode<shared::ObjectRemoved>(packet)) {
+            removedObjects_.push_back(object->id);
+        }
+        return;
+
     case shared::MessageId::ChatLine:
         if (auto line = shared::decode<shared::ChatLine>(packet)) {
             spdlog::info("чат: {}", line->text);
@@ -303,9 +421,15 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
-    case shared::MessageId::AdminOrder:
-        if (const auto order = shared::decode<shared::AdminOrder>(packet)) {
-            orders_.push_back(*order);
+    case shared::MessageId::PlayerTeleport:
+        if (const auto teleport = shared::decode<shared::PlayerTeleport>(packet)) {
+            teleports_.push_back(teleport->position);
+        }
+        return;
+
+    case shared::MessageId::ServerEvent:
+        if (auto event = shared::decode<shared::ServerEvent>(packet)) {
+            serverEvents_.push_back(std::move(*event));
         }
         return;
 
@@ -326,7 +450,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
     case shared::MessageId::Ping:
     case shared::MessageId::ChatSay:
     case shared::MessageId::DamageReport:
-    case shared::MessageId::AdminAction:
+    case shared::MessageId::ClientEvent:
         spdlog::warn("сервер прислал клиентское сообщение");
         return;
     }
@@ -334,10 +458,14 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
 
 void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
     localPlayerId_ = welcome.playerId;
+    spawnPosition_ = welcome.spawnPosition;
     state_ = ConnectionState::Connected;
 
-    // Прошлый отказ больше не описывает происходящее: нас приняли.
+    // Прошлый отказ и прошлый разрыв больше не описывают происходящее: нас
+    // приняли. Отсюда и снимается окно разрыва — само собой, без отдельного
+    // распоряжения: игрок снова в сессии, и рассказывать ему больше не о чем.
     rejectReason_.reset();
+    disconnect_ = DisconnectReason::None;
 
     // Подключение удалось — следующая неудача должна начинать отсчёт заново,
     // а не с накопленной задержки.
@@ -362,6 +490,7 @@ void Connection::handleReject(const shared::ServerReject& reject) {
     }
 
     state_ = ConnectionState::Rejected;
+    disconnect_ = DisconnectReason::Refused;
     spdlog::error("сервер отказал: {}", describe(reject.reason));
 }
 
@@ -384,52 +513,92 @@ void Connection::handleRemoteState(const shared::PlayerState& state) {
     RemotePlayer& player = remotePlayers_[state.playerId];
     player.id = state.playerId;
 
-    // Вышел из-за руля — значит его машины больше нет.
-    //
-    // Узнать это можно только отсюда: снимок машины рассылает водитель, и,
-    // выйдя, он просто перестаёт его слать. Молчание же неотличимо от заминки
-    // в сети, и без этой строки брошенная машина осталась бы стоять у нас
-    // навсегда — вместе с записью о ней.
-    if (!shared::has(state.flags, shared::PlayerFlag::InVehicle) ||
-        state.seat != shared::kDriverSeat) {
-        remoteVehicles_.erase(state.playerId);
-    }
-
-    const auto now = Clock::now();
-
-    if (player.hasState) {
-        player.previous = player.latest;
-        player.previousAt = player.latestAt;
-    } else {
-        player.previous = state;
-        player.previousAt = now;
-        player.hasState = true;
-    }
-
-    player.latest = state;
-    player.latestAt = now;
-}
-
-void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
-    if (state.owner == localPlayerId_ || state.owner == shared::kInvalidPlayerId) {
+    // Снимок, отставший от уже принятого, отбрасывается. Канал ненадёжный и
+    // порядка не обещает, а принятый задом наперёд снимок отматывал бы игрока
+    // назад — и следующий тут же дёргал бы его обратно вперёд.
+    if (player.snapshots > 0 && stale(player.latest.sentAt, state.sentAt)) {
         return;
     }
 
-    RemoteVehicle& vehicle = remoteVehicles_[state.owner];
+    player.previous = player.snapshots > 0 ? player.latest : state;
+    player.latest = state;
+    player.latestAt = Clock::now();
+    ++player.snapshots;
+}
+
+void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
+    // Снимок машины, о существовании которой нам не говорили, отбрасывается.
+    // Заводить машину по снимку больше нельзя: о появлении машин объявляет
+    // сервер, и он же говорит, кто их ведёт. Машина, заведённая здесь, осталась
+    // бы без ведущего навсегда — и никогда не сдвинулась бы с места.
+    //
+    // Случай не выдуманный: снимок идёт по ненадёжному каналу и обгоняет
+    // объявление, идущее по надёжному. Потеря такого снимка ничего не стоит —
+    // следующий придёт через полсотни миллисекунд, уже после объявления.
+    const auto known = vehicles_.find(state.id);
+    if (known == vehicles_.end()) {
+        return;
+    }
+
+    SessionVehicle& vehicle = known->second;
+
+    if (vehicle.snapshots > 0 && stale(vehicle.latest.sentAt, state.sentAt)) {
+        return;
+    }
+
+    vehicle.previous = vehicle.snapshots > 0 ? vehicle.latest : state;
+    vehicle.latest = state;
+    vehicle.latestAt = Clock::now();
+    ++vehicle.snapshots;
+}
+
+void Connection::handleVehicleAdded(const shared::VehicleAdded& added) {
+    if (added.state.id == shared::kInvalidVehicleId) {
+        return;
+    }
 
     const auto now = Clock::now();
 
-    if (vehicle.hasState) {
-        vehicle.previous = vehicle.latest;
-        vehicle.previousAt = vehicle.latestAt;
-    } else {
-        vehicle.previous = state;
-        vehicle.previousAt = now;
-        vehicle.hasState = true;
+    // Оба снимка сразу и одинаковые: машина объявлена стоящей там, где она
+    // есть, и считать между ними нечего, пока не придёт первый настоящий
+    // снимок. Оставь мы их пустыми — машина на мгновение оказалась бы в начале
+    // координат.
+    SessionVehicle& vehicle = vehicles_[added.state.id];
+    vehicle.previous = added.state;
+    vehicle.latest = added.state;
+    vehicle.latestAt = now;
+    vehicle.owner = added.owner;
+
+    // Настоящих снимков ещё не было: то, что пришло, — объявление, а не снимок.
+    // Счёт нужен, чтобы не считать движение между двумя одинаковыми точками.
+    vehicle.snapshots = 0;
+
+    spdlog::debug("в сессии появилась машина {}, ведёт её {}", added.state.id,
+                  added.owner == shared::kInvalidPlayerId ? -1 : static_cast<int>(added.owner));
+}
+
+void Connection::handleVehicleAuthority(const shared::VehicleAuthority& authority) {
+    const auto known = vehicles_.find(authority.id);
+    if (known == vehicles_.end()) {
+        return;
     }
 
-    vehicle.latest = state;
-    vehicle.latestAt = now;
+    if (known->second.owner != authority.owner) {
+        // Отсчёт начинается заново: отметки времени нового ведущего с отметками
+        // прежнего несравнимы — часы у них свои. Смешай мы снимок одного со
+        // снимком другого, промежуток вышел бы любой длины, вплоть до
+        // сорока девяти суток.
+        known->second.snapshots = 0;
+    }
+
+    known->second.owner = authority.owner;
+
+    // Внешность машины, которая перестала быть нашей, забывается как
+    // отправленная. Вернись она к нам обратно — и мы объявим её заново: за то
+    // время, что машину вёл другой, он мог её перекрасить.
+    if (authority.owner != localPlayerId_) {
+        sentAppearances_.erase(authority.id);
+    }
 }
 
 void Connection::setLocalState(const shared::PlayerState& state) {
@@ -437,12 +606,48 @@ void Connection::setLocalState(const shared::PlayerState& state) {
     localState_.playerId = shared::kInvalidPlayerId;
 }
 
-void Connection::setLocalVehicle(const std::optional<shared::VehicleState>& vehicle) {
-    localVehicle_ = vehicle;
+void Connection::setOwnedVehicles(std::vector<shared::VehicleState> vehicles) {
+    ownedVehicles_ = std::move(vehicles);
+}
 
-    if (localVehicle_) {
-        localVehicle_->owner = shared::kInvalidPlayerId;
+void Connection::setOwnedAppearances(std::vector<shared::VehicleAppearance> appearances) {
+    ownedAppearances_ = std::move(appearances);
+}
+
+std::optional<shared::WorldState> Connection::takeWorld() {
+    return std::exchange(world_, std::nullopt);
+}
+
+std::optional<shared::PlayerLoadout> Connection::takeLoadout() {
+    return std::exchange(loadout_, std::nullopt);
+}
+
+std::optional<shared::HealthChanged> Connection::takeHealth() {
+    return std::exchange(health_, std::nullopt);
+}
+
+std::vector<shared::ObjectAdded> Connection::takeObjects() {
+    return std::exchange(objects_, {});
+}
+
+std::vector<shared::ObjectId> Connection::takeRemovedObjects() {
+    return std::exchange(removedObjects_, {});
+}
+
+std::vector<shared::VehicleAppearance> Connection::takeVehicleAppearances() {
+    return std::exchange(vehicleAppearances_, {});
+}
+
+void Connection::emit(std::string name, std::string payload) {
+    if (name.empty()) {
+        return;
     }
+
+    shared::ClientEvent event;
+    event.name = std::move(name);
+    event.payload = std::move(payload);
+
+    outgoingEvents_.push_back(std::move(event));
 }
 
 void Connection::say(std::string text) {
@@ -477,12 +682,12 @@ std::vector<shared::DamageTaken> Connection::takeDamage() {
     return std::exchange(damage_, {});
 }
 
-void Connection::order(const shared::AdminAction& action) {
-    outgoingOrders_.push_back(action);
+std::vector<shared::Vec3> Connection::takeTeleports() {
+    return std::exchange(teleports_, {});
 }
 
-std::vector<shared::AdminOrder> Connection::takeOrders() {
-    return std::exchange(orders_, {});
+std::vector<shared::ServerEvent> Connection::takeServerEvents() {
+    return std::exchange(serverEvents_, {});
 }
 
 std::optional<std::int64_t> Connection::takeMoney() {
@@ -522,17 +727,47 @@ void Connection::sendStateIfDue() {
         return;
     }
 
-    // Машина уходит раньше своего водителя, и это не мелочь: получатель сажает
+    // Отметка ставится здесь, при отправке, а не при снятии снимка в игровом
+    // потоке. Разница есть: снимки снимаются каждый кадр, а уходит раз в
+    // пятьдесят миллисекунд последний из них, и отметка должна описывать то, что
+    // ушло. Одна на всё, что уходит в этот раз, — они и описывают одно мгновение.
+    const auto sentAt = static_cast<shared::Timestamp>(nowMilliseconds());
+
+    // Машины уходят раньше своего водителя, и это не мелочь: получатель сажает
     // игрока в машину, а посадить его некуда, пока о машине не сказано.
-    if (localVehicle_) {
-        const auto vehiclePacket = shared::encode(*localVehicle_);
+    for (shared::VehicleState vehicle : ownedVehicles_) {
+        vehicle.sentAt = sentAt;
+
+        const auto vehiclePacket = shared::encode(vehicle);
         host_->send(serverPeer_, shared::Channel::State, shared::ByteView{vehiclePacket});
     }
+
+    localState_.sentAt = sentAt;
 
     const auto packet = shared::encode(localState_);
     host_->send(serverPeer_, shared::Channel::State, shared::ByteView{packet});
 
     nextStateAt_ = Clock::now() + kStateInterval;
+
+    sendAppearancesIfChanged();
+}
+
+void Connection::sendAppearancesIfChanged() {
+    for (const shared::VehicleAppearance& appearance : ownedAppearances_) {
+        const auto sent = sentAppearances_.find(appearance.id);
+        if (sent != sentAppearances_.end() && sent->second == appearance) {
+            continue;
+        }
+
+        // По надёжному каналу, в отличие от снимков рядом. Разница не в
+        // важности, а в том, что происходит с потерянным сообщением: потерянный
+        // снимок заменит следующий через полсотни миллисекунд, а потерянный цвет
+        // не заменит ничто — он больше не изменится.
+        const auto packet = shared::encode(appearance);
+        host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
+
+        sentAppearances_[appearance.id] = appearance;
+    }
 }
 
 void Connection::sendQueued() {
@@ -541,7 +776,7 @@ void Connection::sendQueued() {
         // минуту после переподключения, уже никому не нужна.
         outgoingChat_.clear();
         outgoingDamage_.clear();
-        outgoingOrders_.clear();
+        outgoingEvents_.clear();
         return;
     }
 
@@ -559,11 +794,13 @@ void Connection::sendQueued() {
     }
     outgoingDamage_.clear();
 
-    for (const shared::AdminAction& action : outgoingOrders_) {
-        const auto packet = shared::encode(action);
+    // Тем же надёжным каналом: потерянное нажатие не повторится, а игрок
+    // увидит, что оно пропало впустую.
+    for (const shared::ClientEvent& event : outgoingEvents_) {
+        const auto packet = shared::encode(event);
         host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
     }
-    outgoingOrders_.clear();
+    outgoingEvents_.clear();
 }
 
 void Connection::fallBackToWaiting(std::string_view reason) {
@@ -576,12 +813,30 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     host_.reset();
     serverPeer_ = net::kInvalidPeerId;
     localPlayerId_ = shared::kInvalidPlayerId;
+    spawnPosition_.reset();
     remotePlayers_.clear();
-    remoteVehicles_.clear();
-    orders_.clear();
+
+    // Машины забываются вместе с соединением: их список принадлежит серверу, и
+    // после переподключения он расскажет о них заново — с теми номерами и
+    // ведущими, какие будут к тому времени.
+    vehicles_.clear();
+    sentAppearances_.clear();
+    teleports_.clear();
+    serverEvents_.clear();
+
+    // Предметы и снаряжение забываются вместе с соединением: их список
+    // принадлежит серверу, и после переподключения он расскажет о них заново.
+    objects_.clear();
+    removedObjects_.clear();
+    loadout_.reset();
+    health_.reset();
     latency_.reset();
     nextPingAt_ = Clock::time_point::max();
     nextStateAt_ = Clock::time_point::max();
+
+    // Отсчёт молчания начинается заново с первым словом нового соединения:
+    // тишина прошлого сервера к новому отношения не имеет.
+    heardAt_ = Clock::time_point{};
 
     state_ = ConnectionState::Waiting;
     nextAttemptAt_ = Clock::now() + retryDelay_;

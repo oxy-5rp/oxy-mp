@@ -1,15 +1,21 @@
 // oxymp-server — сервер мультиплеера.
 //
-// Настройки задаются аргументами командной строки. Файла конфигурации пока нет
-// намеренно: четыре параметра его не оправдывают, а лишняя зависимость — это
-// лишний способ всё усложнить.
+// Настройки читаются из server.cfg рядом с исполняемым файлом, а ключи
+// командной строки перекрывают прочитанное. Порядок именно такой: файл описывает
+// сервер, а строка запуска — сегодняшний опыт над ним, и опыт должен побеждать.
+//
+// Долгое время файла не было намеренно: четырёх параметров он не оправдывал.
+// Теперь их два десятка — точка появления, дальность видимости, погода, список
+// раздаваемого, — и строка запуска перестала помещаться в голове.
 
+#include "config_file.hpp"
 #include "server.hpp"
 
 #include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <charconv>
+#include <cstdio>
 #include <csignal>
 #include <iostream>
 #include <string>
@@ -43,6 +49,24 @@ bool parseNumber(std::string_view text, T& value) {
     return result.ec == std::errc{} && result.ptr == end;
 }
 
+/// Где искать конфигурацию, если её не назвали явно.
+constexpr const char* kDefaultConfig = "server.cfg";
+
+/// Достаёт путь к конфигурации из командной строки.
+///
+/// Отдельным проходом до разбора остального, и это не небрежность: файл
+/// читается первым, а ключи строки ложатся поверх него. Узнать имя файла из
+/// того же прохода, который уже начал заполнять настройки, было бы поздно.
+[[nodiscard]] std::string configPath(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view{argv[i]} == "--config") {
+            return argv[i + 1];
+        }
+    }
+
+    return kDefaultConfig;
+}
+
 bool parseArguments(int argc, char** argv, oxymp::server::Config& config) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
@@ -58,6 +82,10 @@ bool parseArguments(int argc, char** argv, oxymp::server::Config& config) {
             }
         } else if (argument == "--name" && hasValue) {
             config.name = argv[++i];
+        } else if (argument == "--config" && hasValue) {
+            // Уже прочитан отдельным проходом — здесь его нужно только пропустить
+            // вместе со значением, чтобы он не сошёл за неизвестный ключ.
+            ++i;
         } else {
             return false;
         }
@@ -73,14 +101,25 @@ int main(int argc, char** argv) {
     ::SetConsoleOutputCP(CP_UTF8);
 #endif
 
+    spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
+    spdlog::set_level(spdlog::level::debug);
+
     oxymp::server::Config config;
+
+    // Сперва файл, потом командная строка: файл описывает сервер, а строка
+    // запуска — сегодняшний опыт над ним, и опыт должен побеждать.
+    const std::string path = configPath(argc, argv);
+
+    std::string configError;
+    if (!oxymp::server::config_file::load(path, config, configError)) {
+        spdlog::error("{}: {}", path, configError);
+        return 2;
+    }
+
     if (!parseArguments(argc, argv, config)) {
         printUsage();
         return 2;
     }
-
-    spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
-    spdlog::set_level(spdlog::level::debug);
 
     std::signal(SIGINT, onInterrupt);
     std::signal(SIGTERM, onInterrupt);

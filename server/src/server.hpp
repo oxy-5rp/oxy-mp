@@ -1,10 +1,18 @@
 #pragma once
 
+#include "config.hpp"
 #include "http_server.hpp"
 #include "player_registry.hpp"
+#include "resource_catalog.hpp"
 #include "resource_store.hpp"
+#include "object_directory.hpp"
+#include "runtime.hpp"
+#include "server_core.hpp"
+#include "vehicle_directory.hpp"
+#include "world_clock.hpp"
 
 #include <oxymp/net/host.hpp>
+#include <oxymp/script/events.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <atomic>
@@ -13,44 +21,22 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace oxymp::server {
 
-struct Config {
-    std::uint16_t port = shared::kDefaultServerPort;
-    std::size_t maxPlayers = 32;
-    std::string name = "oxyMP";
-
-    /// Кому позволено распоряжаться из админ-меню.
-    ///
-    /// По умолчанию — нулевому месту, то есть тому, кто вошёл первым. Обычно это
-    /// хозяин сервера, который его и запустил.
-    ///
-    /// Проверка здесь не от взломщиков: пакет умеет собрать кто угодно. Она от
-    /// обычного случая — чтобы гость, зашедший в сессию, не мог собрать к себе
-    /// всех остальных.
-    std::vector<shared::PlayerId> admins{0};
-
-    /// С чего игрок начинает.
-    ///
-    /// Своя сумма, к настоящему GTA Online отношения не имеющая. Не ноль, чтобы
-    /// в сессии было что тратить с первой минуты.
-    std::int64_t startingMoney = 100'000;
-
-    /// Откуда брать файлы, которые сервер раздаёт клиентам.
-    ///
-    /// Путь относительный: сервер запускают из своего каталога, и требовать
-    /// от хозяина писать полный путь незачем.
-    std::filesystem::path resourceDirectory = "resources/dlcpacks";
-};
-
 /// Сервер: владеет сетевым узлом и списком игроков.
 ///
 /// Единственный владелец своих подсистем — они создаются вместе с ним и живут
 /// ровно столько же.
-class Server {
+///
+/// Наследование от CoreSink закрытое и означает ровно одно: сервер умеет
+/// разослать то, что скриптовое ядро изменило. Наружу это не видно и видно быть
+/// не должно — принимает ядро эту способность при сборке и больше ни у кого о
+/// ней не спрашивает.
+class Server : private CoreSink {
 public:
     [[nodiscard]] static std::unique_ptr<Server> start(const Config& config, std::string& error);
 
@@ -71,9 +57,52 @@ private:
     void handlePing(net::PeerId peer, const shared::Ping& ping);
     void handlePlayerState(net::PeerId peer, shared::PlayerState state);
     void handleVehicleState(net::PeerId peer, shared::VehicleState state);
+    void handleVehicleAppearance(net::PeerId peer, shared::VehicleAppearance appearance);
+    /// Именованное событие от клиента.
+    ///
+    /// Единственное, чем клиент теперь просит сервер что-либо сделать. Раньше
+    /// таких сообщений было семь — завести машину, убрать её, выдать оружие,
+    /// сменить погоду, поставить предмет, распорядиться игроком, — и каждое несло
+    /// в себе кусок правил игры. Правила уехали в ресурсы, а клиенту осталось
+    /// передать нажатие.
+    void handleClientEvent(net::PeerId peer, const shared::ClientEvent& event);
+
+    /// Сообщает игроку его здоровье и броню.
+    void sendHealth(const Player& player, shared::PlayerId attacker);
+
+    /// Выдаёт игроку его снаряжение.
+    void sendLoadout(const Player& player, bool replace);
+
+    /// Поднимает мёртвых, у которых вышел срок.
+    void reviveDead();
+
+    // --- То, чего скриптовое ядро не может само (CoreSink) ------------------------
+    //
+    // Каждое из них — рассылка: ядро меняет реестры, а рассказать об этом сети
+    // умеет только сервер.
+
+    void healthChanged(const Player& player) override;
+    void teleported(const Player& player, const shared::Vec3& position) override;
+    void emitted(const Player& player, std::string_view name, std::string_view payload) override;
+    void loadoutChanged(const Player& player, bool replace) override;
+    void vehicleAdded(shared::VehicleId id) override;
+    void vehicleRemoved(shared::VehicleId id) override;
+    void objectAdded(shared::ObjectId id) override;
+    void objectRemoved(shared::ObjectId id) override;
+    void worldChanged() override;
+    void chatLine(shared::PlayerId to, std::string text) override;
+
+    /// Объявляет скриптам событие про игрока.
+    ///
+    /// Возвращает false, если кто-то из них его отменил. Считается это только у
+    /// реплики в чат — остальное скрипту отменять незачем, и делать вид, что он
+    /// на это влияет, было бы обманом.
+    bool tellScripts(script::EventKind kind, shared::PlayerId about, std::string text = {});
+
+    /// Сколько игрок лежит мёртвым, прежде чем сервер поднимет его.
+    static constexpr auto kRespawnDelay = std::chrono::seconds{5};
     void handleChatSay(net::PeerId peer, const shared::ChatSay& say);
     void handleDamageReport(net::PeerId peer, const shared::DamageReport& report);
-    void handleAdminAction(net::PeerId peer, const shared::AdminAction& action);
 
     /// Рассылает строку чата всем и записывает её в журнал сервера.
     void announce(shared::ChatKind kind, shared::PlayerId author, std::string nickname,
@@ -94,12 +123,91 @@ private:
         host_->broadcast(shared::Channel::Control, shared::ByteView{packet}, except);
     }
 
+    /// Читает описания ресурсов, поднимает их и берёт в раздачу их файлы.
+    void startResources();
+
+    /// Останавливает поднятое.
+    void stopResources();
+
+    /// Заводит машины под те языки, что встретились в перечне ресурсов.
+    ///
+    /// По надобности, а не про запас: голый сервер не должен платить памятью и
+    /// временем запуска за движок, которым никто не пользуется.
+    void ensureRuntimes();
+
+    /// Машина для ресурсов такого типа. nullptr — такой в сервере нет.
+    [[nodiscard]] Runtime* runtimeFor(std::string_view type) const;
+
     /// Разрывает соединения, которые подключились, но так и не представились.
     void dropSilentPeers();
+
+    /// Пересматривает, кто какую машину ведёт, и рассылает изменения.
+    ///
+    /// Не каждый тик: пересмотр перебирает все машины на всех игроков, а
+    /// расстояния между ними за тридцатую долю секунды меняются на сантиметры.
+    /// Раз в полсекунды и достаточно — этого хватает, чтобы подъехавший принял
+    /// машину раньше, чем успеет к ней подойти.
+    void reassignVehicles();
+
+    /// Рассказывает каждому о машинах, которые к нему приблизились, и убирает
+    /// те, что отдалились.
+    ///
+    /// Так же устроено в RAGE MP: клиент знает не обо всей сессии, а о том, что
+    /// вокруг него. Рассказывать каждому обо всём — значит слать сотню снимков
+    /// в секунду о машинах на другом конце карты, которых он всё равно не
+    /// увидит.
+    void streamVehicles();
+
+    /// Объявляет игроку машину вместе с её внешностью.
+    ///
+    /// Вместе — потому что порознь нельзя: внешность накладывается на машину, и
+    /// пришедшая раньше неё оказалась бы никому не нужна.
+    void sendVehicleTo(net::PeerId peer, const VehicleDirectory::Vehicle& vehicle);
+
+    /// Рассылает погоду и время, если пора.
+    void broadcastWorld();
+
+    /// Рассказывает каждому о предметах, которые к нему приблизились.
+    ///
+    /// Тем же порядком, что и машины, и по той же причине. Отдельно от них —
+    /// потому что номера у предметов свои, и списки виденного у игрока тоже
+    /// разные.
+    void streamObjects();
+
+    /// Рассылает сообщение тем, кто достаточно близко к точке.
+    ///
+    /// Ею уходит всё, что описывает происходящее в одном месте мира: снимки
+    /// игроков и машин, их внешность. Игроку незачем знать, как бежит человек за
+    /// полкилометра от него и какого цвета там машина, — он их всё равно не
+    /// увидит, а снимков это половина всего, что ходит по сети.
+    ///
+    /// Канал задаётся вызывающим, потому что разным сообщениям нужен разный:
+    /// снимок устаревает через полсотни миллисекунд и переотправки не стоит, а
+    /// не дошедший цвет не исправится сам никогда.
+    template<typename Message>
+    void broadcastNear(const shared::Vec3& origin, shared::Channel channel, const Message& message,
+                       net::PeerId except = net::kInvalidPeerId) {
+        const auto packet = shared::encode(message);
+        const float reach = config_.streamDistance * config_.streamDistance;
+
+        for (const auto& [peer, player] : players_) {
+            if (peer == except || shared::distanceSquared(origin, player.position) > reach) {
+                continue;
+            }
+
+            host_->send(peer, channel, shared::ByteView{packet});
+        }
+    }
 
     Config config_;
     std::unique_ptr<net::Host> host_;
     PlayerRegistry players_;
+
+    /// Кто в какой машине сидит и как эти машины выглядят.
+    VehicleDirectory vehicles_;
+
+    /// Что расставлено в мире руками.
+    ObjectDirectory objects_;
 
     /// Что сервер раздаёт клиентам сверх самой игры.
     ///
@@ -112,6 +220,45 @@ private:
     /// Когда соединение подключилось. Запись живёт до рукопожатия: молчащий
     /// клиент иначе занимал бы место в лимите игроков бесконечно.
     std::unordered_map<net::PeerId, std::chrono::steady_clock::time_point> awaitingHello_;
+
+    /// Погода и часы сессии. Идут здесь, а не у клиентов.
+    ///
+    /// Со значением по умолчанию, потому что сервер собирается пустым, а
+    /// настройки прикладываются к нему в start. Заменяется там же целиком.
+    WorldClock world_{"EXTRASUNNY", 12, 0};
+
+    /// Кто слушает происходящее в сессии.
+    ///
+    /// Объявлены раньше ядра и ресурсов, потому что переживают и то и другое:
+    /// ресурс отписывается при остановке, и список обязан быть жив в это
+    /// мгновение.
+    script::Events events_;
+
+    /// Лицо сервера, обращённое к скриптам.
+    ///
+    /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
+    /// и быть не должно — они разошлись бы с настоящими молча.
+    ServerCore core_{players_, vehicles_, objects_, world_, config_, events_, *this};
+
+    /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
+    ResourceCatalog catalog_;
+
+    /// Скриптовые машины, по одной на язык.
+    ///
+    /// Списком, а не полем на каждую: сервер не должен знать, сколько их и какие
+    /// они — он спрашивает по типу ресурса и получает ту, что откликнулась. Так
+    /// добавление языка не трогает ничего, кроме места, где список наполняется.
+    ///
+    /// Пустой список — обычное состояние голого сервера, а не поломка.
+    std::vector<std::unique_ptr<Runtime>> runtimes_;
+
+    /// Когда в последний раз пересматривали ведущих и раздавали машины по виду.
+    ///
+    /// Отсчёты разные, потому что поводы разные: пересмотр ведущих случается ещё
+    /// и по событиям — сел за руль, вышел из сессии, — а раздача идёт своим
+    /// ровным чередом.
+    std::chrono::steady_clock::time_point reassignedAt_{};
+    std::chrono::steady_clock::time_point streamedAt_{};
 };
 
 } // namespace oxymp::server

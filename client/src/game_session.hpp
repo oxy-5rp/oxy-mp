@@ -1,6 +1,5 @@
 #pragma once
 
-#include "game/admin_menu.hpp"
 #include "game/appearance.hpp"
 #include "game/controls.hpp"
 #include "game/engine_addresses.hpp"
@@ -10,7 +9,7 @@
 #include "game/net_session.hpp"
 #include "game/network_bail.hpp"
 #include "game/network_game.hpp"
-#include "game/noclip.hpp"
+#include "game/objects.hpp"
 #include "game/online_map.hpp"
 #include "game/player.hpp"
 #include "game/remote_players.hpp"
@@ -27,13 +26,13 @@
 #include "session_mail.hpp"
 #include "session_status.hpp"
 #include "ui_feed.hpp"
-#include "ui_mail.hpp"
 
 #include <oxymp/shared/math/vec3.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace oxymp::client {
@@ -97,7 +96,6 @@ public:
                                                              LocalState& localState,
                                                              SessionMail& mail,
                                                              UiFeed& feed,
-                                                             UiMail& clicks,
                                                              std::string& error);
 
     ~GameSession();
@@ -121,7 +119,7 @@ public:
 private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
-                LocalState& localState, SessionMail& mail, UiFeed& feed, UiMail& clicks);
+                LocalState& localState, SessionMail& mail, UiFeed& feed);
 
     /// Чем клиент занят между запуском игры и полноценной игрой.
     ///
@@ -148,7 +146,6 @@ private:
     void advance();
     void spawn();
     void sweepScripts();
-    void handleInput(int ped);
     void handleDeath(int player);
     void showRemotePlayers(int ped);
     void publishLocalState(int player, int ped, bool dead);
@@ -160,25 +157,10 @@ private:
     void ensureTextEntry();
 
     /// Ведёт чат и консоль: открытие, набор, отправку.
-    ///
-    /// Строка ввода одна на весь клиент, и просить её могут двое: чат и меню.
-    /// Иначе пришлось бы держать два перехвата клавиатуры одного окна.
     void handleTyping();
 
-    /// Кому сейчас принадлежит набираемая строка.
-    enum class Typing {
-        Chat,
-        Menu,
-    };
-
-    /// Ведёт админ-меню: открытие, перемещение по пунктам, распоряжения.
-    void handleMenu(int player, int ped);
-
-    /// Применяет к меню то, что игрок сделал на странице мышью.
-    void applyClicks(int player, int ped);
-
-    /// Исполняет распоряжения администратора сессии.
-    void applyOrders(int ped);
+    /// Исполняет то, что велел сервер: перенос игрока и именованные события.
+    void applyServerEvents(int ped);
 
     /// Держит игру в поднятой сетевой сессии.
     void holdSession();
@@ -191,10 +173,27 @@ private:
 
 
     /// Применяет к своему персонажу урон, о котором сообщил сервер.
+    ///
+    /// Здоровье при этом не меняется: его назначает сервер отдельным сообщением.
+    /// Отсюда — только то, что видно и слышно: вспышка на экране и строка о том,
+    /// кто попал.
     void applyIncomingDamage(int ped);
 
-    /// Чья это машина, если сидеть на указанном месте.
-    [[nodiscard]] shared::PlayerId ownerOfVehicle(const game::Vehicles::Seat& seat) const;
+    /// Принимает от сервера здоровье, снаряжение и предметы.
+    void applyServerState(int ped);
+
+    /// Где появляться. Названное сервером, а пока он молчит — запасное.
+    [[nodiscard]] shared::Vec3 spawnPoint() const;
+
+    /// Пора ли снимать внешность машины, за рулём которой мы сидим.
+    ///
+    /// Кто какую машину ведёт, здесь больше не решается: это решает сервер. А вот
+    /// как часто перечитывать внешность — забота наша: полсотни вызовов нативов
+    /// ради цвета, который не менялся с начала сессии, дороги за кадр и дёшевы
+    /// раз в пару секунд.
+    ///
+    /// Не const: вызов сдвигает отсчёт до следующего раза.
+    [[nodiscard]] bool appearanceDue();
 
     /// Ведёт замер меню паузы и записывает результат каждого открытия.
     void reportPause();
@@ -212,11 +211,6 @@ private:
     /// строк чата. Он живёт внутри этого же процесса и рисуется прямо в кадр.
     UiFeed& feed_;
 
-    /// Обратное направление: что игрок нажал на странице мышью. Забирается
-    /// изнутри тика — почти каждый пункт меню это нативы, а их можно звать
-    /// только оттуда.
-    UiMail& clicks_;
-
     game::Hud hud_;
     game::Player player_;
     game::Screen screen_;
@@ -227,16 +221,17 @@ private:
     game::OnlineMap onlineMap_;
     game::Appearance appearance_;
     game::Respawn respawn_;
-    game::Noclip noclip_;
     game::Streaming streaming_;
 
     /// Объявлены в этом порядке не случайно: машины строятся раньше игроков,
     /// потому что игроки на них ссылаются.
     game::Vehicles vehicles_;
     game::RemotePlayers remotePlayers_;
-    game::Nameplates nameplates_;
 
-    game::AdminMenu adminMenu_;
+    /// Предметы, расставленные в мире. Ни от кого не зависят: у них нет ведущего
+    /// и они не двигаются — оттого и стоят особняком от машин и людей.
+    game::Objects objects_;
+    game::Nameplates nameplates_;
 
     game::SessionState sessionState_;
     game::NetworkGame networkGame_;
@@ -245,17 +240,6 @@ private:
     /// Перехват клавиатуры. Ставится не сразу: окна игры в первые секунды ещё
     /// нет, а без окна перехватывать нечего.
     std::unique_ptr<game::TextEntry> textEntry_;
-
-    /// Кому уйдёт набранное, когда игрок нажмёт ввод.
-    Typing typingFor_ = Typing::Chat;
-
-    /// Кончился ли набор строки в этом кадре.
-    ///
-    /// Клавиша, которой набор закончили, не должна отзываться в меню. Иначе
-    /// Enter, отправивший название модели, в том же кадре нажимал бы выбранный
-    /// пункт — то самое поле ввода, — и меню тут же спрашивало бы название
-    /// заново.
-    bool typingJustEnded_ = false;
 
     /// Запертая дверь, через которую игра уходит из сессии.
     ///
@@ -280,6 +264,9 @@ private:
     /// Время отсчитывается по монотонным часам, а не по игровому таймеру:
     /// игровой стоит на нуле, пока не началась сессия, — то есть ровно тогда,
     /// когда экран загрузки и нужен.
+    /// Когда внешность машин снимали в прошлый раз.
+    Clock::time_point vehicleAppearanceAt_{};
+
     Clock::time_point worldReadyAt_{};
     Clock::time_point playingSince_{};
     Clock::time_point sweptAt_{};

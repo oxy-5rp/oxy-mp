@@ -43,7 +43,7 @@ void ResourceStore::load(const std::filesystem::path& directory) {
     std::error_code ec;
 
     if (!std::filesystem::exists(directory, ec)) {
-        spdlog::info("каталог ресурсов {} отсутствует — раздавать нечего",
+        spdlog::info("каталог игровых файлов {} отсутствует — раздавать нечего",
                      directory.string());
         return;
     }
@@ -94,6 +94,33 @@ void ResourceStore::load(const std::filesystem::path& directory) {
     std::ranges::sort(items_, {}, &Item::name);
 
     spdlog::info("ресурсов готово к раздаче: {}", items_.size());
+}
+
+bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
+    const std::vector<std::uint8_t> plain = readFile(path);
+    if (plain.empty()) {
+        return false;
+    }
+
+    std::vector<std::uint8_t> packed = shared::Vault::pack(plain, shared::Vault::builtInKey());
+    const std::string hash = shared::fingerprint(packed);
+
+    Item item;
+    item.name = std::move(name);
+    item.hash = hash;
+    item.size = packed.size();
+
+    spdlog::info("ресурс {}: {} КБ", item.name, item.size / 1024);
+    spdlog::info("  /resources/dlcpacks/{}.resource", hash);
+
+    items_.push_back(std::move(item));
+
+    // Содержимое кладётся один раз: два одинаковых файла дают один отпечаток, и
+    // второй раз хранить то же самое незачем. В списке они при этом оба —
+    // клиенту важно имя, а качать он будет один файл.
+    packed_.emplace(hash, std::move(packed));
+
+    return true;
 }
 
 const std::vector<std::uint8_t>* ResourceStore::find(const std::string& hash) const {

@@ -4,6 +4,7 @@
 # консольный бот-клиент. Сеть таким образом отлаживается без запуска игры.
 add_library(oxymp_clientcore STATIC
     src/connection.cpp
+    src/interpolation.cpp
 )
 add_library(oxymp::clientcore ALIAS oxymp_clientcore)
 
@@ -29,7 +30,6 @@ if(WIN32)
         src/game_session.cpp
         src/resource_cache.cpp
         src/ui_feed.cpp
-        src/game/admin_menu.cpp
         src/game/appearance.cpp
         src/game/controls.cpp
         src/game/crash_log.cpp
@@ -44,14 +44,15 @@ if(WIN32)
         src/game/net_session.cpp
         src/game/network_bail.cpp
         src/game/network_game.cpp
-        src/game/noclip.cpp
+        src/game/objects.cpp
         src/game/nameplates.cpp
         src/game/online_map.cpp
         src/game/overlay_renderer.cpp
         src/game/page_source.cpp
         src/game/present_hook.cpp
+        src/game/ped_activity.cpp
+        src/game/ped_animation.cpp
         src/game/player.cpp
-        src/game/pointer.cpp
         src/game/remote_players.cpp
         src/game/respawn.cpp
         src/game/screen.cpp
@@ -62,6 +63,7 @@ if(WIN32)
         src/game/script_tick.cpp
         src/game/text_entry.cpp
         src/game/ui_layer.cpp
+        src/game/vehicle_snapshot.cpp
         src/game/vehicles.cpp
         src/game/window.cpp
         src/game/world.cpp
@@ -103,3 +105,6 @@ if(WIN32)
         wininet
     )
 endif()
+
+# Подпись внедряемого модуля. Пустышка, пока OXYMP_SIGN выключен.
+oxymp_sign(oxymp_client)

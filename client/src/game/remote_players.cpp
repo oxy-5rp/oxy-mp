@@ -3,6 +3,8 @@
 #include "native_call.hpp"
 #include "native_hashes.hpp"
 
+#include "../interpolation.hpp"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -79,25 +81,24 @@ constexpr float kNoSliding = 0.0F;
 /// стрелять по нему бессмысленно, и лучше рывок, чем стойкая ложь.
 constexpr float kSnapDistance = 3.0F;
 
-/// Какую долю расхождения съедать за кадр, пока оно невелико.
+/// Во сколько раз сокращать расхождение за секунду, пока оно невелико.
 ///
-/// Здесь и заключается разница с прежним способом. Персонаж не переставляется в
-/// точку снимка — он подводится к ней, оставаясь физическим телом: упирается в
-/// стены, сдвигает предметы, принимает удары.
-constexpr float kCorrectionRate = 0.25F;
+/// Персонаж не переставляется в точку снимка — он подводится к ней, оставаясь
+/// физическим телом: упирается в стены, сдвигает предметы, принимает удары.
+///
+/// За секунду, а не за кадр, и это не придирка: доля за кадр съедает расхождение
+/// вдвое быстрее при шестидесяти кадрах, чем при тридцати, и один и тот же игрок
+/// у двух зрителей идёт по-разному. Такую же ошибку здесь уже ловили — на
+/// повороте, который доходил до нужного угла тогда, когда хозяин смотрел уже в
+/// другую сторону. Число подобрано так, чтобы при обычных шестидесяти кадрах
+/// выходила прежняя четверть расхождения за кадр.
+constexpr float kCorrectionRate = 17.0F;
 
 /// Ниже этого расхождения не поправляем вовсе.
 ///
 /// Иначе персонаж вечно подрагивает: снимки приходят с погрешностью в
 /// сантиметры, и гоняться за ней — значит трясти его на месте.
 constexpr float kIgnoredError = 0.15F;
-
-/// Какую долю расхождения по направлению взгляда съедать за кадр.
-constexpr float kTurnRate = 0.25F;
-
-/// Полный оборот и половина оборота в градусах.
-constexpr float kFullTurn = 360.0F;
-constexpr float kHalfTurn = 180.0F;
 
 /// Сколько держать тело обмякшим, в миллисекундах.
 constexpr int kRagdollDuration = 4000;
@@ -124,6 +125,31 @@ constexpr std::uint32_t kFiringPatternFullAuto = 0xC6EE6B4CU;
 /// Признак немедленного выхода из машины: без открывания двери и без анимации.
 constexpr int kWarpOutOfVehicle = 16;
 
+/// Признак обычного входа в машину: подойти, открыть дверь, сесть.
+///
+/// Ровно то, чего не хватало: раньше персонаж возникал на сиденье, и посадки со
+/// стороны видно не было вовсе.
+constexpr int kNormalEntry = 1;
+
+/// С какой скоростью персонаж идёт к машине. Двойка — бегом.
+constexpr float kRunToVehicle = 2.0F;
+
+/// Сколько отводится задаче входа, в миллисекундах.
+///
+/// Не выдержала — сажаем рывком: дверь могло заклинить о стену, а хозяин к
+/// этому времени уже едет, и оставить его персонажа снаружи хуже, чем показать
+/// некрасивую посадку.
+constexpr std::int32_t kEntryPatience = 3000;
+
+/// Признаки задачи «иди туда, целясь вон туда»: не стрелять на ходу, не искать
+/// дорогу вокруг препятствий и не сводить прицел мгновенно.
+constexpr bool kNoShootingOnTheWay = false;
+constexpr float kNoTargetRadius = 0.0F;
+constexpr float kNoSlowdown = 0.0F;
+constexpr bool kNoNavigation = false;
+constexpr int kNoNavigationFlags = 0;
+constexpr bool kNoInstantAim = false;
+
 float length(const shared::Vec3& value) {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
 }
@@ -149,18 +175,17 @@ float blendForSpeed(float speed) {
     return kSprintBlend;
 }
 
-/// Кратчайший поворот от одного направления к другому, в градусах.
-///
-/// Без приведения к половине оборота поворот с 350 градусов на 10 выглядел бы
-/// как разворот на 340 градусов в обратную сторону вместо шага на двадцать.
-float shortestTurn(float from, float to) {
-    return std::fmod(to - from + kHalfTurn + kFullTurn, kFullTurn) - kHalfTurn;
+/// Целится ли игрок — то есть нужно ли разводить взгляд и направление движения.
+bool aiming(const shared::PlayerState& state) {
+    return shared::has(state.flags, shared::PlayerFlag::Aiming) ||
+           shared::has(state.flags, shared::PlayerFlag::Shooting);
 }
 
 } // namespace
 
 RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles) noexcept
     : vehicles_(vehicles),
+      animation_(table),
       hashKey_(table.handlerFor(natives::kGetHashKey)),
       requestModel_(table.handlerFor(natives::kRequestModel)),
       hasModelLoaded_(table.handlerFor(natives::kHasModelLoaded)),
@@ -178,23 +203,27 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       invincible_(table.handlerFor(natives::kSetEntityInvincible)),
       lodDistance_(table.handlerFor(natives::kSetEntityLodDist)),
       getCoords_(table.handlerFor(natives::kGetEntityCoords)),
-      getHeading_(table.handlerFor(natives::kGetEntityHeading)),
       taskGoTo_(table.handlerFor(natives::kTaskGoStraightToCoord)),
+      taskGoToAiming_(table.handlerFor(natives::kTaskGoToCoordWhileAimingAtCoord)),
       moveBlend_(table.handlerFor(natives::kSetPedDesiredMoveBlendRatio)),
       getHealth_(table.handlerFor(natives::kGetEntityHealth)),
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
+      setArmour_(table.handlerFor(natives::kSetPedArmour)),
       gameTimer_(table.handlerFor(natives::kGetGameTimer)),
       clearTasks_(table.handlerFor(natives::kClearPedTasksImmediately)),
       damagedBy_(table.handlerFor(natives::kHasEntityBeenDamagedByEntity)),
       clearDamage_(table.handlerFor(natives::kClearEntityLastDamageEntity)),
       giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)),
       setWeapon_(table.handlerFor(natives::kSetCurrentPedWeapon)),
+      setAmmo_(table.handlerFor(natives::kSetPedAmmo)),
       taskAim_(table.handlerFor(natives::kTaskAimGunAtCoord)),
       taskShoot_(table.handlerFor(natives::kTaskShootAtCoord)),
       setRagdoll_(table.handlerFor(natives::kSetPedToRagdoll)),
       canRagdoll_(table.handlerFor(natives::kSetPedCanRagdoll)),
       setIntoVehicle_(table.handlerFor(natives::kSetPedIntoVehicle)),
-      leaveVehicle_(table.handlerFor(natives::kTaskLeaveVehicle)) {}
+      enterVehicle_(table.handlerFor(natives::kTaskEnterVehicle)),
+      leaveVehicle_(table.handlerFor(natives::kTaskLeaveVehicle)),
+      isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)) {}
 
 RemotePlayers::~RemotePlayers() {
     // Персонажей здесь уже не убрать: разрушение приходится на выгрузку модуля,
@@ -208,9 +237,9 @@ bool RemotePlayers::ready() const noexcept {
            setCoords_ != nullptr && setHeading_ != nullptr && defaultVariation_ != nullptr &&
            blockEvents_ != nullptr && asMissionEntity_ != nullptr && canBeTargetted_ != nullptr &&
            diesWhenInjured_ != nullptr && invincible_ != nullptr && lodDistance_ != nullptr &&
-           getCoords_ != nullptr && getHeading_ != nullptr && taskGoTo_ != nullptr &&
-           moveBlend_ != nullptr && getHealth_ != nullptr && setHealth_ != nullptr &&
-           gameTimer_ != nullptr && clearTasks_ != nullptr;
+           getCoords_ != nullptr && taskGoTo_ != nullptr && moveBlend_ != nullptr &&
+           getHealth_ != nullptr && setHealth_ != nullptr && gameTimer_ != nullptr &&
+           clearTasks_ != nullptr;
 }
 
 std::uint32_t RemotePlayers::model() {
@@ -259,15 +288,9 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
     // хозяина.
     invokeNative<void>(blockEvents_, ped, true);
 
-    // А вот эти два — наоборот, включены, и в этом суть перемены.
-    //
-    // Раньше персонаж был неуязвим и не брался на прицел. Из-за этого по нему
-    // нельзя было ни попасть, ни прицелиться: удар проходил насквозь, а
-    // автонаведение его не видело. Именно это выглядело как «нет коллизии».
-    //
-    // Теперь по нему попадают по-настоящему. Умереть от этого он всё равно не
-    // может — здоровье ему каждый кадр возвращает хозяин, — но само попадание
-    // мы замечаем и отправляем серверу, а тот уже жертве.
+    // По нему попадают по-настоящему. Умереть от этого он всё равно не может —
+    // здоровье ему каждый кадр возвращает хозяин, — но само попадание мы
+    // замечаем и отправляем серверу, а тот уже жертве.
     invokeNative<void>(canBeTargetted_, ped, true);
     invokeNative<void>(invincible_, ped, false);
 
@@ -321,13 +344,26 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
         it = puppets_.erase(it);
     }
 
+    const auto now = invokeNative<std::int32_t>(gameTimer_);
+
+    // Длительность кадра — один раз на всех: часы у игры одни, а персонажей
+    // бывает три десятка. Первый кадр сравнивать не с чем, и отрицательная
+    // длительность после переполнения счётчика — тоже не длительность: и то и
+    // другое означает «времени не прошло».
+    const float seconds =
+        framedAt_ != 0 && now > framedAt_ ? static_cast<float>(now - framedAt_) / 1000.0F : 0.0F;
+
+    framedAt_ = now;
+
     for (const RemotePlayerView& player : players) {
         const auto known = puppets_.find(player.id);
 
         if (known == puppets_.end()) {
             if (const int ped = spawn(player); ped != 0) {
                 puppets_.emplace(player.id,
-                                 Puppet{.ped = ped, .appliedHealth = player.state.health});
+                                 Puppet{.ped = ped,
+                                        .appliedHealth = player.state.health,
+                                        .actionSequence = player.state.actionSequence});
             }
             continue;
         }
@@ -347,12 +383,21 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
         // Мёртвый никуда не идёт и никуда не смотрит: он лежит там, где упал.
         // Ставить ему положение значило бы возить труп по земле.
         if (!shared::has(player.state.flags, shared::PlayerFlag::Dead)) {
-            ride(puppet, player);
+            ride(puppet, player, now);
 
-            if (!shared::has(player.state.flags, shared::PlayerFlag::InVehicle)) {
-                walk(puppet, player);
+            const bool riding = shared::has(player.state.flags, shared::PlayerFlag::InVehicle);
+            const bool entering =
+                shared::has(player.state.flags, shared::PlayerFlag::EnteringVehicle);
+
+            // Залезающим распоряжается задача входа: она ведёт его к двери сама,
+            // и вести его при этом ещё и снимками значит тянуть в две стороны.
+            if (!riding && !entering) {
+                walk(puppet, player, seconds, now);
                 aim(puppet, player);
             }
+
+            animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
+            act(puppet, player);
         }
 
         puppet.flags = player.state.flags;
@@ -392,6 +437,13 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     }
     puppet.appliedHealth = wanted;
 
+    // Броня видна со стороны: она рисуется на полосе над головой и решает,
+    // сколько выстрелов персонаж выдержит, прежде чем по нему начнёт попадать
+    // по-настоящему.
+    if (setArmour_ != nullptr) {
+        invokeNative<void>(setArmour_, puppet.ped, static_cast<int>(player.state.armour));
+    }
+
     if (dead == wasDead) {
         return;
     }
@@ -404,52 +456,165 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     spdlog::debug("игрок {} {}", player.id, dead ? "погиб" : "снова жив");
 }
 
-void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player) const {
+void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player, std::int32_t now) const {
     const bool riding = shared::has(player.state.flags, shared::PlayerFlag::InVehicle);
+    const bool entering = shared::has(player.state.flags, shared::PlayerFlag::EnteringVehicle);
 
-    if (!riding) {
-        if (puppet.vehicleOwner == shared::kInvalidPlayerId) {
+    if (!riding && !entering) {
+        if (puppet.vehicleId == shared::kInvalidVehicleId) {
             return;
         }
 
         // Вышел. Высаживаем сразу, а не с открыванием двери: хозяин к этому
         // времени уже стоит на асфальте, и отыгрывать выход некогда.
-        const int left = vehicles_.handleFor(puppet.vehicleOwner);
-        puppet.vehicleOwner = shared::kInvalidPlayerId;
+        const int left = vehicles_.handleFor(puppet.vehicleId);
+        puppet.vehicleId = shared::kInvalidVehicleId;
+        puppet.seat = shared::kNoSeat;
+        puppet.enteringSince = 0;
 
         if (left != 0 && leaveVehicle_ != nullptr) {
             invokeNative<void>(leaveVehicle_, puppet.ped, left, kWarpOutOfVehicle);
         } else {
-            // Машины уже нет — её убрали вместе с тем, что хозяин перестал её
-            // рассылать. Персонажу остаётся только забыть свои задачи.
+            // Машины уже нет — её убрали вместе с тем, что о ней перестали
+            // рассказывать. Персонажу остаётся только забыть свои задачи.
             invokeNative<void>(clearTasks_, puppet.ped);
         }
         return;
     }
 
-    const int vehicle = vehicles_.handleFor(player.state.vehicleOwner);
+    const int vehicle = vehicles_.handleFor(player.state.vehicleId);
     if (vehicle == 0) {
         // Машина ещё не создана: её модель могла не успеть загрузиться. Сажать
         // некуда, и это нормально — сядет в следующем кадре.
         return;
     }
 
-    if (puppet.vehicleOwner == player.state.vehicleOwner && puppet.seat == player.state.seat) {
+    const int seat = static_cast<int>(player.state.seat);
+
+    if (entering) {
+        // Хозяин ещё лезет. Задача входа выдаётся один раз и дальше идёт сама:
+        // персонаж подходит к двери, открывает её и садится — то самое, чего со
+        // стороны не было видно вовсе, пока его пересаживали рывком.
+        if (puppet.enteringSince != 0 || enterVehicle_ == nullptr) {
+            return;
+        }
+
+        puppet.enteringSince = now;
+        puppet.vehicleId = player.state.vehicleId;
+        puppet.seat = player.state.seat;
+
+        invokeNative<void>(enterVehicle_, puppet.ped, vehicle, kTaskTimeout, seat, kRunToVehicle,
+                           kNormalEntry, 0);
+
+        spdlog::debug("игрок {} лезет в машину {:#010x} на место {}", player.id,
+                      player.state.vehicleId, seat);
         return;
     }
 
-    puppet.vehicleOwner = player.state.vehicleOwner;
-    puppet.seat = player.state.seat;
+    // Хозяин уже сидит. Если наш персонаж тоже — вход удался, и трогать его
+    // больше не нужно.
+    const bool placed =
+        puppet.vehicleId == player.state.vehicleId && puppet.seat == player.state.seat;
 
-    if (setIntoVehicle_ != nullptr) {
-        invokeNative<void>(setIntoVehicle_, puppet.ped, vehicle, static_cast<int>(player.state.seat));
+    // Спросить игру надёжнее, чем помнить самим: персонажа могло выбросить из
+    // машины взрывом. Но если спросить нечем, память — единственное, что есть, и
+    // считать по ней «не сидит» нельзя: мы сажали бы его рывком каждый кадр.
+    const bool seated = isInVehicle_ != nullptr
+                            ? invokeNative<bool>(isInVehicle_, puppet.ped, vehicle, false)
+                            : placed;
+
+    if (placed && seated) {
+        puppet.enteringSince = 0;
+        return;
     }
 
-    spdlog::debug("игрок {} сел в машину игрока {} на место {}", player.id,
-                 player.state.vehicleOwner, static_cast<int>(player.state.seat));
+    // Вход был начат и ещё не кончился — дадим ему доиграть. Но не бесконечно:
+    // дверь могло заклинить о стену, а хозяин уже едет.
+    if (!seated && puppet.enteringSince != 0 && now - puppet.enteringSince < kEntryPatience) {
+        return;
+    }
+
+    puppet.vehicleId = player.state.vehicleId;
+    puppet.seat = player.state.seat;
+    puppet.enteringSince = 0;
+
+    if (setIntoVehicle_ != nullptr) {
+        invokeNative<void>(setIntoVehicle_, puppet.ped, vehicle, seat);
+    }
+
+    spdlog::debug("игрок {} сел в машину {:#010x} на место {}", player.id, player.state.vehicleId,
+                  seat);
 }
 
-void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player) const {
+void RemotePlayers::turn(const Puppet& puppet, const RemotePlayerView& player, bool moving) const {
+    // Угол приходит уже посчитанным на это мгновение — тем же расчётом и на то
+    // же время, что и положение. Доводить его здесь долей за кадр, как делалось
+    // раньше, не нужно и вредно: доля за кадр означает, что скорость доворота
+    // зависит от частоты кадров, а до нужного угла персонаж доходит уже тогда,
+    // когда хозяин смотрит в другую сторону.
+    if (!moving && setHeading_ != nullptr) {
+        // Стоящему угол задаётся прямо: у него нет ни задачи, ни походки,
+        // которые могли бы этот угол оспорить.
+        invokeNative<void>(setHeading_, puppet.ped, player.state.heading);
+        return;
+    }
+
+    if (desiredHeading_ != nullptr) {
+        // Идущему — желаемое направление, а не мгновенное: игра доворачивает
+        // персонажа сама, отыгрывая шаг ногами, вместо того чтобы вращать его
+        // вокруг оси.
+        invokeNative<void>(desiredHeading_, puppet.ped, player.state.heading);
+    }
+}
+
+void RemotePlayers::steer(Puppet& puppet, const RemotePlayerView& player, float speed,
+                          std::int32_t now) const {
+    // Цель — далеко впереди по ходу движения. Дойти до неё персонаж не успеет,
+    // и в этом весь смысл: задача не должна завершиться, иначе походка кончится
+    // вместе с ней.
+    const shared::Vec3 direction{player.state.velocity.x / speed, player.state.velocity.y / speed,
+                                 player.state.velocity.z / speed};
+    const shared::Vec3 target{player.state.position.x + direction.x * kAimAhead,
+                              player.state.position.y + direction.y * kAimAhead,
+                              player.state.position.z + direction.z * kAimAhead};
+
+    const bool aims = aiming(player.state);
+
+    const bool tasked = puppet.taskedAt != 0;
+    const bool stale = tasked && now - puppet.taskedAt >= kTaskRefresh;
+    const bool veered = tasked && distanceBetween(puppet.aim, target) >= kRetaskDistance;
+    const bool switched = tasked && puppet.taskedAiming != aims;
+
+    if (tasked && !stale && !veered && !switched) {
+        return;
+    }
+
+    puppet.aim = target;
+    puppet.taskedAt = now;
+    puppet.taskedAiming = aims;
+
+    // Целящегося ведёт другая задача, и в этом суть. Обычная задача движения
+    // заодно решает, куда персонаж смотрит, — а целящийся ходит боком и назад,
+    // глядя туда, куда наведено оружие. Развести направление движения и
+    // направление взгляда умеет только эта.
+    if (aims && taskGoToAiming_ != nullptr) {
+        invokeNative<void>(taskGoToAiming_, puppet.ped, target.x, target.y, target.z,
+                           player.state.aimAt.x, player.state.aimAt.y, player.state.aimAt.z,
+                           blendForSpeed(speed), kNoShootingOnTheWay, kNoTargetRadius, kNoSlowdown,
+                           kNoNavigation, kNoNavigationFlags, kNoInstantAim,
+                           kFiringPatternFullAuto);
+        return;
+    }
+
+    // Скорость задаче отдаётся та же, что и походке: разойдись они, персонаж
+    // поехал бы по земле — ноги отыгрывали бы одну скорость, а перемещала бы
+    // его другая.
+    invokeNative<void>(taskGoTo_, puppet.ped, target.x, target.y, target.z, speed, kTaskTimeout,
+                       player.state.heading, kNoSliding);
+}
+
+void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float seconds,
+                         std::int32_t now) const {
     NativeContext coords;
     coords.push(puppet.ped);
     coords.push(true);
@@ -466,10 +631,15 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player) const {
         invokeNative<void>(setCoords_, puppet.ped, player.state.position.x,
                            player.state.position.y, player.state.position.z, false, false, false);
     } else if (error > kIgnoredError) {
+        // Понемногу, и «понемногу» считается от времени, а не от кадров: доля за
+        // кадр съедала бы расхождение вдвое быстрее при шестидесяти кадрах, чем
+        // при тридцати, и один и тот же игрок у двух зрителей шёл бы по-разному.
+        const float share = interpolation::catchUp(kCorrectionRate, seconds);
+
         invokeNative<void>(setCoords_, puppet.ped,
-                           std::lerp(actual.x, player.state.position.x, kCorrectionRate),
-                           std::lerp(actual.y, player.state.position.y, kCorrectionRate),
-                           std::lerp(actual.z, player.state.position.z, kCorrectionRate), false,
+                           std::lerp(actual.x, player.state.position.x, share),
+                           std::lerp(actual.y, player.state.position.y, share),
+                           std::lerp(actual.z, player.state.position.z, share), false,
                            false, false);
     }
 
@@ -488,24 +658,14 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player) const {
         return;
     }
 
-    // Поворот доводится, а не ставится сразу: снимки приходят реже кадров, и
-    // взгляд прыгал бы ступеньками.
-    const float heading = invokeNative<float>(getHeading_, puppet.ped);
-    const float turned = heading + shortestTurn(heading, player.state.heading) * kTurnRate;
-
-    if (desiredHeading_ != nullptr) {
-        // Желаемое направление, а не мгновенное: игра доворачивает персонажа
-        // сама, отыгрывая шаг ногами, вместо того чтобы вращать его вокруг оси.
-        invokeNative<void>(desiredHeading_, puppet.ped, turned);
-    } else {
-        invokeNative<void>(setHeading_, puppet.ped, turned);
-    }
-
     const float speed = length(player.state.velocity);
+    const bool moving = speed >= kStandingSpeed;
+
+    turn(puppet, player, moving);
 
     invokeNative<void>(moveBlend_, puppet.ped, blendForSpeed(speed));
 
-    if (speed < kStandingSpeed) {
+    if (!moving) {
         // Стоящему задача движения не нужна: без неё он просто стоит, а с ней
         // топтался бы на месте, пытаясь дойти до цели, которой мы его не
         // снабдили.
@@ -516,33 +676,7 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player) const {
         return;
     }
 
-    // Цель — далеко впереди по ходу движения. Дойти до неё персонаж не успеет,
-    // и в этом весь смысл: задача не должна завершиться, иначе походка кончится
-    // вместе с ней.
-    const shared::Vec3 direction{player.state.velocity.x / speed, player.state.velocity.y / speed,
-                                 player.state.velocity.z / speed};
-    const shared::Vec3 target{player.state.position.x + direction.x * kAimAhead,
-                              player.state.position.y + direction.y * kAimAhead,
-                              player.state.position.z + direction.z * kAimAhead};
-
-    const auto now = invokeNative<std::int32_t>(gameTimer_);
-
-    const bool tasked = puppet.taskedAt != 0;
-    const bool stale = tasked && now - puppet.taskedAt >= kTaskRefresh;
-    const bool veered = tasked && distanceBetween(puppet.aim, target) >= kRetaskDistance;
-
-    if (tasked && !stale && !veered) {
-        return;
-    }
-
-    puppet.aim = target;
-    puppet.taskedAt = now;
-
-    // Скорость задаче отдаётся та же, что и походке: разойдись они, персонаж
-    // поехал бы по земле — ноги отыгрывали бы одну скорость, а перемещала бы
-    // его другая.
-    invokeNative<void>(taskGoTo_, puppet.ped, target.x, target.y, target.z, speed, kTaskTimeout,
-                       player.state.heading, kNoSliding);
+    steer(puppet, player, speed, now);
 }
 
 void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
@@ -556,18 +690,36 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
         puppet.weapon = player.state.weapon;
 
         if (puppet.weapon != 0) {
-            // Признаки: боезапас полный, оружие сразу в руки.
-            invokeNative<void>(giveWeapon_, puppet.ped, puppet.weapon, kFullAmmo, false, true);
+            // Боезапас — тот, что у хозяина, а не полный, как было раньше.
+            // Разница видна в перестрелке: с полным магазином кукла продолжала
+            // бы стрелять ровно тогда, когда хозяин перезаряжается, и обмен
+            // выстрелами выглядел бы у двоих по-разному.
+            invokeNative<void>(giveWeapon_, puppet.ped, puppet.weapon,
+                               static_cast<int>(player.state.ammo), false, true);
             invokeNative<void>(setWeapon_, puppet.ped, puppet.weapon, true);
+
+            puppet.ammo = player.state.ammo;
         }
+    } else if (puppet.weapon != 0 && player.state.ammo != puppet.ammo && setAmmo_ != nullptr) {
+        // Патроны догоняются отдельно и без выдачи оружия: выдача сбрасывает
+        // позу, а патроны меняются каждым выстрелом.
+        invokeNative<void>(setAmmo_, puppet.ped, puppet.weapon,
+                           static_cast<int>(player.state.ammo));
+
+        puppet.ammo = player.state.ammo;
+    }
+
+    if (!aiming(player.state)) {
+        return;
+    }
+
+    // Идущего и целящегося ведёт задача движения — она же держит и прицел.
+    // Выдавать ему вдобавок задачу прицела значило бы отменять первую.
+    if (length(player.state.velocity) >= kStandingSpeed && taskGoToAiming_ != nullptr) {
+        return;
     }
 
     const bool shooting = shared::has(player.state.flags, shared::PlayerFlag::Shooting);
-    const bool aiming = shared::has(player.state.flags, shared::PlayerFlag::Aiming);
-
-    if (!shooting && !aiming) {
-        return;
-    }
 
     // Задача выдаётся коротким сроком и каждый кадр: и прицел, и стрельба — это
     // состояния, которые кончаются в тот же миг, что и у хозяина, а не длятся
@@ -582,6 +734,35 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
         invokeNative<void>(taskAim_, puppet.ped, player.state.aimAt.x, player.state.aimAt.y,
                            player.state.aimAt.z, kAimTaskDuration, false, false);
     }
+}
+
+void RemotePlayers::act(Puppet& puppet, const RemotePlayerView& player) {
+    if (player.state.action == shared::PedAction::None ||
+        player.state.actionSequence == puppet.actionSequence) {
+        return;
+    }
+
+    // Номер запоминается только после удачи. Набор движений мог не успеть
+    // загрузиться, и забыв про удар сейчас, мы не показали бы его никогда:
+    // следующий снимок принесёт тот же номер, и он покажется уже повтором.
+    if (animation_.play(puppet.ped, player.state.action)) {
+        puppet.actionSequence = player.state.actionSequence;
+    }
+}
+
+std::optional<shared::Vec3> RemotePlayers::positionOf(shared::PlayerId player) const {
+    const auto known = puppets_.find(player);
+    if (known == puppets_.end() || known->second.ped == 0 || getCoords_ == nullptr) {
+        return std::nullopt;
+    }
+
+    NativeContext context;
+    context.push(known->second.ped);
+    context.push(true);
+    getCoords_(context.address());
+
+    return shared::Vec3{context.result<float>(0), context.result<float>(1),
+                        context.result<float>(2)};
 }
 
 shared::PlayerId RemotePlayers::ownerOf(int ped) const {

@@ -41,7 +41,67 @@ World::World(const NativeTable& table) noexcept
       clearWanted_(table.handlerFor(natives::kClearPlayerWantedLevel)),
       policeIgnore_(table.handlerFor(natives::kSetPoliceIgnorePlayer)),
       dispatchService_(table.handlerFor(natives::kEnableDispatchService)),
-      timeScale_(table.handlerFor(natives::kSetTimeScale)) {}
+      timeScale_(table.handlerFor(natives::kSetTimeScale)),
+      setWeather_(table.handlerFor(natives::kSetWeatherTypeNow)),
+      setClock_(table.handlerFor(natives::kOverrideClockTime)),
+      vehicleBudget_(table.handlerFor(natives::kSetVehiclePopulationBudget)),
+      pedBudget_(table.handlerFor(natives::kSetPedPopulationBudget)),
+      parkedVehicles_(table.handlerFor(natives::kSetNumberOfParkedVehicles)),
+      lowPriorityGenerators_(
+          table.handlerFor(natives::kSetAllLowPriorityVehicleGeneratorsActive)),
+      clearGenerators_(table.handlerFor(natives::kRemoveVehiclesFromGeneratorsInArea)),
+      closestVehicle_(table.handlerFor(natives::kGetClosestVehicle)),
+      isMissionEntity_(table.handlerFor(natives::kIsEntityAMissionEntity)),
+      deleteVehicle_(table.handlerFor(natives::kDeleteVehicle)) {}
+
+void World::sweepStrayVehicle(shared::Vec3 centre, float radius) const {
+    if (closestVehicle_ == nullptr || isMissionEntity_ == nullptr || deleteVehicle_ == nullptr) {
+        return;
+    }
+
+    // Признаки поиска: любая модель (ноль) и обычный набор условий — на колёсах,
+    // не горит, не в воде. Семьдесят — то же число, которым пользуются сами
+    // скрипты игры, когда ищут машину поблизости.
+    constexpr std::uint32_t kAnyModel = 0;
+    constexpr int kOrdinaryVehicle = 70;
+
+    const int vehicle = invokeNative<int>(closestVehicle_, centre.x, centre.y, centre.z, radius,
+                                          kAnyModel, kOrdinaryVehicle);
+
+    if (vehicle == 0) {
+        return;
+    }
+
+    // Наша машина принадлежит скрипту — мы сами её такой пометили при создании.
+    // Случайная принадлежит миру, и только её здесь и убирают.
+    if (invokeNative<bool>(isMissionEntity_, vehicle)) {
+        return;
+    }
+
+    int handle = vehicle;
+
+    NativeContext context;
+    context.push(&handle);
+    deleteVehicle_(context.address());
+}
+
+void World::applyWorldState(const shared::WorldState& state) {
+    // Погода — только на изменение. Натив меняет её мгновенно и рвёт плавный
+    // переход, а сервер повторяет одно и то же раз в две секунды: ставь мы её
+    // каждый раз — небо дёргалось бы всю сессию.
+    if (setWeather_ != nullptr && !state.weather.empty() && state.weather != weather_) {
+        invokeNative<void>(setWeather_, state.weather.c_str());
+        weather_ = state.weather;
+    }
+
+    // Время — каждый раз, и это верно: между рассылками часы у клиента стоят,
+    // а идущие сами по себе разошлись бы у всех по-разному. Раз в две секунды
+    // сервер сдвигает их ровно на игровую минуту — как они и тикают у игры.
+    if (setClock_ != nullptr) {
+        invokeNative<void>(setClock_, static_cast<int>(state.hour), static_cast<int>(state.minute),
+                           static_cast<int>(state.second));
+    }
+}
 
 bool World::ready() const noexcept {
     return pedDensity_ != nullptr && scenarioPedDensity_ != nullptr && vehicleDensity_ != nullptr &&
@@ -80,6 +140,29 @@ void World::suppressPopulation() const {
     invokeNative<void>(garbageTrucks_, false);
     invokeNative<void>(randomBoats_, false);
     invokeNative<void>(randomTrains_, false);
+
+    // Множителей плотности мало, и это выяснилось на живой игре: машины с
+    // водителями продолжали появляться. Множитель говорит, сколько заводить
+    // сверх уже намеченного, а намечает игра заранее — двумя другими способами.
+    //
+    // Запас населения — сколько всего игра готова держать на свете. Нулевой
+    // запас не даёт ей наметить никого.
+    if (vehicleBudget_ != nullptr) {
+        invokeNative<void>(vehicleBudget_, 0);
+    }
+    if (pedBudget_ != nullptr) {
+        invokeNative<void>(pedBudget_, 0);
+    }
+
+    // Точки появления машин расставлены по карте заранее и от плотности не
+    // зависят вовсе: из них машина выезжает и едет по своим делам. Минус
+    // единица означает «ни одной», а не «сколько было».
+    if (parkedVehicles_ != nullptr) {
+        invokeNative<void>(parkedVehicles_, -1);
+    }
+    if (lowPriorityGenerators_ != nullptr) {
+        invokeNative<void>(lowPriorityGenerators_, false);
+    }
 }
 
 void World::suppressWanted(int player) const {

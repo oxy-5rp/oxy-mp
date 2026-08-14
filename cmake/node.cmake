@@ -1,0 +1,112 @@
+# Подключение Node.js — движка, на котором пишутся игровые режимы.
+#
+# Собирается он отдельно и заранее, сценарием tools/build-node.ps1: сборка Node
+# занимает часы, и держать её внутри обычной сборки проекта нельзя. Здесь только
+# поиск готового.
+#
+# **Необязателен намеренно.** Без Node проект собирается целиком и работает: у
+# сервера просто не оказывается ни одной скриптовой машины, и всякий ресурс он
+# встречает честной жалобой «машины для такого типа здесь нет». Голый сервер —
+# чат и появление игрока — от этого не меняется вовсе.
+#
+# Требовать Node безусловно было бы неверно: тогда всякий, кто впервые взял
+# исходники, упирался бы в многочасовую сборку чужого проекта прежде, чем
+# увидеть свой собранным.
+#
+# **Отдельным файлом рядом с сервером, а не внутри него.** Так же устроено у
+# alt:V, и причин две. Исполняемый файл сервера остаётся в пару мегабайт вместо
+# полутора сотен: обновляя сервер, хозяин не перекачивает Node заново. И
+# собирается это заметно быстрее — компоновка четырёх гигабайт статических
+# библиотек занимает минуты при каждой правке.
+
+set(OXYMP_NODE_ROOT "" CACHE PATH
+    "Каталог с исходниками и собранным Node.js. Пусто — скриптов на JS не будет.")
+
+# Цель заводится всегда, даже когда Node нет: так потребителям не приходится
+# оборачивать в условие каждое упоминание, а признак наличия спрашивается один
+# раз и в одном месте.
+add_library(oxymp_node INTERFACE)
+add_library(oxymp::node ALIAS oxymp_node)
+
+set(OXYMP_WITH_JS OFF CACHE INTERNAL "Собран ли oxyMP со скриптами на JS")
+
+if(NOT OXYMP_NODE_ROOT)
+    message(STATUS "Node.js не задан (OXYMP_NODE_ROOT) — сервер собирается без скриптов на JS")
+    return()
+endif()
+
+if(NOT EXISTS "${OXYMP_NODE_ROOT}/src/node.h")
+    message(FATAL_ERROR
+        "OXYMP_NODE_ROOT указывает на \"${OXYMP_NODE_ROOT}\", но исходников Node там нет: "
+        "не найден src/node.h. Ожидается каталог, выкачанный из github.com/nodejs/node.")
+endif()
+
+# Заголовки. Перечень тот же, что у alt:V, и не по подражанию: встраивание
+# требует ровно этих трёх — сам Node, V8 и libuv.
+set(OXYMP_NODE_INCLUDES
+    "${OXYMP_NODE_ROOT}/src"
+    "${OXYMP_NODE_ROOT}/deps/v8/include"
+    "${OXYMP_NODE_ROOT}/deps/uv/include"
+)
+
+foreach(directory IN LISTS OXYMP_NODE_INCLUDES)
+    if(NOT EXISTS "${directory}")
+        message(FATAL_ERROR "Node: нет каталога заголовков \"${directory}\"")
+    endif()
+endforeach()
+
+# SYSTEM: предупреждения чужих заголовков не должны сыпаться в наши сборки. У
+# Node их много — он собирается своими флагами, не нашими.
+target_include_directories(oxymp_node SYSTEM INTERFACE ${OXYMP_NODE_INCLUDES})
+
+# Собранное лежит в out/<конфигурация>: сама библиотека и импортная к ней. Так
+# раскладывает это собственная сборка Node, и перекладывать её незачем.
+#
+# Обе конфигурации обязательны. Соблазн подсунуть отладочному серверу выпускной
+# Node велик — он уже собран, — но линковщик такого не пропустит: у отладочной
+# библиотеки времени выполнения другой _ITERATOR_DEBUG_LEVEL, и всякая
+# стандартная строка в сигнатуре разойдётся между сторонами.
+# Импортная библиотека лежит рядом с самой DLL, а не в подкаталоге lib. В lib
+# складываются составные части, из которых её собирают, — и одноимённый файл там
+# тоже бывает: он остаётся от статической сборки, если её когда-либо делали.
+# Взяв его по ошибке, получаешь неразрешённые ссылки на всё подряд при том, что
+# нужные символы в DLL есть.
+foreach(config IN ITEMS Release Debug)
+    set(OXYMP_NODE_LIB_${config} "${OXYMP_NODE_ROOT}/out/${config}/libnode.lib")
+    set(OXYMP_NODE_DLL_${config} "${OXYMP_NODE_ROOT}/out/${config}/libnode.dll")
+
+    foreach(file IN ITEMS "${OXYMP_NODE_LIB_${config}}" "${OXYMP_NODE_DLL_${config}}")
+        if(NOT EXISTS "${file}")
+            message(FATAL_ERROR
+                "Node: не найден \"${file}\". Соберите его:\n"
+                "    powershell -File tools/build-node.ps1 -Configuration ${config}")
+        endif()
+    endforeach()
+endforeach()
+
+set(OXYMP_NODE_DLL
+    "$<$<CONFIG:Debug>:${OXYMP_NODE_DLL_Debug}>$<$<NOT:$<CONFIG:Debug>>:${OXYMP_NODE_DLL_Release}>"
+    CACHE INTERNAL "Путь к libnode.dll текущей конфигурации")
+
+target_link_libraries(oxymp_node INTERFACE
+    "$<$<CONFIG:Debug>:${OXYMP_NODE_LIB_Debug}>"
+    "$<$<NOT:$<CONFIG:Debug>>:${OXYMP_NODE_LIB_Release}>"
+)
+
+# Признак того, что Node подключается извне, а не собирается здесь.
+#
+# Без него заголовки объявляют всё как `__declspec(dllexport)` — то есть считают,
+# что этот самый Node мы и строим, — и линковщик ищет тела функций у себя. Ищет
+# и не находит: они в libnode.dll.
+#
+# Одним признаком включаются все три: сам Node, V8 и libuv. Так же поступают
+# внешние модули Node, и придумывать своё нечего.
+#
+# NODE_WANT_INTERNALS здесь не годится, хотя и просится по образцу alt:V.
+# Внутренности отмечены отдельным признаком видимости, и в отдельной библиотеке
+# они не экспортируются вовсе: подключив их объявления, мы получили бы те же
+# неразрешённые ссылки, только позже и непонятнее.
+target_compile_definitions(oxymp_node INTERFACE BUILDING_NODE_EXTENSION)
+
+set(OXYMP_WITH_JS ON CACHE INTERNAL "Собран ли oxyMP со скриптами на JS" FORCE)
+message(STATUS "Node.js: ${OXYMP_NODE_ROOT} (отдельной библиотекой)")

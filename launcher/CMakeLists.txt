@@ -58,3 +58,7 @@ target_link_libraries(oxymp_launcher PRIVATE version)
 # BattlEye в лаунчер Rockstar и хозяйства Chromium, которым модуль рисует
 # интерфейс изнутри игры.
 add_dependencies(oxymp_launcher oxymp_client oxymp_rglpatch oxymp_cefsub oxymp_cef_runtime)
+
+# Подпись. Лаунчер — то, что запускает игрок, и первое, обо что спотыкается
+# SmartScreen; ему подпись нужнее всего. Пустышка, пока OXYMP_SIGN выключен.
+oxymp_sign(oxymp_launcher)

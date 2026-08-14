@@ -64,6 +64,13 @@ void ByteWriter::writeString(std::string_view value) {
     bytes_.insert(bytes_.end(), value.begin(), value.begin() + static_cast<std::ptrdiff_t>(length));
 }
 
+void ByteWriter::writeText(std::string_view value) {
+    const std::size_t length = std::min(value.size(), kMaxTextLength);
+
+    writeU32(static_cast<std::uint32_t>(length));
+    bytes_.insert(bytes_.end(), value.begin(), value.begin() + static_cast<std::ptrdiff_t>(length));
+}
+
 bool ByteReader::consume(std::size_t count) noexcept {
     if (failed_ || data_.size() - position_ < count) {
         failed_ = true;
@@ -122,6 +129,22 @@ std::string ByteReader::readString() {
     const std::uint16_t length = readU16();
 
     if (length > kMaxStringLength) {
+        failed_ = true;
+        return {};
+    }
+
+    const std::size_t start = position_;
+    if (!consume(length)) {
+        return {};
+    }
+
+    return std::string{reinterpret_cast<const char*>(data_.data() + start), length};
+}
+
+std::string ByteReader::readText() {
+    const std::uint32_t length = readU32();
+
+    if (length > kMaxTextLength) {
         failed_ = true;
         return {};
     }

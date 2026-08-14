@@ -106,8 +106,35 @@ int main(int argc, char** argv) {
     auto lastReport = std::chrono::steady_clock::time_point{};
     bool everConnected = false;
 
+    // Чем кончилась связь в прошлый раз, когда мы смотрели. Нужно, чтобы писать
+    // о разрыве один раз, а не двадцать в секунду: признак держится до тех пор,
+    // пока сервер не примет нас заново.
+    auto lastDisconnect = oxymp::client::DisconnectReason::None;
+
     while (!g_stopRequested.load()) {
         connection.update(std::chrono::milliseconds{20});
+
+        // То же самое, что в игре показывается окном во весь экран. Здесь —
+        // строкой в журнале: другого экрана у бота нет, а проверять разрыв на
+        // нём удобнее, чем в игре.
+        if (const auto lost = connection.disconnectReason(); lost != lastDisconnect) {
+            lastDisconnect = lost;
+
+            switch (lost) {
+            case oxymp::client::DisconnectReason::None:
+                spdlog::info("разрыв: связь восстановлена, снова в сессии");
+                break;
+            case oxymp::client::DisconnectReason::Lost:
+                spdlog::error("разрыв: связь с сервером потеряна");
+                break;
+            case oxymp::client::DisconnectReason::Refused:
+                spdlog::error("разрыв: сервер отказал — {}",
+                              connection.rejectReason()
+                                  ? oxymp::client::describe(*connection.rejectReason())
+                                  : std::string_view{"без объяснения"});
+                break;
+            }
+        }
 
         if (connection.state() == oxymp::client::ConnectionState::Connected) {
             everConnected = true;
@@ -151,10 +178,10 @@ int main(int argc, char** argv) {
             // Главное доказательство работы мультиплеера: мы видим, где сейчас
             // находятся другие игроки, и их положение меняется.
             for (const auto& [id, player] : connection.remotePlayers()) {
-                const auto position = player.interpolatedPosition(now);
-                spdlog::info("  игрок \"{}\" (id {}) в точке {:.1f} {:.1f} {:.1f}",
-                             player.nickname.empty() ? "?" : player.nickname, id, position.x,
-                             position.y, position.z);
+                const auto state = player.at(now);
+                spdlog::info("  игрок \"{}\" (id {}) в точке {:.1f} {:.1f} {:.1f}, поворот {:.0f}",
+                             player.nickname.empty() ? "?" : player.nickname, id, state.position.x,
+                             state.position.y, state.position.z, state.heading);
             }
         }
 

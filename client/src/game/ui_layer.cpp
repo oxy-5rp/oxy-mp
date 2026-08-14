@@ -2,12 +2,10 @@
 
 #include "overlay_renderer.hpp"
 #include "page_source.hpp"
-#include "pointer.hpp"
 #include "present_hook.hpp"
 #include "window.hpp"
 
 #include "../ui_feed.hpp"
-#include "../ui_mail.hpp"
 
 #include <oxymp/cefui/browser.hpp>
 
@@ -15,13 +13,11 @@
 
 #include <algorithm>
 #include <atomic>
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
-#include <optional>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -46,70 +42,6 @@ constexpr int kInitialHeight = 720;
 /// Двадцать раз в секунду: чаще ей нечего показывать — ни задержка до сервера,
 /// ни список игроков, ни ход загрузки не меняются быстрее.
 constexpr auto kStateInterval = std::chrono::milliseconds{50};
-
-/// Как часто опрашивается мышь.
-///
-/// Чаще состояния, и намного: состояние меняется в такт событиям, а указатель —
-/// в такт руке. Двадцать шагов в секунду рука замечает как рывки.
-constexpr auto kPointerInterval = std::chrono::milliseconds{16};
-
-/// Значение поля в сообщении страницы.
-///
-/// Разбор нарочно короткий. Сообщения складывает та же страница, которую пишем
-/// мы, и вид у них один на все: имя, а за ним строка или число. Полноценный
-/// разбор JSON ради двух полей был бы библиотекой, которую никто не просил.
-std::string_view valueOf(std::string_view json, std::string_view name) {
-    const std::string key = std::string{"\""} + std::string{name} + "\":";
-
-    const std::size_t at = json.find(key);
-    if (at == std::string_view::npos) {
-        return {};
-    }
-
-    std::string_view rest = json.substr(at + key.size());
-
-    if (!rest.empty() && rest.front() == '"') {
-        rest.remove_prefix(1);
-
-        const std::size_t end = rest.find('"');
-        return end == std::string_view::npos ? std::string_view{} : rest.substr(0, end);
-    }
-
-    const std::size_t end = rest.find_first_of(",}");
-    return rest.substr(0, end == std::string_view::npos ? rest.size() : end);
-}
-
-/// Разбирает нажатие, о котором рассказала страница.
-///
-/// Пусто — значит сказанное нам непонятно. Молча, без жалобы в журнал: страница
-/// своя, и незнакомое сообщение от неё означает не беду, а несобранную заново
-/// пару «страница и клиент».
-std::optional<UiClick> readClick(std::string_view json) {
-    const std::string_view kind = valueOf(json, "kind");
-
-    UiClick click;
-
-    if (kind == "point") {
-        click.kind = UiClick::Kind::Point;
-    } else if (kind == "press") {
-        click.kind = UiClick::Kind::Press;
-    } else if (kind == "alternate") {
-        click.kind = UiClick::Kind::Alternate;
-    } else if (kind == "back") {
-        click.kind = UiClick::Kind::Back;
-    } else if (kind == "close") {
-        click.kind = UiClick::Kind::Close;
-    } else if (kind == "ask") {
-        click.kind = UiClick::Kind::Ask;
-    } else {
-        return std::nullopt;
-    }
-
-    const std::string_view index = valueOf(json, "index");
-    std::from_chars(index.data(), index.data() + index.size(), click.index);
-
-    return click;
-}
 
 /// Каталог с хозяйством CEF.
 ///
@@ -144,7 +76,6 @@ std::filesystem::path cefDirectory() {
 /// получил бы следом Direct3D и половину Chromium.
 struct UiLayer::State {
     UiFeed* feed = nullptr;
-    UiMail* mail = nullptr;
 
     std::unique_ptr<oxymp::cefui::Browser> browser;
     std::unique_ptr<PresentHook> hook;
@@ -170,15 +101,11 @@ struct UiLayer::State {
     int width = kInitialWidth;
     int height = kInitialHeight;
 
-    /// Поток, который ведёт страницу: подгоняет её под размер кадра, отдаёт ей
-    /// состояние и водит по ней указателем. Свой, а не чужой, потому что чужие
-    /// заняты: поток игры рисует кадр, а сетевой минуту дожидается готовности
-    /// движка.
+    /// Поток, который ведёт страницу: подгоняет её под размер кадра и отдаёт ей
+    /// состояние. Свой, а не чужой, потому что чужие заняты: поток игры рисует
+    /// кадр, а сетевой минуту дожидается готовности движка.
     std::thread keeper;
     std::atomic<bool> stopped{false};
-
-    /// Мышь, доведённая до страницы. Живёт только в этом потоке.
-    Pointer pointer;
 
     /// Подгоняет страницу под размер кадра игры.
     ///
@@ -209,34 +136,16 @@ struct UiLayer::State {
     }
 
     void keep() {
-        auto stateDue = std::chrono::steady_clock::now();
-
         while (!stopped.load()) {
-            const auto now = std::chrono::steady_clock::now();
+            fitToWindow();
+            browser->post(feed->takeUpdate());
 
-            if (now >= stateDue) {
-                stateDue = now + kStateInterval;
-
-                fitToWindow();
-                browser->post(feed->takeUpdate());
-            }
-
-            // Указатель ведём, только пока открыто меню. В остальное время мышь
-            // принадлежит игре: ею водят камерой, и события от неё страница
-            // получала бы впустую — а курсор, нарисованный поверх игры, стоял бы
-            // посреди боя.
-            if (feed->menuOpen()) {
-                pointer.follow(*browser, width, height);
-            } else {
-                pointer.release(*browser);
-            }
-
-            std::this_thread::sleep_for(kPointerInterval);
+            std::this_thread::sleep_for(kStateInterval);
         }
     }
 };
 
-std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, UiMail& mail, std::string& error) {
+std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, std::string& error) {
     const std::filesystem::path directory = cefDirectory();
     if (directory.empty()) {
         error = "не удалось найти каталог с хозяйством CEF";
@@ -252,7 +161,6 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, UiMail& mail, std::string
 
     State& state = *layer->state_;
     state.feed = &feed;
-    state.mail = &mail;
 
     state.browser = oxymp::cefui::Browser::create(
         kInitialWidth, kInitialHeight,
@@ -274,15 +182,6 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, UiMail& mail, std::string
     if (state.browser == nullptr) {
         return nullptr;
     }
-
-    // Обратный путь: страница называет пункт, на который нажали мышью, а решает
-    // по-прежнему игра. Приходит это из потока CEF, поэтому дальше почты здесь
-    // ничего не делается.
-    state.browser->onMessage([&state](std::string_view json) {
-        if (const std::optional<UiClick> click = readClick(json)) {
-            state.mail->post(*click);
-        }
-    });
 
     state.browser->show(composePage());
 

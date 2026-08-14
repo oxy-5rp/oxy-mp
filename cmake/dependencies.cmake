@@ -21,7 +21,7 @@ FetchContent_Declare(enet
 )
 FetchContent_MakeAvailable(enet)
 
-add_library(enet STATIC
+set(OXYMP_ENET_SOURCES
     "${enet_SOURCE_DIR}/callbacks.c"
     "${enet_SOURCE_DIR}/compress.c"
     "${enet_SOURCE_DIR}/host.c"
@@ -32,21 +32,33 @@ add_library(enet STATIC
     "${enet_SOURCE_DIR}/unix.c"
     "${enet_SOURCE_DIR}/win32.c"
 )
+
+# Дважды, как и наши собственные библиотеки: клиент собирается со статической
+# библиотекой времени выполнения, сервер — с динамической. Почему так, объяснено
+# в cmake/dual_runtime.cmake.
+foreach(enet_target enet enet_md)
+    add_library(${enet_target} STATIC ${OXYMP_ENET_SOURCES})
+
+    # SYSTEM: чужие заголовки не должны сыпать предупреждениями в наши сборки.
+    target_include_directories(${enet_target} SYSTEM PUBLIC "${enet_SOURCE_DIR}/include")
+
+    if(WIN32)
+        target_link_libraries(${enet_target} PUBLIC ws2_32 winmm)
+    endif()
+
+    # Предупреждения чужого кода мы всё равно не исправляем, а наши на их фоне
+    # теряются.
+    if(MSVC)
+        target_compile_options(${enet_target} PRIVATE /w)
+    else()
+        target_compile_options(${enet_target} PRIVATE -w)
+    endif()
+endforeach()
+
 add_library(enet::enet ALIAS enet)
+add_library(enet::enet_md ALIAS enet_md)
 
-# SYSTEM: чужие заголовки не должны сыпать предупреждениями в наши сборки.
-target_include_directories(enet SYSTEM PUBLIC "${enet_SOURCE_DIR}/include")
-
-if(WIN32)
-    target_link_libraries(enet PUBLIC ws2_32 winmm)
-endif()
-
-# Предупреждения чужого кода мы всё равно не исправляем, а наши на их фоне теряются.
-if(MSVC)
-    target_compile_options(enet PRIVATE /w)
-else()
-    target_compile_options(enet PRIVATE -w)
-endif()
+set_target_properties(enet_md PROPERTIES MSVC_RUNTIME_LIBRARY "${OXYMP_DYNAMIC_RUNTIME}")
 
 # spdlog — журналирование. Нужно всем трём исполняемым частям: сервер пишет в
 # консоль, клиент внутри игры — в файл, и делает это из своего потока.

@@ -15,6 +15,15 @@ namespace {
 /// то же, что и на пятистах.
 constexpr float kAimDistance = 100.0F;
 
+/// Сколько замеченный удар держится в снимке, в миллисекундах.
+///
+/// Снимок собирается каждый кадр, а уходит на сервер раз в пятьдесят
+/// миллисекунд. Удар, замеченный в одном кадре и забытый в следующем, попал бы в
+/// отправленный снимок только по счастливой случайности. Двести миллисекунд —
+/// это заведомо несколько отправок и заведомо меньше, чем промежуток между двумя
+/// ударами человека.
+constexpr std::int32_t kActionHold = 200;
+
 } // namespace
 
 Player::Player(const NativeTable& table) noexcept
@@ -30,13 +39,16 @@ Player::Player(const NativeTable& table) noexcept
       freeze_(table.handlerFor(natives::kFreezeEntityPosition)),
       setCollision_(table.handlerFor(natives::kSetEntityCollision)),
       clearTasks_(table.handlerFor(natives::kClearPedTasksImmediately)),
-      isShooting_(table.handlerFor(natives::kIsPedShooting)),
-      isAiming_(table.handlerFor(natives::kIsPlayerFreeAiming)),
-      isRagdoll_(table.handlerFor(natives::kIsPedRagdoll)),
-      isJumping_(table.handlerFor(natives::kIsPedJumping)),
       selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)),
       forwardVector_(table.handlerFor(natives::kGetEntityForwardVector)),
-      applyDamage_(table.handlerFor(natives::kApplyDamageToPed)) {}
+      applyDamage_(table.handlerFor(natives::kApplyDamageToPed)),
+      setHealth_(table.handlerFor(natives::kSetEntityHealth)),
+      setArmour_(table.handlerFor(natives::kSetPedArmour)),
+      giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)),
+      removeAllWeapons_(table.handlerFor(natives::kRemoveAllPedWeapons)),
+      getAmmo_(table.handlerFor(natives::kGetAmmoInPedWeapon)),
+      activity_(table),
+      gameTimer_(table.handlerFor(natives::kGetGameTimer)) {}
 
 bool Player::ready() const noexcept {
     return playerId_ != nullptr && playerPedId_ != nullptr && isPlaying_ != nullptr &&
@@ -174,7 +186,7 @@ shared::Vec3 Player::aimPoint(int ped) const {
                         position.z + forward.z * kAimDistance};
 }
 
-shared::PlayerState Player::snapshot(int player, int ped, bool dead) const {
+shared::PlayerState Player::snapshot(int player, int ped, bool dead) {
     shared::PlayerState state;
 
     if (ped == 0) {
@@ -185,45 +197,53 @@ shared::PlayerState Player::snapshot(int player, int ped, bool dead) const {
     state.heading = heading(ped);
     state.velocity = velocity(ped);
     state.health = static_cast<std::uint16_t>(std::max(health(ped), 0));
-
-    std::uint32_t flags = 0;
+    state.armour = activity_.armour(ped);
 
     // Смерть берётся не из здоровья, а у самой игры: шкала здоровья персонажа
     // не доходит до нуля в тот же миг, когда игра объявляет игрока мёртвым, и
-    // порог по числу пришлось бы подбирать наугад.
-    if (dead) {
-        flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Dead);
-    }
-
-    const bool aiming = isAiming_ != nullptr && invokeNative<bool>(isAiming_, player);
-    const bool shooting = isShooting_ != nullptr && invokeNative<bool>(isShooting_, ped);
-
-    if (aiming) {
-        flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Aiming);
-    }
-    if (shooting) {
-        flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Shooting);
-    }
-    if (isRagdoll_ != nullptr && invokeNative<bool>(isRagdoll_, ped)) {
-        flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Ragdoll);
-    }
-    if (isJumping_ != nullptr && invokeNative<bool>(isJumping_, ped)) {
-        flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Jumping);
-    }
-
-    state.flags = flags;
+    // порог по числу пришлось бы подбирать наугад. Поэтому она приходит сюда
+    // доводом от того, кто разбирает смерть.
+    state.flags = activity_.flags(player, ped, dead);
 
     if (selectedWeapon_ != nullptr) {
         state.weapon = invokeNative<std::uint32_t>(selectedWeapon_, ped);
+        state.ammo = ammo(ped, state.weapon);
     }
 
     // Точка прицела считается только когда она нужна: это лишний натив на кадр,
     // а стоящему без оружия она ничего не описывает.
-    if (aiming || shooting) {
+    if (shared::has(state.flags, shared::PlayerFlag::Aiming) ||
+        shared::has(state.flags, shared::PlayerFlag::Shooting)) {
         state.aimAt = aimPoint(ped);
     }
 
+    state.action = holdStrike(activity_.strike(ped, state.weapon));
+    state.actionSequence = actionSequence_;
+
     return state;
+}
+
+shared::PedAction Player::holdStrike(shared::PedAction started) {
+    const auto now = gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0;
+
+    if (started != shared::PedAction::None) {
+        action_ = started;
+        actionAt_ = now;
+
+        // Счётчик двигается вместе с самим движением, а не с кадром: получатель
+        // отличает по нему новый удар от того же самого, а не считает снимки.
+        ++actionSequence_;
+
+        return action_;
+    }
+
+    // Держится ровно столько, чтобы попасть хотя бы в один отправленный снимок,
+    // и не дольше: иначе следующий удар оказался бы неотличим от эха прошлого.
+    if (action_ != shared::PedAction::None && now - actionAt_ >= kActionHold) {
+        action_ = shared::PedAction::None;
+    }
+
+    return action_;
 }
 
 void Player::applyDamage(int ped, std::uint16_t amount) const {
@@ -233,9 +253,58 @@ void Player::applyDamage(int ped, std::uint16_t amount) const {
 
     // Признаки: урон не от игрока-владельца и обычный, не заглушающий. Оружие не
     // называется — его хеш у нас есть, но применять урон именно от оружия значит
-    // отдать игре решение о том, сколько снять, а решение это уже принято тем,
-    // кто попал.
+    // отдать игре решение о том, сколько снять, а решать это ей больше не по
+    // чину: сколько снять, решил сервер, и он же уже снял.
     invokeNative<void>(applyDamage_, ped, static_cast<int>(amount), false, 0);
+}
+
+void Player::applyHealth(int ped, std::uint16_t health, std::uint16_t armour) const {
+    if (ped == 0) {
+        return;
+    }
+
+    if (setHealth_ != nullptr) {
+        invokeNative<void>(setHealth_, ped, static_cast<int>(health));
+    }
+    if (setArmour_ != nullptr) {
+        invokeNative<void>(setArmour_, ped, static_cast<int>(armour));
+    }
+}
+
+void Player::applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapons,
+                          bool replace) const {
+    if (ped == 0 || giveWeapon_ == nullptr) {
+        return;
+    }
+
+    if (replace && removeAllWeapons_ != nullptr) {
+        invokeNative<void>(removeAllWeapons_, ped, true);
+    }
+
+    for (const shared::WeaponSlot& slot : weapons) {
+        if (slot.weapon == 0) {
+            continue;
+        }
+
+        // Последние признаки: не брать сразу в руки и не делать оружие
+        // сюжетным. В руки берёт сам игрок — подменять ему оружие в разгар
+        // перестрелки оттого, что сервер прислал список, было бы издевательством.
+        invokeNative<void>(giveWeapon_, ped, slot.weapon, static_cast<int>(slot.ammo), false,
+                           false);
+    }
+}
+
+std::uint16_t Player::ammo(int ped, std::uint32_t weapon) const {
+    if (getAmmo_ == nullptr || ped == 0 || weapon == 0) {
+        return 0;
+    }
+
+    const int count = invokeNative<int>(getAmmo_, ped, weapon);
+
+    // Отрицательного боезапаса не бывает, а бесконечный игра обозначает большим
+    // числом: и то и другое приводится к пределу поля, чтобы не превратиться по
+    // дороге в свою противоположность.
+    return static_cast<std::uint16_t>(std::clamp(count, 0, 0xFFFF));
 }
 
 } // namespace oxymp::client::game

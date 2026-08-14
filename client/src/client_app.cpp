@@ -5,7 +5,6 @@
 #include "resource_cache.hpp"
 #include "session_mail.hpp"
 #include "ui_feed.hpp"
-#include "ui_mail.hpp"
 
 #include "game/crash_log.hpp"
 #include "game/engine_addresses.hpp"
@@ -458,6 +457,13 @@ bool probeNatives(const game::EngineAddresses& addresses) {
     }
 }
 
+/// Сколько игрок числится видимым после последнего снимка.
+///
+/// Заведомо длиннее и предела достраивания движения, и любой разумной заминки в
+/// сети: пропасть игрок должен оттого, что отошёл за границу видимости, а не
+/// оттого, что один пакет задержался.
+constexpr auto kPlayerSilence = std::chrono::seconds{2};
+
 /// Составляет список чужих игроков для показа в игре.
 ///
 /// Положение берётся не последним пришедшим, а посчитанным на текущий момент:
@@ -470,18 +476,29 @@ std::vector<RemoteView> describeRemotePlayers(const Connection& connection) {
     players.reserve(connection.remotePlayers().size());
 
     for (const auto& [id, player] : connection.remotePlayers()) {
-        if (!player.hasState) {
+        // Игрок, о котором не пришло ни одного снимка, не показывается: где он,
+        // неизвестно, а поставить его в начало координат — значит собрать там
+        // всех, кто ещё не успел о себе рассказать.
+        if (!player.visible()) {
             continue;
         }
 
-        // Всё, кроме положения, берётся из последнего снимка как есть:
-        // достраивать по времени имеет смысл только то, что меняется плавно, а
-        // «целится» и «стреляет» плавно не меняются.
+        // Замолчавший — тоже. Снимки о себе игрок шлёт непрерывно, пока он
+        // рядом, и молчание означает ровно одно: он отошёл дальше, чем сервер
+        // считает нужным о нём рассказывать.
+        //
+        // У машин молчание ничего не значило и означать не могло: стоящую машину
+        // не рассылает никто, и убирать её по молчанию было той самой ошибкой,
+        // из-за которой машины пропадали. Здесь наоборот — молчит только тот,
+        // кого не стало видно.
+        if (now - player.latestAt > kPlayerSilence) {
+            continue;
+        }
+
         RemoteView view;
         view.id = id;
         view.nickname = player.nickname;
-        view.state = player.latest;
-        view.state.position = player.interpolatedPosition(now);
+        view.state = player.at(now);
 
         players.push_back(std::move(view));
     }
@@ -489,21 +506,22 @@ std::vector<RemoteView> describeRemotePlayers(const Connection& connection) {
     return players;
 }
 
-/// Составляет список чужих машин на текущий момент.
-std::vector<RemoteVehicleView> describeRemoteVehicles(const Connection& connection) {
+/// Составляет список машин сессии на текущий момент.
+std::vector<SessionVehicleView> describeSessionVehicles(const Connection& connection) {
     const auto now = std::chrono::steady_clock::now();
 
-    std::vector<RemoteVehicleView> vehicles;
-    vehicles.reserve(connection.remoteVehicles().size());
+    std::vector<SessionVehicleView> vehicles;
+    vehicles.reserve(connection.vehicles().size());
 
-    for (const auto& [owner, vehicle] : connection.remoteVehicles()) {
-        if (!vehicle.hasState) {
-            continue;
-        }
-
-        RemoteVehicleView view;
-        view.state = vehicle.latest;
-        view.state.position = vehicle.interpolatedPosition(now);
+    for (const auto& [id, vehicle] : connection.vehicles()) {
+        // Проверки на «был ли снимок» здесь больше нет, и это существенно.
+        // Машина, о которой сервер объявил, существует с этого мгновения — даже
+        // если снимков о ней ещё не было и не будет: стоящую машину никто не
+        // рассылает. Пропусти мы её здесь — и брошенные машины не появились бы
+        // в мире никогда.
+        SessionVehicleView view;
+        view.state = vehicle.at(now);
+        view.owner = vehicle.owner;
 
         vehicles.push_back(view);
     }
@@ -541,7 +559,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               const Connection::Settings& settings,
                                               const SessionStatus& status,
                                               const RemoteRoster& roster, LocalState& localState,
-                                              SessionMail& mail, UiFeed& feed, UiMail& clicks,
+                                              SessionMail& mail, UiFeed& feed,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -584,7 +602,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, clicks, error);
+                                       localState, mail, feed, error);
     if (session == nullptr) {
         spdlog::error("игровая сессия не создана: {}", error);
     }
@@ -603,11 +621,6 @@ void run() {
     UiFeed feed;
     feed.describeSession(std::format("{}:{}", settings.address, settings.port),
                          settings.nickname);
-
-    // Обратное направление: что игрок нажал на странице мышью. Объявлено здесь
-    // же, потому что переживать обязано обоих — и слой интерфейса, который сюда
-    // пишет, и игровую сессию, которая отсюда читает.
-    UiMail clicks;
 
     // Ловушка падений ставится раньше всего остального: всё, что делает клиент
     // дальше, вправе уронить игру, и от этого мгновения в журнале должна
@@ -671,7 +684,7 @@ void run() {
     if (hooksReady) {
         std::string uiError;
 
-        ui = game::UiLayer::create(feed, clicks, uiError);
+        ui = game::UiLayer::create(feed, uiError);
         if (ui == nullptr) {
             spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
         }
@@ -703,7 +716,7 @@ void run() {
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   clicks, scriptStartup);
+                                   scriptStartup);
     }
 
     // Соединение поднимается здесь, а не в начале, и это перемена по просьбе.
@@ -771,6 +784,10 @@ void run() {
 
         status.update(connection.state(), players, latency, connection.localPlayerId());
 
+        if (const auto spawn = connection.spawnPosition()) {
+            status.setSpawn(*spawn);
+        }
+
         if (const auto money = connection.takeMoney()) {
             status.setMoney(*money);
         }
@@ -783,11 +800,12 @@ void run() {
                 feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
             }
         }
-        roster.replace(describeRemotePlayers(connection), describeRemoteVehicles(connection));
+        roster.replace(describeRemotePlayers(connection), describeSessionVehicles(connection));
 
         if (const auto own = localState.get()) {
             connection.setLocalState(*own);
-            connection.setLocalVehicle(localState.vehicle());
+            connection.setOwnedVehicles(localState.vehicles());
+            connection.setOwnedAppearances(localState.appearances());
         }
 
         // Игровой поток просил отправить — отправляем.
@@ -797,15 +815,21 @@ void run() {
         for (const shared::DamageReport& report : mail.takeOutgoingDamage()) {
             connection.reportDamage(report.victim, report.amount, report.weapon);
         }
-        for (const shared::AdminAction& action : mail.takeOutgoingAdmin()) {
-            connection.order(action);
+        for (shared::ClientEvent& event : mail.takeOutgoingEvents()) {
+            connection.emit(std::move(event.name), std::move(event.payload));
         }
 
         // Пришедшее раскладывается по двум разным адресатам: попадания нужны
         // игре, а строки чата — только экрану, и гонять их через игровой поток
         // незачем.
         mail.deliverDamage(connection.takeDamage());
-        mail.deliverAdmin(connection.takeOrders());
+        mail.deliverTeleports(connection.takeTeleports());
+        mail.deliverServerEvents(connection.takeServerEvents());
+        mail.deliverVehicleAppearances(connection.takeVehicleAppearances());
+        mail.deliverWorld(connection.takeWorld());
+        mail.deliverLoadout(connection.takeLoadout());
+        mail.deliverHealth(connection.takeHealth());
+        mail.deliverObjects(connection.takeObjects(), connection.takeRemovedObjects());
 
         for (const shared::ChatLine& line : connection.takeChatLines()) {
             feed.pushChat(line.kind, line.kind == shared::ChatKind::Say
@@ -821,6 +845,8 @@ void run() {
         const int latencyMilliseconds =
             latency.has_value() ? static_cast<int>(latency->count()) : -1;
 
+        const DisconnectReason lost = connection.disconnectReason();
+
         feed.setConnection(UiFeed::Connection{
             .state = static_cast<unsigned int>(connection.state()),
             .players = players,
@@ -828,6 +854,14 @@ void run() {
             .playerId = connection.localPlayerId(),
             .troubled = troubled,
             .money = status.snapshot().money,
+            .disconnect = static_cast<unsigned int>(lost),
+
+            // Объяснение прикладывается только к отказу: его сервер назвал
+            // сам. У оборванной связи причины нет — есть только то, что её
+            // больше нет, и придумывать здесь объяснение значило бы солгать.
+            .disconnectDetail = connection.rejectReason().has_value()
+                                    ? std::string{describe(*connection.rejectReason())}
+                                    : std::string{},
         });
         feed.setRoster(describeRoster(connection, settings.nickname));
 

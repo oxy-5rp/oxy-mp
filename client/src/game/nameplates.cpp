@@ -55,13 +55,26 @@ bool Nameplates::ready() const noexcept {
     return setOrigin_ != nullptr && clearOrigin_ != nullptr && hud_.ready();
 }
 
-void Nameplates::draw(const std::vector<RemotePlayerView>& players, shared::Vec3 viewer) const {
+void Nameplates::draw(const std::vector<RemotePlayerView>& players, const RemotePlayers& people,
+                      shared::Vec3 viewer) const {
     if (!ready()) {
         return;
     }
 
     for (const RemotePlayerView& player : players) {
-        const float distance = distanceBetween(viewer, player.state.position);
+        // Где рисовать — берётся у самого персонажа, а не из снимка. Персонаж
+        // подводится к снимку понемногу, оставаясь физическим телом, и всё это
+        // время его голова не там, где точка снимка: подпись, поставленная по
+        // снимку, уезжала вперёд и дёргалась на каждой поправке.
+        //
+        // Пока персонажа нет — модель ещё грузится, — рисовать не по чему, и
+        // снимок здесь не выручает: он назовёт место, где никого не видно.
+        const auto at = people.positionOf(player.id);
+        if (!at) {
+            continue;
+        }
+
+        const float distance = distanceBetween(viewer, *at);
         if (distance > kVisibleDistance) {
             continue;
         }
@@ -70,8 +83,7 @@ void Nameplates::draw(const std::vector<RemotePlayerView>& players, shared::Vec3
         // сквозь стену. Так задумано — в сессии важнее знать, кто где, чем
         // соблюсти честность видимости, и так же ведут себя подписи в GTA
         // Online.
-        invokeNative<void>(setOrigin_, player.state.position.x, player.state.position.y,
-                           player.state.position.z + kHeightAboveFeet, 0);
+        invokeNative<void>(setOrigin_, at->x, at->y, at->z + kHeightAboveFeet, 0);
 
         const float nearness =
             std::clamp((distance - kFullSizeDistance) / (kVisibleDistance - kFullSizeDistance),

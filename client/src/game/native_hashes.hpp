@@ -189,6 +189,42 @@ inline constexpr std::uint64_t kSetRandomVehicleDensityMultiplier = 0X23D563236A
 /// SET_PARKED_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME, канонический хеш 0XEAE6DCC7EEE3DB1D.
 inline constexpr std::uint64_t kSetParkedVehicleDensityMultiplier = 0X40C1C94D5A5157C5;
 
+/// SET_VEHICLE_POPULATION_BUDGET, канонический хеш 0XCB9E1EB3BE2AF4E9.
+inline constexpr std::uint64_t kSetVehiclePopulationBudget = 0X283C0970282AA5F3;
+
+/// SET_PED_POPULATION_BUDGET, канонический хеш 0X8C95333CFC3340F3.
+inline constexpr std::uint64_t kSetPedPopulationBudget = 0XAD9B1C8FED6B4D96;
+
+/// SET_NUMBER_OF_PARKED_VEHICLES, канонический хеш 0XCAA15F13EBD417FF.
+inline constexpr std::uint64_t kSetNumberOfParkedVehicles = 0XECDFDC2E8AC2D613;
+
+/// SET_ALL_LOW_PRIORITY_VEHICLE_GENERATORS_ACTIVE, канонический хеш 0X608207E7A8FB787C.
+inline constexpr std::uint64_t kSetAllLowPriorityVehicleGeneratorsActive = 0XEFAF1ADDE0F583C3;
+
+/// REMOVE_VEHICLES_FROM_GENERATORS_IN_AREA, канонический хеш 0X46A1E1A299EC4BBA.
+inline constexpr std::uint64_t kRemoveVehiclesFromGeneratorsInArea = 0XC4BCE90F7242F354;
+
+/// GET_AMMO_IN_PED_WEAPON, канонический хеш 0X015A522136D7F951.
+inline constexpr std::uint64_t kGetAmmoInPedWeapon = 0X1149D67DB429787A;
+
+/// SET_PED_AMMO, канонический хеш 0X14E56BC5B5DB6A19.
+inline constexpr std::uint64_t kSetPedAmmo = 0X45FC566246B3511B;
+
+/// REMOVE_ALL_PED_WEAPONS, канонический хеш 0XF25DF915FA38C5F3.
+inline constexpr std::uint64_t kRemoveAllPedWeapons = 0X1834D30866818A23;
+
+/// CREATE_OBJECT_NO_OFFSET, канонический хеш 0X9A294B2138ABB884.
+inline constexpr std::uint64_t kCreateObjectNoOffset = 0X43AFC452F25F3A2F;
+
+/// DELETE_OBJECT, канонический хеш 0X539E0AE3E6634B9F.
+inline constexpr std::uint64_t kDeleteObject = 0X51C8BEA2005931AB;
+
+/// GET_CLOSEST_VEHICLE, канонический хеш 0XF73EB622C4F1689B.
+inline constexpr std::uint64_t kGetClosestVehicle = 0XF0CA45A211FFDCD9;
+
+/// IS_ENTITY_A_MISSION_ENTITY, канонический хеш 0X0A7B270912999B3C.
+inline constexpr std::uint64_t kIsEntityAMissionEntity = 0X110821AE6C63DD4F;
+
 /// SET_CREATE_RANDOM_COPS, канонический хеш 0X102E68B2024D536D.
 inline constexpr std::uint64_t kSetCreateRandomCops = 0XD682DD0578BF5392;
 
@@ -527,7 +563,7 @@ inline constexpr std::uint64_t kIsModelInCdimage = 0XE7D342E0F16AAA8F;
 /// IS_MODEL_A_VEHICLE, канонический хеш 0X19AAC8F07BFEC53E.
 inline constexpr std::uint64_t kIsModelAVehicle = 0XAD1840C2E6AF7D5E;
 
-/// SET_WEATHER_TYPE_NOW, канонический хеш 0XED712CA327900C8A.
+/// SET_WEATHER_TYPE_NOW_PERSIST, канонический хеш 0XED712CA327900C8A.
 inline constexpr std::uint64_t kSetWeatherTypeNow = 0XE38A58649E049502;
 
 /// NETWORK_OVERRIDE_CLOCK_TIME, канонический хеш 0XE679E3E06E363892.
@@ -538,4 +574,264 @@ inline constexpr std::uint64_t kOverrideClockTime = 0XAFD3BC0F6EBB5474;
 /// Где стоит камера. Вместе с положением персонажа этого хватает, чтобы узнать,
 /// куда она смотрит, не разбираясь в том, какой угол в каком порядке отдаёт игра.
 inline constexpr std::uint64_t kGetGameplayCamCoord = 0XCF141FCD0940B0A3;
+
+// --- Ввод водителя ------------------------------------------------------------
+//
+// Угол руля, газ и тормоз игра наружу не отдаёт: нативов для них у неё нет, и
+// FiveM читает их прямо из памяти машины. Мы берём их с другой стороны — из
+// ввода того, кто за рулём. Это ровно те числа, из которых игра эти величины и
+// получает, и достаются они нативом, а не смещением в структуре, которое живёт
+// до ближайшего обновления игры.
+
+/// GET_CONTROL_NORMAL, канонический хеш 0XEC3C9B8D5327B563.
+inline constexpr std::uint64_t kGetControlNormal = 0XB504E1B50AA21FC5;
+
+/// IS_CONTROL_JUST_PRESSED, канонический хеш 0X580417101DDB492F.
+inline constexpr std::uint64_t kIsControlJustPressed = 0X875A214D5EBCA509;
+
+/// IS_CONTROL_PRESSED, канонический хеш 0XF3A21BCD95725A4A.
+inline constexpr std::uint64_t kIsControlPressed = 0X6D05C5731A838CB3;
+
+// --- Движение тел -------------------------------------------------------------
+
+/// GET_ENTITY_ROTATION_VELOCITY, канонический хеш 0X213B91045D09B983.
+inline constexpr std::uint64_t kGetEntityRotationVelocity = 0X47507DD57C93B472;
+
+// --- Машина: то, что меняется на ходу ------------------------------------------
+
+/// GET_VEHICLE_ENGINE_HEALTH, канонический хеш 0XC45D23BAF168AAB8.
+inline constexpr std::uint64_t kGetVehicleEngineHealth = 0X4C7724D572378B05;
+
+/// SET_VEHICLE_ENGINE_HEALTH, канонический хеш 0X45F6D8EEF34ABEF1.
+inline constexpr std::uint64_t kSetVehicleEngineHealth = 0X2AEBE39F6BF7D6BC;
+
+/// GET_VEHICLE_BODY_HEALTH, канонический хеш 0XF271147EB7B40F12.
+inline constexpr std::uint64_t kGetVehicleBodyHealth = 0X3B5692CB240DBC2F;
+
+/// SET_VEHICLE_BODY_HEALTH, канонический хеш 0XB77D05AC8C78AADB.
+inline constexpr std::uint64_t kSetVehicleBodyHealth = 0X3E7E7AD923FD91A7;
+
+/// GET_VEHICLE_PETROL_TANK_HEALTH, канонический хеш 0X7D5DABE888D2D074.
+inline constexpr std::uint64_t kGetVehiclePetrolTankHealth = 0X31B58D7972181BFA;
+
+/// SET_VEHICLE_PETROL_TANK_HEALTH, канонический хеш 0X70DB57649FA8D0D8.
+inline constexpr std::uint64_t kSetVehiclePetrolTankHealth = 0XDF9DC0584881B7AF;
+
+/// GET_IS_VEHICLE_ENGINE_RUNNING, канонический хеш 0XAE31E7DF9B5B132E.
+inline constexpr std::uint64_t kGetIsVehicleEngineRunning = 0X182BD9AD1675B5DE;
+
+/// GET_VEHICLE_LIGHTS_STATE, канонический хеш 0XB91B4C20085BD12F.
+inline constexpr std::uint64_t kGetVehicleLightsState = 0X9FFEA38DBCE391EC;
+
+/// SET_VEHICLE_LIGHTS, канонический хеш 0X34E710FF01247C5A.
+inline constexpr std::uint64_t kSetVehicleLights = 0XBA3C1A9AA7FD9616;
+
+/// SET_VEHICLE_FULLBEAM, канонический хеш 0X8B7FD87F0DDB421E.
+inline constexpr std::uint64_t kSetVehicleFullbeam = 0X2F12C305B28C6C59;
+
+/// IS_VEHICLE_SIREN_ON, канонический хеш 0X4C9BF537BE2634B2.
+inline constexpr std::uint64_t kIsVehicleSirenOn = 0XE101D58DA98B6070;
+
+/// SET_VEHICLE_SIREN, канонический хеш 0XF4924635A19EB37D.
+inline constexpr std::uint64_t kSetVehicleSiren = 0X4539850624F18A9E;
+
+/// SET_VEHICLE_STEER_BIAS, канонический хеш 0X42A8EC77D5150CBE.
+inline constexpr std::uint64_t kSetVehicleSteerBias = 0XDEABDA7736297FEB;
+
+/// SET_VEHICLE_HANDBRAKE, канонический хеш 0X684785568EF26A22.
+inline constexpr std::uint64_t kSetVehicleHandbrake = 0XB2FD24D644A68449;
+
+/// SET_VEHICLE_BRAKE_LIGHTS, канонический хеш 0X92B35082E0B42F66.
+inline constexpr std::uint64_t kSetVehicleBrakeLights = 0XE456FB21FF21AE99;
+
+// --- Машина: повреждения -------------------------------------------------------
+
+/// GET_VEHICLE_DOOR_ANGLE_RATIO, канонический хеш 0XFE3F9C29F7B32BD5.
+inline constexpr std::uint64_t kGetVehicleDoorAngleRatio = 0X7BFB76C576628F3D;
+
+/// SET_VEHICLE_DOOR_OPEN, канонический хеш 0X7C65DAC73C35C862.
+inline constexpr std::uint64_t kSetVehicleDoorOpen = 0XBFE60A5CC0C835D8;
+
+/// SET_VEHICLE_DOOR_SHUT, канонический хеш 0X93D9BD300D7789E5.
+inline constexpr std::uint64_t kSetVehicleDoorShut = 0X6515021478088FBC;
+
+/// IS_VEHICLE_DOOR_DAMAGED, канонический хеш 0XB8E181E559464527.
+inline constexpr std::uint64_t kIsVehicleDoorDamaged = 0XAD830DCD82C63F31;
+
+/// SET_VEHICLE_DOOR_BROKEN, канонический хеш 0XD4D4F6A4AB575A33.
+inline constexpr std::uint64_t kSetVehicleDoorBroken = 0X89E9F387C190061F;
+
+/// IS_VEHICLE_WINDOW_INTACT, канонический хеш 0X46E571A0E20D01F1.
+inline constexpr std::uint64_t kIsVehicleWindowIntact = 0X01D37530E5C420F5;
+
+/// SMASH_VEHICLE_WINDOW, канонический хеш 0X9E5B5E4D2CCD2259.
+inline constexpr std::uint64_t kSmashVehicleWindow = 0X62DFD44586348C12;
+
+/// IS_VEHICLE_TYRE_BURST, канонический хеш 0XBA291848A0815CA9.
+inline constexpr std::uint64_t kIsVehicleTyreBurst = 0X548F6F43A7CB6F45;
+
+/// SET_VEHICLE_TYRE_BURST, канонический хеш 0XEC6A202EE4960385.
+inline constexpr std::uint64_t kSetVehicleTyreBurst = 0XE488FDAA43A181AE;
+
+/// SET_VEHICLE_TYRE_FIXED, канонический хеш 0X6E13FC662B882D1D.
+inline constexpr std::uint64_t kSetVehicleTyreFixed = 0XF516E954BCB89C18;
+
+// --- Машина: внешность, меняется редко -----------------------------------------
+
+/// GET_VEHICLE_COLOURS, канонический хеш 0XA19435F193E081AC.
+inline constexpr std::uint64_t kGetVehicleColours = 0XFF4B16F297D9CB3E;
+
+/// SET_VEHICLE_COLOURS, канонический хеш 0X4F1D4BE3A7F24601.
+inline constexpr std::uint64_t kSetVehicleColours = 0XD133EF7430EDCD09;
+
+/// GET_VEHICLE_EXTRA_COLOURS, канонический хеш 0X3BC4245933A166F7.
+inline constexpr std::uint64_t kGetVehicleExtraColours = 0X741D9B0685E67684;
+
+/// SET_VEHICLE_EXTRA_COLOURS, канонический хеш 0X2036F561ADD12E33.
+inline constexpr std::uint64_t kSetVehicleExtraColours = 0XBB361D7264AC4FD8;
+
+/// GET_VEHICLE_NUMBER_PLATE_TEXT, канонический хеш 0X7CE1CCB9B293020E.
+inline constexpr std::uint64_t kGetVehicleNumberPlateText = 0XCA7159F2C5FF745A;
+
+/// SET_VEHICLE_NUMBER_PLATE_TEXT, канонический хеш 0X95A88F0B409CDA47.
+inline constexpr std::uint64_t kSetVehicleNumberPlateText = 0X3FEAE59CDE6D3946;
+
+/// GET_VEHICLE_NUMBER_PLATE_TEXT_INDEX, канонический хеш 0XF11BC2DD9A3E7195.
+inline constexpr std::uint64_t kGetVehicleNumberPlateTextIndex = 0X4F06416A18248EA0;
+
+/// SET_VEHICLE_NUMBER_PLATE_TEXT_INDEX, канонический хеш 0X9088EB5A43FFB0A1.
+inline constexpr std::uint64_t kSetVehicleNumberPlateTextIndex = 0X05D3F682DDA06C20;
+
+/// GET_VEHICLE_LIVERY, канонический хеш 0X2BB9230590DA5E8A.
+inline constexpr std::uint64_t kGetVehicleLivery = 0XA089B04A208DBD0B;
+
+/// SET_VEHICLE_LIVERY, канонический хеш 0X60BF608F1B8CD1B6.
+inline constexpr std::uint64_t kSetVehicleLivery = 0XA1C03303EC67320B;
+
+/// GET_VEHICLE_DIRT_LEVEL, канонический хеш 0X8F17BC8BA08DA62B.
+inline constexpr std::uint64_t kGetVehicleDirtLevel = 0XF04E476AE02C4646;
+
+/// GET_VEHICLE_MOD, канонический хеш 0X772960298DA26FDB.
+inline constexpr std::uint64_t kGetVehicleMod = 0X94C9CD3D66808551;
+
+/// SET_VEHICLE_MOD, канонический хеш 0X6AF0636DDEDCB6DD.
+inline constexpr std::uint64_t kSetVehicleMod = 0X8450270DC5896D39;
+
+/// SET_VEHICLE_MOD_KIT, канонический хеш 0X1F2AA07F00B3217A.
+inline constexpr std::uint64_t kSetVehicleModKit = 0XB5AD06DDA85E2E8F;
+
+/// TOGGLE_VEHICLE_MOD, канонический хеш 0X2A1F4F37F95BAD08.
+inline constexpr std::uint64_t kToggleVehicleMod = 0XF5501FF9869DAC7C;
+
+/// IS_TOGGLE_MOD_ON, канонический хеш 0X84B233A8C8FC8AE7.
+inline constexpr std::uint64_t kIsToggleModOn = 0X1D5A665629D417A7;
+
+/// GET_VEHICLE_WHEEL_TYPE, канонический хеш 0XB3ED1BFB4BE636DC.
+inline constexpr std::uint64_t kGetVehicleWheelType = 0X6A375D21624F9187;
+
+/// SET_VEHICLE_WHEEL_TYPE, канонический хеш 0X487EB21CC7295BA1.
+inline constexpr std::uint64_t kSetVehicleWheelType = 0XE33678A9AE50A01B;
+
+/// GET_VEHICLE_WINDOW_TINT, канонический хеш 0X0EE21293DAD47C95.
+inline constexpr std::uint64_t kGetVehicleWindowTint = 0XDA63CE76F9AAB439;
+
+/// SET_VEHICLE_WINDOW_TINT, канонический хеш 0X57C51E6BAD752696.
+inline constexpr std::uint64_t kSetVehicleWindowTint = 0XFE620ED8E0A3C209;
+
+/// GET_VEHICLE_MAX_NUMBER_OF_PASSENGERS, канонический хеш 0XA7C4F2C6E744A550.
+inline constexpr std::uint64_t kGetVehicleMaxNumberOfPassengers = 0X2EEC0612337D20CE;
+
+// --- Чем занят персонаж --------------------------------------------------------
+
+/// IS_PED_IN_MELEE_COMBAT, канонический хеш 0X4E209B2C1EAD5159.
+inline constexpr std::uint64_t kIsPedInMeleeCombat = 0XFFAC548682B3D56E;
+
+/// GET_PED_STEALTH_MOVEMENT, канонический хеш 0X7C2AC9CA66575FBF.
+inline constexpr std::uint64_t kGetPedStealthMovement = 0XC2BF1F6F84E31EB2;
+
+/// SET_PED_STEALTH_MOVEMENT, канонический хеш 0X88CBB5CEB96B7BD2.
+inline constexpr std::uint64_t kSetPedStealthMovement = 0XF9358C41CC69C616;
+
+/// IS_PED_CLIMBING, канонический хеш 0X53E8CB4F48BFE623.
+inline constexpr std::uint64_t kIsPedClimbing = 0X7CB06BFD42FB0E24;
+
+/// IS_PED_VAULTING, канонический хеш 0X117C70D1F5730B5E.
+inline constexpr std::uint64_t kIsPedVaulting = 0X75B105C651D87D0E;
+
+/// IS_PED_SWIMMING, канонический хеш 0X9DE327631295B4C2.
+inline constexpr std::uint64_t kIsPedSwimming = 0X2CFBD7757B4D922F;
+
+/// IS_PED_SWIMMING_UNDER_WATER, канонический хеш 0XC024869A53992F34.
+inline constexpr std::uint64_t kIsPedSwimmingUnderWater = 0X9AC89B274C35B3FC;
+
+/// IS_PED_DIVING, канонический хеш 0X5527B8246FEF9B11.
+inline constexpr std::uint64_t kIsPedDiving = 0XCD80FA7E842E5CA9;
+
+/// IS_PED_FALLING, канонический хеш 0XFB92A102F1C4DFA3.
+inline constexpr std::uint64_t kIsPedFalling = 0X9857C978BD3CBEDA;
+
+/// GET_PED_PARACHUTE_STATE, канонический хеш 0X79CFD9827CC979B6.
+inline constexpr std::uint64_t kGetPedParachuteState = 0X57E7FD3BD6BB28C0;
+
+/// IS_PED_RELOADING, канонический хеш 0X24B100C68C645951.
+inline constexpr std::uint64_t kIsPedReloading = 0XC722DDBD6C3E86D7;
+
+/// IS_PED_IN_COVER, канонический хеш 0X60DFD0691A170B88.
+inline constexpr std::uint64_t kIsPedInCover = 0XD6179D448A06A77F;
+
+/// IS_PED_GETTING_UP, канонический хеш 0X2A74E1D5F2F00EEC.
+inline constexpr std::uint64_t kIsPedGettingUp = 0X0B3FC0E7676E79BF;
+
+/// IS_PED_DOING_DRIVEBY, канонический хеш 0XB2C086CC1BF8F2BF.
+inline constexpr std::uint64_t kIsPedDoingDriveby = 0XB29E06D8C7B733E6;
+
+/// GET_PED_ARMOUR, канонический хеш 0X9483AF821605B1D8.
+inline constexpr std::uint64_t kGetPedArmour = 0XE5E6F6EFCE07789A;
+
+// --- Посадка в машину ----------------------------------------------------------
+
+/// IS_PED_GETTING_INTO_A_VEHICLE, канонический хеш 0XBB062B2B5722478E.
+inline constexpr std::uint64_t kIsPedGettingIntoAVehicle = 0X9D6DF8F3584AAC2B;
+
+/// GET_VEHICLE_PED_IS_TRYING_TO_ENTER, канонический хеш 0X814FA8BE5449445D.
+inline constexpr std::uint64_t kGetVehiclePedIsTryingToEnter = 0XF9F8E3060F7CAEDB;
+
+/// GET_SEAT_PED_IS_TRYING_TO_ENTER, канонический хеш 0X6F4C85ACD641BCD2.
+inline constexpr std::uint64_t kGetSeatPedIsTryingToEnter = 0X03603B0046EE6ACD;
+
+/// IS_PED_IN_VEHICLE, канонический хеш 0XA3EE4A07279BB9DB.
+inline constexpr std::uint64_t kIsPedInVehicle = 0XCECDBB848D53DEB2;
+
+/// TASK_ENTER_VEHICLE, канонический хеш 0XC20E50AA46D09CA8.
+inline constexpr std::uint64_t kTaskEnterVehicle = 0XEBA229B2E0BB05E0;
+
+// --- Проигрывание движений -----------------------------------------------------
+
+/// REQUEST_ANIM_DICT, канонический хеш 0XD3BD40951412FEF6.
+inline constexpr std::uint64_t kRequestAnimDict = 0X80813AC549A1E8AE;
+
+/// HAS_ANIM_DICT_LOADED, канонический хеш 0XD031A9162D01088C.
+inline constexpr std::uint64_t kHasAnimDictLoaded = 0XE100DD4F82A51BDE;
+
+/// TASK_PLAY_ANIM, канонический хеш 0XEA47FE3719165B94.
+inline constexpr std::uint64_t kTaskPlayAnim = 0X10425721983AE158;
+
+/// IS_ENTITY_PLAYING_ANIM, канонический хеш 0X1F0B79228E461EC9.
+inline constexpr std::uint64_t kIsEntityPlayingAnim = 0X13CCB1AD131C1082;
+
+/// STOP_ANIM_TASK, канонический хеш 0X97FF36A1D40EA00A.
+inline constexpr std::uint64_t kStopAnimTask = 0X08D8528BA8E43641;
+
+/// CLEAR_PED_SECONDARY_TASK, канонический хеш 0X176CECF6F920D707.
+inline constexpr std::uint64_t kClearPedSecondaryTask = 0XBEB96F1A510EE9AA;
+
+/// TASK_GO_TO_COORD_WHILE_AIMING_AT_COORD, канонический хеш 0X11315AB3385B8AC0.
+inline constexpr std::uint64_t kTaskGoToCoordWhileAimingAtCoord = 0XB8551FB832F73124;
+
+/// SET_PED_CONFIG_FLAG, канонический хеш 0X1913FE4CBF41C463.
+inline constexpr std::uint64_t kSetPedConfigFlag = 0X0428AFDCAA63B06E;
+
+/// SET_PED_CAN_PLAY_AMBIENT_ANIMS, канонический хеш 0X6373D1349925A70E.
+inline constexpr std::uint64_t kSetPedCanPlayAmbientAnims = 0XC1BC1B8A5AA67C6B;
+
 } // namespace oxymp::client::game::natives

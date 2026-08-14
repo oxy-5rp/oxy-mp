@@ -32,6 +32,11 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # клиент неизбежно не запустится ни у кого, кроме того, кто его собрал.
 #
 # Вшитая библиотека снимает оба случая разом и не требует от игрока ничего.
+#
+# Это умолчание, а не правило для всех. Серверная сторона живёт иначе: рядом с
+# ней лежит libnode.dll, собранный с динамической библиотекой, и через границу
+# этой DLL ходят стандартные строки. Почему двух видов не избежать и как это
+# устроено — в cmake/dual_runtime.cmake.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Общие настройки компиляции. Подключается к каждой цели как oxymp::options,
@@ -58,12 +63,27 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+# Двойная сборка общих библиотек: клиенту нужна статическая библиотека времени
+# выполнения, серверу — динамическая. Подключается раньше зависимостей: ENet
+# собирается тем же способом.
+include(cmake/dual_runtime.cmake)
+
 include(cmake/dependencies.cmake)
+
+# Node.js — движок игровых режимов. Необязателен: без него собирается всё, кроме
+# скриптов, и голый сервер от этого не меняется.
+include(cmake/node.cmake)
+
+# Подпись Authenticode. Объявляется раньше целей, чтобы oxymp_sign(...) была
+# известна к моменту, когда её вызывают; по умолчанию не делает ничего.
+include(cmake/sign.cmake)
 
 add_subdirectory(memscan)
 add_subdirectory(gamesig)
 add_subdirectory(shared)
 add_subdirectory(net)
+add_subdirectory(script)
+add_subdirectory(script-js)
 add_subdirectory(client)
 add_subdirectory(server)
 add_subdirectory(botclient)
@@ -77,10 +97,18 @@ endif()
 
 add_subdirectory(tools/sigcheck)
 
+# Подпись наших бинарников вызывается в CMakeLists самих целей — там же, где они
+# объявлены: add_custom_command(TARGET ...) иначе цель не видит. Подписываются
+# только свои файлы; библиотеки Chromium уже подписаны проектом CEF, а средства
+# разработки — бота, sigcheck, тесты — не раздают никому.
+
 if(OXYMP_BUILD_TESTS)
     enable_testing()
     add_subdirectory(memscan/tests)
     add_subdirectory(shared/tests)
+    add_subdirectory(client/tests)
+    add_subdirectory(server/tests)
+    add_subdirectory(script/tests)
 endif()
 
 # Раскладка собранного по каталогам, которые отдают людям.

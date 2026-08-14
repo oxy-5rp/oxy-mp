@@ -44,8 +44,9 @@
     overflow: hidden;
     user-select: none;
 
-    /* Своего курсора у страницы нет: системный над кадром игры не показать, а
-       нарисованный ею — обычный элемент разметки, и он ниже. */
+    /* Курсора нет вовсе: системный над кадром игры не виден, а рисовать свой
+       не для чего — мышь страница не получает. Она ничем не распоряжается, и
+       нажимать на ней нечего. */
     cursor: none;
   }
 
@@ -185,6 +186,18 @@
      остановиться. Останавливается она на меню паузы: скриптовый тик при этом не
      идёт, и уголок, оставленный на экране, застыл бы поверх меню на последнем
      своём состоянии. */
+  /* Признака «голый клиент» здесь больше нет, и это исправление, а не отказ от
+     замысла. Замысел был верен — что показать игроку, решает сервер, — но
+     выключателя к нему так и не появилось: поднять признак было некому, и он
+     оставался поднятым всегда. Чат от этого не показывался ни разу.
+
+     Чат при этом и не должен был прятаться. Он не принадлежит игровому режиму:
+     сервер разносит реплики сам, ещё до всякого ресурса, — ровно как голый
+     сервер RAGE MP. Прятать от игрока то, что сервер ему шлёт, незачем.
+
+     Появится своё окно у ресурса — оно и будет решать, что показывать. Гасить
+     ради этого чат, который работает, не нужно. */
+
   body:not(.ready) .hud,
   body:not(.alive) .hud,
   body:not(.ready) .chat,
@@ -295,10 +308,8 @@
   }
 
   /* Пустой чат не рисуется вовсе: тёмный прямоугольник без единой строки
-     закрывал бы собой угол экрана просто так. Набор для меню его тоже не
-     поднимает — набранное показывается в самом меню. */
-  body:not(.has-chat):not(.typing) .chat,
-  body:not(.has-chat).asking .chat { display: none !important; }
+     закрывал бы собой угол экрана просто так. */
+  body:not(.has-chat):not(.typing) .chat { display: none !important; }
 
   .lines {
     overflow: hidden;
@@ -321,12 +332,9 @@
     display: none;
   }
 
-  /* Строка ввода живёт в чате, только пока набирают для чата. Набор для меню
-     показывается в самом меню, в его поле, — за тем поле и заводилось. */
-  body.typing:not(.asking) .entry { display: block; }
+  body.typing .entry { display: block; }
 
-  .entry .caret,
-  .field .caret {
+  .entry .caret {
     display: inline-block;
     width: 7px;
     margin-left: 1px;
@@ -334,207 +342,6 @@
     animation: blink 1.05s steps(1, end) infinite;
   }
   @keyframes blink { 50% { opacity: 0; } }
-
-  /* --- Админ-меню -------------------------------------------------------- */
-
-  /* Меню ведут и клавиши, и мышь, и спорить им не о чем: мышь наводит выбор на
-     пункт, а нажимает по нему то же самое, что и Enter. Решает по-прежнему игра —
-     страница лишь называет пункт. */
-  .menu {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 560px;
-    max-height: 80%;
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    overflow: hidden;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
-  }
-
-  body:not(.menu-open) .menu { display: none; }
-
-  .menu header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 11px 12px 11px 16px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .menu h3 {
-    margin: 0;
-    flex: 1;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: .3px;
-  }
-  .menu h3 b { color: var(--accent); font-weight: 600; }
-
-  /* Кнопки заголовка: назад и закрыть. Обе есть и на клавиатуре, но искать их
-     там игрок не обязан — он видит их и нажимает. */
-  .tool {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 28px;
-    height: 26px;
-    padding: 0 9px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, .03);
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1;
-  }
-
-  .tool:hover { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
-
-  /* На верхнем разделе возвращаться некуда. */
-  body:not(.menu-deep) .menu .back { display: none; }
-
-  .menu ul {
-    margin: 0;
-    padding: 6px 0;
-    list-style: none;
-    flex: 1;
-    min-height: 0;
-
-    /* Список бывает длиннее окна: машин четырнадцать, а кадр бывает и в 720
-       точек высотой. Прокрутка при этом своя — колеса мыши у страницы нет, оно
-       уходит в игру мимо нас. */
-    overflow-y: auto;
-    scrollbar-width: none;
-  }
-
-  .menu ul::-webkit-scrollbar { display: none; }
-
-  .menu li {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 7px 16px;
-    font-size: 13px;
-    color: #c3cbd9;
-  }
-
-  .menu li .label { flex: 1; }
-
-  /* Немедленный отклик на наведение. Настоящий выбор приходит от игры, но
-     дорога туда и обратно занимает полсотни миллисекунд, а рука ждёт ответа
-     сразу. */
-  .menu li:hover { background: rgba(255, 255, 255, .05); }
-
-  /* Подсвеченный пункт — полосой слева, а не заливкой во всю строку: заливка
-     поверх игры читается как окно, а полоса как выбор. */
-  .menu li.on {
-    color: var(--text);
-    background: var(--accent-dim);
-    box-shadow: inset 3px 0 0 var(--accent);
-  }
-
-  .menu li .value {
-    color: var(--muted);
-    font-size: 11px;
-    letter-spacing: .2px;
-  }
-
-  /* Раздел: у него есть продолжение, и это видно по стрелке. */
-  .menu li .chevron { color: var(--muted); font-size: 14px; }
-  .menu li.on .chevron { color: var(--accent); }
-
-  /* Переключатель. Рисуется переключателем, а не подписью «вкл/выкл»: подпись
-     приходится читать, а положение видно. */
-  .switch {
-    position: relative;
-    width: 34px;
-    height: 18px;
-    border-radius: 9px;
-    background: rgba(255, 255, 255, .12);
-    border: 1px solid var(--line);
-    transition: background .15s;
-  }
-
-  .switch::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #8894a8;
-    transition: transform .15s, background .15s;
-  }
-
-  .switch.on { background: var(--accent-dim); border-color: var(--accent); }
-  .switch.on::after { transform: translateX(16px); background: var(--accent); }
-
-  /* Поле ввода названия модели — прямо в меню, а не строкой в углу экрана.
-     Набирает его по-прежнему клиент: страница живёт в чужом браузерном движке и
-     до клавиатуры игры не дотягивается. Здесь она показывает набранное. */
-  .field {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    min-height: 26px;
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: rgba(0, 0, 0, .35);
-    font-family: "Cascadia Mono", Consolas, monospace;
-    font-size: 12px;
-    color: var(--text);
-  }
-
-  .field:hover { border-color: var(--accent); }
-  .field.asking { border-color: var(--accent); background: rgba(76, 194, 255, .08); }
-  .field .ghost { color: #5b6577; }
-
-  /* Два действия у игрока: перенестись к нему и позвать его к себе. Кнопками, а
-     не подсказкой «ввод — к нему, → — сюда»: подсказку надо помнить. */
-  .menu li .act {
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    background: rgba(255, 255, 255, .03);
-  }
-
-  .menu li .act:hover { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
-
-  .menu footer {
-    padding: 9px 16px;
-    border-top: 1px solid var(--line);
-    font-size: 11px;
-    color: var(--muted);
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .menu footer .note { color: var(--good); }
-
-  /* --- Курсор ------------------------------------------------------------ */
-
-  /* Рисуется страницей, потому что рисовать его больше некому: системный курсор
-     над кадром игры не виден, а кадр рисуем мы. Показывается, только пока
-     открыто меню, — в остальное время мышь принадлежит игре. */
-  .cursor {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 16px;
-    height: 22px;
-    pointer-events: none;
-    display: none;
-    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .7));
-  }
-
-  body.menu-open .cursor { display: block; }
 
   /* --- Консоль ---------------------------------------------------------- */
 
@@ -572,6 +379,82 @@
   .log .warn { color: #ffcc66; }
   .log .err  { color: var(--bad); }
   .log .dbg  { color: #6d7688; }
+
+  /* --- Разрыв связи с сервером ------------------------------------------- */
+
+  /* Поверх всего и без исключений: игрок, оставшийся без сервера, продолжает
+     видеть живую игру — персонаж ходит, машина едет, — и ничто в кадре само по
+     себе не скажет ему, что происходящее больше никого не касается.
+
+     Прячется оно только вместе с экраном загрузки: пока тот держится, о ходе
+     подключения сказано там своей строкой. */
+  .broken {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(3, 5, 8, .82);
+
+    /* Размытие отделяет мёртвую картинку от окна лучше любой рамки: игра за ним
+       видна, но перестаёт читаться как то, во что играют. */
+    backdrop-filter: blur(7px);
+  }
+
+  body.broken .broken { display: flex; }
+
+  /* Пока держится экран загрузки, окна разрыва нет: о ходе подключения там уже
+     сказано своей строкой, и второе объяснение поверх первого только сбивало бы.
+     Своё слово окно скажет, когда экран уйдёт. */
+  body:not(.ready) .broken { display: none !important; }
+
+  .broken .box {
+    width: 460px;
+    padding: 28px 30px 24px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  }
+
+  .broken h2 {
+    margin: 0 0 10px;
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--bad);
+  }
+
+  .broken .why {
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: #c3ccda;
+  }
+
+  /* Отсчёт до следующей попытки не показывается, и это осознанно: попытки идут
+     с растущей задержкой, и точного числа у страницы нет. Обещать секунду и
+     промолчать полминуты хуже, чем не обещать ничего. */
+  .broken .retry {
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+
+  .broken .retry b { color: var(--accent); font-weight: 500; }
+
+  /* Окончательный отказ повторять нечего: причина сама не изменится. */
+  body.broken-final .broken .retry { display: none; }
+
+  .broken .final {
+    display: none;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+
+  body.broken-final .broken .final { display: block; }
 </style>
 </head>
 <body>
@@ -622,26 +505,6 @@
   <div class="entry"><span id="typed"></span><span class="caret"></span></div>
 </div>
 
-<div class="card menu">
-  <header>
-    <span class="tool back" data-do="back">‹</span>
-    <h3 id="menu-title">oxy<b>MP</b></h3>
-    <span class="tool" data-do="close">✕</span>
-  </header>
-
-  <ul id="menu-items"></ul>
-
-  <footer>
-    <span>мышь или ↑↓ · Enter — применить · ← — назад</span>
-    <span class="note" id="menu-note"></span>
-  </footer>
-</div>
-
-<svg class="cursor" id="cursor" viewBox="0 0 16 22" xmlns="http://www.w3.org/2000/svg">
-  <path d="M1 1 L1 17 L5.2 13.2 L8 20 L10.6 18.9 L7.9 12.3 L13.4 12.3 Z"
-        fill="#ffffff" stroke="#0b0e14" stroke-width="1.2" stroke-linejoin="round"/>
-</svg>
-
 <div class="console-view">
   <header>
     <h3>Консоль oxyMP</h3>
@@ -650,11 +513,24 @@
   <div class="log" id="log"></div>
 </div>
 
+<div class="broken">
+  <div class="box">
+    <h2 id="broken-title">Соединение с сервером потеряно</h2>
+    <p class="why" id="broken-why"></p>
+    <div class="retry">пробуем подключиться заново — <b id="broken-address">—</b></div>
+    <div class="final">выйдите из игры и вернитесь, когда причина будет устранена</div>
+  </div>
+</div>
+
 <script>
   const CONNECTION = ['ожидание', 'подключение', 'представляемся', 'в сессии', 'отказано'];
 
   /// Состояние соединения, при котором игрок уже в сессии.
   const IN_SESSION = 3;
+
+  // Чем кончилась связь. Совпадает с DisconnectReason на стороне клиента.
+  const LOST = 1;
+  const REFUSED = 2;
 
   // Порядок и число совпадают с LoadStage на стороне клиента.
   const STAGES = [
@@ -671,13 +547,6 @@
   // считает на один шаг больше, чем стадий.
   const STEPS = STAGES.length + 1;
 
-  // Вид пункта меню. Порядок совпадает с AdminMenu::Kind на стороне игры.
-  const ACTION = 0;
-  const SECTION = 1;
-  const TOGGLE = 2;
-  const FIELD = 3;
-  const PLAYER = 4;
-
   const KIND = ['say', 'join', 'leave', 'system'];
 
   // Уровни spdlog: trace, debug, info, warn, err, critical, off.
@@ -690,15 +559,6 @@
 
   const lines = document.getElementById('lines');
   const log = document.getElementById('log');
-  const cursor = document.getElementById('cursor');
-
-  // Обратный путь к клиенту. Появляется он не сразу: страница поднимается
-  // раньше, чем её окружению добавляют эту функцию.
-  function tell(message) {
-    if (window.oxympSend) {
-      window.oxympSend(JSON.stringify(message));
-    }
-  }
 
   function append(box, text, className, keep) {
     const row = document.createElement('div');
@@ -737,222 +597,6 @@
     }
   }
 
-  // --- Меню ----------------------------------------------------------------
-
-  let menuSignature = '';
-
-  /// Собирает правую часть строки — ту, которой пункты и отличаются друг от
-  /// друга. Возвращает список элементов: у игрока их два, у остальных один.
-  /// Пояснение справа от названия. Пустое не рисуется вовсе.
-  function valueOf(item) {
-    if (!item.value) {
-      return [];
-    }
-
-    const value = document.createElement('span');
-    value.className = 'value';
-    value.textContent = item.value;
-    return [value];
-  }
-
-  function decorate(item, index, asking, typed) {
-    if (item.kind === SECTION) {
-      const chevron = document.createElement('span');
-      chevron.className = 'chevron';
-      chevron.textContent = '›';
-
-      return valueOf(item).concat([chevron]);
-    }
-
-    if (item.kind === TOGGLE) {
-      const knob = document.createElement('span');
-      knob.className = 'switch' + (item.on ? ' on' : '');
-      return [knob];
-    }
-
-    if (item.kind === PLAYER) {
-      const toHim = document.createElement('span');
-      toHim.className = 'act';
-      toHim.textContent = 'к нему';
-      toHim.dataset.do = 'press';
-      toHim.dataset.index = index;
-
-      const toMe = document.createElement('span');
-      toMe.className = 'act';
-      toMe.textContent = 'сюда';
-      toMe.dataset.do = 'alternate';
-      toMe.dataset.index = index;
-
-      return [toHim, toMe];
-    }
-
-    if (item.kind === FIELD) {
-      const field = document.createElement('span');
-      field.className = 'field' + (asking ? ' asking' : '');
-      field.dataset.do = 'ask';
-
-      if (asking) {
-        field.textContent = typed;
-
-        const caret = document.createElement('span');
-        caret.className = 'caret';
-        field.appendChild(caret);
-      } else {
-        const ghost = document.createElement('span');
-        ghost.className = 'ghost';
-        ghost.textContent = item.value ? item.value + ' — нажмите и наберите' : 'нажмите и наберите';
-        field.appendChild(ghost);
-      }
-
-      return [field];
-    }
-
-    return valueOf(item);
-  }
-
-  function renderMenu(menu, typed) {
-    document.body.classList.toggle('menu-open', !!menu.open);
-
-    if (!menu.open) {
-      menuSignature = '';
-      return;
-    }
-
-    document.getElementById('menu-note').textContent = menu.note || '';
-
-    // Глубина видна по заголовку: у верхнего раздела он свой, у остальных —
-    // название раздела. Возвращаться с верхнего некуда, и кнопки там нет.
-    document.body.classList.toggle('menu-deep', menu.title !== 'oxyMP');
-    document.body.classList.toggle('asking', !!menu.asking);
-
-    // Список перестраивается, только когда он и правда изменился: меню
-    // приходит целиком двадцать раз в секунду, а меняется от нажатия.
-    // Подпись списка — обычный JSON: собранная склейкой через служебные
-    // символы, она однажды уже принесла в страницу настоящие нулевые байты, а
-    // те обрывали её встроенный текст на середине.
-    const signature = JSON.stringify([menu.title, menu.selected, menu.items, menu.asking, typed]);
-
-    if (signature === menuSignature) {
-      return;
-    }
-    menuSignature = signature;
-
-    document.getElementById('menu-title').textContent = menu.title;
-
-    const box = document.getElementById('menu-items');
-    box.textContent = '';
-
-    let chosen = null;
-
-    menu.items.forEach((item, index) => {
-      const row = document.createElement('li');
-      if (index === menu.selected) {
-        row.className = 'on';
-        chosen = row;
-      }
-
-      row.dataset.index = index;
-
-      const label = document.createElement('span');
-      label.className = 'label';
-      label.textContent = item.label;
-      row.appendChild(label);
-
-      for (const extra of decorate(item, index, menu.asking, typed)) {
-        row.appendChild(extra);
-      }
-
-      box.appendChild(row);
-    });
-
-    // Выбранный стрелками пункт может оказаться за краем списка: стрелки ходят
-    // по всем пунктам, а видно не все.
-    if (chosen) {
-      chosen.scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  // --- Мышь ----------------------------------------------------------------
-
-  // Мышь приходит от клиента настоящими событиями: он берёт положение курсора
-  // над окном игры и пересчитывает его в точки страницы. Здесь она — обычная
-  // мышь, и разметка ведёт себя как разметка.
-
-  // На каком пункте указатель стоял в прошлый раз. Нужно, чтобы не рассказывать
-  // об этом клиенту по шестьдесят раз в секунду: выбор меняется, когда указатель
-  // переходит с пункта на пункт, а не когда он дрожит внутри одного.
-  let pointedAt = -1;
-
-  /// Полоса у края списка, в которой он подкручивается, и шаг прокрутки.
-  const EDGE = 28;
-  const SCROLL_STEP = 14;
-
-  /// Подкручивает длинный список, когда указатель у его края.
-  ///
-  /// Так делают, когда колеса нет, а список не помещается. У нас его и правда
-  /// нет: колесо мыши уходит в игру мимо страницы.
-  function scrollByEdge(y) {
-    const box = document.getElementById('menu-items');
-    if (box.scrollHeight <= box.clientHeight) {
-      return;
-    }
-
-    const bounds = box.getBoundingClientRect();
-
-    if (y < bounds.top + EDGE) {
-      box.scrollTop -= SCROLL_STEP;
-    } else if (y > bounds.bottom - EDGE) {
-      box.scrollTop += SCROLL_STEP;
-    }
-  }
-
-  document.addEventListener('mousemove', (event) => {
-    cursor.style.transform = 'translate(' + event.clientX + 'px,' + event.clientY + 'px)';
-
-    scrollByEdge(event.clientY);
-
-    const row = event.target.closest('li[data-index]');
-    const index = row ? Number(row.dataset.index) : -1;
-
-    if (index >= 0 && index !== pointedAt) {
-      pointedAt = index;
-      tell({ kind: 'point', index: index });
-    }
-  });
-
-  /// Что делать по нажатию на этом месте страницы.
-  ///
-  /// Кнопки заголовка и кнопки игрока называют своё дело сами, а строка целиком
-  /// означает «нажать выбранный пункт».
-  function intentAt(target, alternate) {
-    const marked = target.closest('[data-do]');
-    if (marked) {
-      const index = marked.dataset.index !== undefined
-        ? Number(marked.dataset.index)
-        : Number((marked.closest('li[data-index]') || { dataset: {} }).dataset.index || 0);
-
-      return { kind: marked.dataset.do, index: index };
-    }
-
-    const row = target.closest('li[data-index]');
-    if (!row) {
-      return null;
-    }
-
-    return { kind: alternate ? 'alternate' : 'press', index: Number(row.dataset.index) };
-  }
-
-  document.addEventListener('mousedown', (event) => {
-    const intent = intentAt(event.target, event.button === 2);
-    if (intent) {
-      tell(intent);
-    }
-  });
-
-  // Своего меню по правой кнопке у страницы быть не должно: она живёт в кадре
-  // игры, и показывать поверх неё меню Chromium некому и незачем.
-  document.addEventListener('contextmenu', (event) => event.preventDefault());
-
   // --- Состояние от клиента ------------------------------------------------
 
   /// Что показывать на экране загрузки последним шагом — тем, на котором клиент
@@ -969,6 +613,30 @@
     }
 
     return { text: 'подключение к серверу', share: 0.88, waiting: true, bad: false };
+  }
+
+  /// Показывает окно разрыва — или убирает его, когда игрок снова в сессии.
+  ///
+  /// Отказ и обрыв разведены не ради разных слов, а ради разного обещания.
+  /// Обрыв проходит сам: клиент повторяет попытки, и окно уйдёт без участия
+  /// игрока. Отказ сам не пройдёт — сервер назвал причину, и она не изменится
+  /// оттого, что мы постучимся ещё раз. Обещать в этом случае повтор значило бы
+  /// заставить человека ждать того, чего не будет.
+  function renderBroken(state) {
+    const reason = Number(state.disconnect) || 0;
+
+    document.body.classList.toggle('broken', reason !== 0);
+    document.body.classList.toggle('broken-final', reason === REFUSED);
+
+    if (reason === 0) {
+      return;
+    }
+
+    document.getElementById('broken-title').textContent =
+      reason === REFUSED ? 'Сервер отказал в подключении' : 'Соединение с сервером потеряно';
+
+    document.getElementById('broken-why').textContent =
+      state.disconnectDetail || (reason === LOST ? 'сервер перестал отвечать' : '');
   }
 
   function renderLoading(state) {
@@ -1039,15 +707,13 @@
         append(log, line.text, LEVEL[line.kind] || '', LOG_KEEP);
       }
 
-      if (s.menu) {
-        renderMenu(s.menu, s.inputText || '');
-      }
-
       renderLoading(s);
+      renderBroken(s);
 
       if (s.address !== undefined) {
         document.getElementById('loading-address').textContent = s.address || '—';
         document.getElementById('loading-nickname').textContent = s.nickname || '—';
+        document.getElementById('broken-address').textContent = s.address || '—';
       }
 
       document.body.classList.toggle('ready', !!s.ready);

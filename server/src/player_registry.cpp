@@ -47,7 +47,20 @@ const Player* PlayerRegistry::findByPeer(net::PeerId peer) const {
     return it == players_.end() ? nullptr : &it->second;
 }
 
+Player* PlayerRegistry::findByPeer(net::PeerId peer) {
+    const auto it = players_.find(peer);
+    return it == players_.end() ? nullptr : &it->second;
+}
+
 const Player* PlayerRegistry::findById(shared::PlayerId id) const {
+    const auto it = std::ranges::find_if(players_, [id](const auto& entry) {
+        return entry.second.id == id;
+    });
+
+    return it == players_.end() ? nullptr : &it->second;
+}
+
+Player* PlayerRegistry::findById(shared::PlayerId id) {
     const auto it = std::ranges::find_if(players_, [id](const auto& entry) {
         return entry.second.id == id;
     });

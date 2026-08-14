@@ -86,6 +86,10 @@ set_target_properties(oxymp_cefsub PROPERTIES
 
 target_link_libraries(oxymp_cefsub PRIVATE oxymp::options oxymp::cef)
 
+# Подпись отдельного процесса CEF: он тоже наш исполняемый файл и запускается у
+# игрока. Пустышка, пока OXYMP_SIGN выключен.
+oxymp_sign(oxymp_cefsub)
+
 # --- Хозяйство CEF рядом с исполняемыми файлами ---------------------------
 #
 # Кладётся в тот же каталог cef, где уже живёт слой загрузки: с точки зрения

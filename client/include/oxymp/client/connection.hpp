@@ -29,6 +29,28 @@ enum class ConnectionState {
     Rejected,
 };
 
+/// Чем кончилась связь с сервером.
+///
+/// Отдельно от ConnectionState, потому что отвечает на другой вопрос. Состояние
+/// говорит, что происходит сейчас; здесь — что случилось и почему игрок остался
+/// без сессии. По состоянию этого не узнать: Waiting одинаково означает «ещё ни
+/// разу не подключались» и «выпали из игры, идёт повтор», а игроку это две очень
+/// разные новости.
+enum class DisconnectReason : std::uint8_t {
+    /// Разрыва не было: либо мы в сессии, либо идёт первое подключение.
+    None = 0,
+
+    /// Связь оборвалась после того, как игрок уже был в сессии.
+    ///
+    /// Кто закрыл соединение — мы или сервер, — здесь не различается, и не по
+    /// небрежности: транспорт этого не сообщает, а для игрока разницы нет. Он
+    /// остался без сервера, и это всё, что ему нужно знать.
+    Lost = 1,
+
+    /// Сервер отказал окончательно. Причина — в rejectReason().
+    Refused = 2,
+};
+
 /// Другой игрок, о котором сообщил сервер.
 struct RemotePlayer {
     shared::PlayerId id = shared::kInvalidPlayerId;
@@ -42,38 +64,80 @@ struct RemotePlayer {
     shared::PlayerState previous;
     shared::PlayerState latest;
 
-    /// Когда пришли соответствующие снимки.
-    std::chrono::steady_clock::time_point previousAt{};
+    /// Когда последний снимок пришёл — по нашим часам.
+    ///
+    /// Время прихода нужно только для одного: знать, сколько мы уже показываем
+    /// этот отрезок. Длину самого отрезка оно больше не задаёт — её говорит
+    /// отправитель отметкой времени, и оттого движение перестало дрожать.
     std::chrono::steady_clock::time_point latestAt{};
 
-    /// Получен ли хотя бы один снимок.
-    bool hasState = false;
-
-    /// Положение на текущий момент.
+    /// Сколько снимков принято.
     ///
-    /// Между двумя последними снимками положение считается пропорционально
-    /// прошедшему времени; за пределами этого промежутка — достраивается по
-    /// скорости, чтобы игрок не замирал при потере пакета.
-    [[nodiscard]] shared::Vec3 interpolatedPosition(
-        std::chrono::steady_clock::time_point now) const;
+    /// Три состояния, а не два, и различать их обязательно. Ноль — показывать
+    /// игрока нечем, он ещё нигде. Один — показать можно, но смешивать не с чем:
+    /// отрезка ещё нет. Два и больше — обычная работа.
+    std::uint32_t snapshots = 0;
+
+    /// Есть ли чем показать игрока.
+    [[nodiscard]] bool visible() const noexcept { return snapshots > 0; }
+
+    /// Состояние на текущее мгновение.
+    ///
+    /// Плавно меняющееся — положение и направление взгляда — считается между
+    /// двумя последними снимками пропорционально прошедшему времени, а за
+    /// пределами этого промежутка достраивается, чтобы игрок не замирал при
+    /// потере пакета. Остальное берётся из последнего снимка как есть:
+    /// «целится» и «стреляет» плавно не меняются.
+    ///
+    /// Направление взгляда попало в первую половину не сразу, и в этом была
+    /// причина того, что чужие игроки стояли повёрнутыми не туда. Раньше сюда
+    /// уходил последний снимок, а доворачивал персонажа получатель — долей
+    /// расхождения за кадр. Доля за кадр означает, что скорость доворота зависит
+    /// от частоты кадров, и до нужного угла персонаж доходил уже тогда, когда
+    /// хозяин смотрел в другую сторону.
+    [[nodiscard]] shared::PlayerState at(std::chrono::steady_clock::time_point now) const;
 };
 
-/// Машина чужого игрока.
+/// Машина сессии.
 ///
-/// Заводится по тем же двум снимкам и с тем же расчётом промежуточного
-/// положения, что и сам игрок: машина едет быстрее человека, и рывки на ней
-/// заметнее вдвойне.
-struct RemoteVehicle {
+/// Не «чужая»: список машин ведёт сервер, и в нём лежат все — включая те, что
+/// ведём мы сами. Кто именно ведёт машину, сказано в owner, и от этого зависит
+/// всё остальное обращение с ней.
+///
+/// Снимков хранится два, как и у игрока, и с тем же расчётом: они приходят реже
+/// кадров, и показывать последний пришедший значит дёргать машину от точки к
+/// точке. Машина едет быстрее человека, и рывки на ней заметнее вдвойне.
+struct SessionVehicle {
     shared::VehicleState previous;
     shared::VehicleState latest;
 
-    std::chrono::steady_clock::time_point previousAt{};
+    /// Когда последний снимок пришёл — по нашим часам.
     std::chrono::steady_clock::time_point latestAt{};
 
-    bool hasState = false;
+    /// Сколько снимков принято от нынешнего ведущего.
+    ///
+    /// От нынешнего — потому что отметки времени двух разных клиентов между
+    /// собой несравнимы: у каждого свои часы, и разница между их отметками не
+    /// означает ничего. Со сменой ведущего отсчёт начинается заново.
+    ///
+    /// Ноль здесь, в отличие от игрока, не означает «показывать нечем»: машину
+    /// объявляет сервер вместе с её состоянием, и стоящую машину никто никогда
+    /// не рассылает — снимков о ней не будет вовсе.
+    std::uint32_t snapshots = 0;
 
-    [[nodiscard]] shared::Vec3 interpolatedPosition(
-        std::chrono::steady_clock::time_point now) const;
+    /// Кто ведёт машину. kInvalidPlayerId — никто.
+    shared::PlayerId owner = shared::kInvalidPlayerId;
+
+    /// Состояние на текущее мгновение.
+    ///
+    /// Поворот считается наравне с положением, и без этого не обойтись: машина в
+    /// повороте разворачивается за десятые доли секунды, а снимков приходит
+    /// двадцать в секунду. Взятый из последнего снимка, поворот отставал бы от
+    /// положения — машина ехала бы боком.
+    ///
+    /// У машины без ведущего не считается ничего: новых снимков не будет, и
+    /// достраивать движение не по чему. Она стоит там, где её оставили.
+    [[nodiscard]] shared::VehicleState at(std::chrono::steady_clock::time_point now) const;
 };
 
 /// Соединение с сервером и состояние сессии.
@@ -114,11 +178,51 @@ public:
     /// проставляет его сам.
     void setLocalState(const shared::PlayerState& state);
 
-    /// Задаёт состояние машины, за рулём которой мы сидим.
+    /// Задаёт снимки машин, которые ведём мы.
     ///
-    /// Пусто означает «мы не за рулём»: снимок машины рассылает только её
-    /// водитель, а пассажир называет её в своём состоянии по хозяину.
-    void setLocalVehicle(const std::optional<shared::VehicleState>& vehicle);
+    /// Их бывает много, и это не исключение, а обычное дело: ведущим машины
+    /// назначают того, кто к ней ближе всех, и стоящий посреди двора отвечает
+    /// разом за все машины во дворе. Раньше машина была одна — та, в которой
+    /// игрок сидел, — и всё, что стояло рядом, не вёл никто.
+    void setOwnedVehicles(std::vector<shared::VehicleState> vehicles);
+
+    /// Задаёт внешности машин, которые мы ведём.
+    ///
+    /// Уходят по надёжному каналу и только при изменении: цвет и тюнинг меняются
+    /// раз в сессию, а не двадцать раз в секунду, — но не дошедший цвет сам собой
+    /// не исправится, в отличие от потерянного снимка.
+    void setOwnedAppearances(std::vector<shared::VehicleAppearance> appearances);
+
+    /// Отправляет серверу именованное событие.
+    ///
+    /// Единственный способ, которым клиент теперь просит сервер что-либо
+    /// сделать. Раньше их было семь — завести машину, убрать её, выдать оружие,
+    /// сменить погоду, поставить предмет, распорядиться игроком, — и каждый нёс
+    /// в себе кусок правил игры. Правила уехали в ресурсы сервера; здесь
+    /// осталось передать нажатие и не толковать его.
+    void emit(std::string name, std::string payload);
+
+    /// Забирает присланное снаряжение, если оно менялось.
+    [[nodiscard]] std::optional<shared::PlayerLoadout> takeLoadout();
+
+    /// Забирает присланное здоровье, если оно менялось.
+    ///
+    /// Не очередь: промежуточные значения никому не нужны, важно последнее. Кто
+    /// именно попал, приходит отдельным сообщением об уроне — оно как раз
+    /// очередь, потому что каждое попадание стоит показать.
+    [[nodiscard]] std::optional<shared::HealthChanged> takeHealth();
+
+    /// Забирает появившиеся предметы.
+    [[nodiscard]] std::vector<shared::ObjectAdded> takeObjects();
+
+    /// Забирает номера пропавших предметов.
+    [[nodiscard]] std::vector<shared::ObjectId> takeRemovedObjects();
+
+    /// Забирает присланное состояние мира, если оно менялось.
+    ///
+    /// Не очередь, в отличие от соседей: промежуточные значения никому не нужны,
+    /// важно последнее. Пусто — значит с прошлого раза ничего не приходило.
+    [[nodiscard]] std::optional<shared::WorldState> takeWorld();
 
     /// Отправляет реплику в чат. Сервер разошлёт её всем, включая нас.
     void say(std::string text);
@@ -126,17 +230,23 @@ public:
     /// Сообщает серверу о попадании по чужому игроку.
     void reportDamage(shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon);
 
-    /// Отправляет распоряжение из админ-меню. Права проверяет сервер.
-    void order(const shared::AdminAction& action);
-
     /// Забирает пришедшие строки чата. Каждая отдаётся ровно один раз.
     [[nodiscard]] std::vector<shared::ChatLine> takeChatLines();
 
     /// Забирает пришедшие сообщения о попаданиях по нам.
     [[nodiscard]] std::vector<shared::DamageTaken> takeDamage();
 
-    /// Забирает пришедшие распоряжения администратора сессии.
-    [[nodiscard]] std::vector<shared::AdminOrder> takeOrders();
+    /// Забирает точки, в которые сервер велел перенести игрока.
+    [[nodiscard]] std::vector<shared::Vec3> takeTeleports();
+
+    /// Забирает пришедшие от сервера именованные события.
+    ///
+    /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь
+    /// они лишь передаются дальше — странице интерфейса.
+    [[nodiscard]] std::vector<shared::ServerEvent> takeServerEvents();
+
+    /// Забирает пришедшие описания внешности чужих машин.
+    [[nodiscard]] std::vector<shared::VehicleAppearance> takeVehicleAppearances();
 
     /// Забирает список раздаваемого сервером, если он приходил.
     ///
@@ -154,6 +264,11 @@ public:
 
     [[nodiscard]] shared::PlayerId localPlayerId() const noexcept { return localPlayerId_; }
 
+    /// Где сервер велел появиться. Пусто, пока он не принял нас.
+    [[nodiscard]] std::optional<shared::Vec3> spawnPosition() const noexcept {
+        return spawnPosition_;
+    }
+
     /// Время оборота до сервера. Пусто, пока не получен первый ответ.
     [[nodiscard]] std::optional<std::chrono::milliseconds> latency() const noexcept {
         return latency_;
@@ -164,14 +279,22 @@ public:
         return rejectReason_;
     }
 
+    /// Остался ли игрок без сервера и почему.
+    ///
+    /// Держится до тех пор, пока сервер не примет нас заново: повторные попытки
+    /// идут своим чередом, и удавшаяся снимает признак сама. Так окно разрыва
+    /// исчезает ровно тогда, когда игрок снова в сессии, а не раньше.
+    [[nodiscard]] DisconnectReason disconnectReason() const noexcept { return disconnect_; }
+
     [[nodiscard]] const std::unordered_map<shared::PlayerId, RemotePlayer>& remotePlayers()
         const noexcept {
         return remotePlayers_;
     }
 
-    [[nodiscard]] const std::unordered_map<shared::PlayerId, RemoteVehicle>& remoteVehicles()
+    /// Все машины сессии по их номеру в ней.
+    [[nodiscard]] const std::unordered_map<shared::VehicleId, SessionVehicle>& vehicles()
         const noexcept {
-        return remoteVehicles_;
+        return vehicles_;
     }
 
 private:
@@ -185,16 +308,24 @@ private:
     void handlePong(const shared::Pong& pong);
     void handleRemoteState(const shared::PlayerState& state);
     void handleRemoteVehicle(const shared::VehicleState& state);
+    void handleVehicleAdded(const shared::VehicleAdded& added);
+    void handleVehicleAuthority(const shared::VehicleAuthority& authority);
 
     void sendHello();
     void sendPingIfDue();
     void sendStateIfDue();
+
+    /// Отправляет внешности наших машин, изменившиеся с прошлой отправки.
+    void sendAppearancesIfChanged();
 
     /// Выталкивает всё, что игровой поток попросил отправить.
     void sendQueued();
 
     /// Сбрасывает состояние сессии и назначает следующую попытку.
     void fallBackToWaiting(std::string_view reason);
+
+    /// Замечает, что сервер замолчал, и объявляет разрыв раньше транспорта.
+    void noticeSilence();
 
     Settings settings_;
 
@@ -203,17 +334,51 @@ private:
 
     ConnectionState state_ = ConnectionState::Waiting;
     shared::PlayerId localPlayerId_ = shared::kInvalidPlayerId;
+
+    /// Точка появления, названная сервером в приветствии.
+    std::optional<shared::Vec3> spawnPosition_;
     std::optional<shared::RejectReason> rejectReason_;
+
+    /// Чем кончилась связь. Поднимается разрывом, снимается новым приветствием.
+    DisconnectReason disconnect_ = DisconnectReason::None;
+
+    /// Когда сервер сказал нам хоть что-нибудь в последний раз.
+    ///
+    /// Пусто до первого пакета: молчание того, кто ещё ни разу не говорил, — это
+    /// не разрыв, а подключение, и о нём рассказывает состояние.
+    std::chrono::steady_clock::time_point heardAt_{};
+
+    /// Когда цикл обновления проходил здесь в прошлый раз.
+    ///
+    /// Нужно, чтобы отличить молчание сервера от собственного беспамятства: наш
+    /// поток живёт внутри процесса игры и на тяжёлой подгрузке не получает
+    /// управления секундами.
+    std::chrono::steady_clock::time_point loopSeenAt_{};
     std::unordered_map<shared::PlayerId, RemotePlayer> remotePlayers_;
-    std::unordered_map<shared::PlayerId, RemoteVehicle> remoteVehicles_;
+
+    /// Машины сессии, какими их объявил сервер. Живут, пока он не скажет иначе.
+    std::unordered_map<shared::VehicleId, SessionVehicle> vehicles_;
 
     /// Пришедшее с сервера, что ещё не забрал игровой поток.
     std::vector<shared::ChatLine> chatLines_;
     std::vector<shared::DamageTaken> damage_;
-    std::vector<shared::AdminOrder> orders_;
+    std::vector<shared::Vec3> teleports_;
+    std::vector<shared::ServerEvent> serverEvents_;
+    std::vector<shared::VehicleAppearance> vehicleAppearances_;
 
     /// Последний присланный счёт денег, ещё не забранный.
     std::optional<std::int64_t> money_;
+
+    /// Последнее присланное состояние мира, ещё не забранное.
+    std::optional<shared::WorldState> world_;
+
+    /// Последнее присланное снаряжение и здоровье, ещё не забранные.
+    std::optional<shared::PlayerLoadout> loadout_;
+    std::optional<shared::HealthChanged> health_;
+
+    /// Появившиеся и пропавшие предметы, ещё не забранные.
+    std::vector<shared::ObjectAdded> objects_;
+    std::vector<shared::ObjectId> removedObjects_;
 
     /// Список раздаваемого сервером, ещё не забранный.
     std::optional<std::vector<shared::ResourceEntry>> resources_;
@@ -222,7 +387,7 @@ private:
     /// поток кладёт сюда в любой момент кадра, а отправка идёт своим чередом.
     std::vector<shared::ChatSay> outgoingChat_;
     std::vector<shared::DamageReport> outgoingDamage_;
-    std::vector<shared::AdminAction> outgoingOrders_;
+    std::vector<shared::ClientEvent> outgoingEvents_;
 
     Clock::time_point nextAttemptAt_ = Clock::now();
     Clock::time_point nextPingAt_ = Clock::time_point::max();
@@ -235,8 +400,18 @@ private:
     bool stopped_ = false;
 
     shared::PlayerState localState_;
-    std::optional<shared::VehicleState> localVehicle_;
+
+    /// Снимки машин, которые ведём мы, — то, что уйдёт следующей отправкой.
+    std::vector<shared::VehicleState> ownedVehicles_;
+
     Clock::time_point nextStateAt_ = Clock::time_point::max();
+
+    /// Внешности наших машин и те, что уже отправлены.
+    ///
+    /// Две карты, а не одна: отправлять внешность нужно при изменении, а узнать
+    /// об изменении можно только сравнив с тем, что ушло в прошлый раз.
+    std::vector<shared::VehicleAppearance> ownedAppearances_;
+    std::unordered_map<shared::VehicleId, shared::VehicleAppearance> sentAppearances_;
 };
 
 /// Человекочитаемое описание причины отказа.

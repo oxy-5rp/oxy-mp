@@ -1,5 +1,9 @@
 #include "server.hpp"
 
+#ifdef OXYMP_WITH_JS
+#include "js_runtime.hpp"
+#endif
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -30,14 +34,6 @@ std::string_view describe(shared::RejectReason reason) {
     return "причина не указана";
 }
 
-std::string_view describe(shared::AdminCommand command) {
-    switch (command) {
-    case shared::AdminCommand::Summon:
-        return "перенести к себе";
-    }
-    return "?";
-}
-
 bool nicknameLooksValid(const std::string& nickname) {
     if (nickname.empty() || nickname.size() > shared::kMaxNicknameLength) {
         return false;
@@ -58,14 +54,23 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
     std::unique_ptr<Server> server{new Server};
     server->config_ = config;
     server->host_ = std::move(host);
+    server->world_ = WorldClock{config.weather, config.startingHour, config.startingMinute};
 
     spdlog::info("сервер \"{}\" слушает порт {}, мест: {}", config.name, config.port,
                  config.maxPlayers);
 
-    // Ресурсы собираются до того, как кто-либо подключится: клиент получает их
-    // список первым же делом, и собирать его на ходу значило бы заставить
-    // первого вошедшего ждать шифрования всех файлов.
-    server->resources_.load(config.resourceDirectory);
+    // Игровые файлы собираются до того, как кто-либо подключится: клиент
+    // получает их список первым же делом, и собирать его на ходу значило бы
+    // заставить первого вошедшего ждать шифрования всех файлов.
+    server->resources_.load(config.gameFilesDirectory);
+
+    // Ресурсы — следом, и порядок этот вынужденный: сбор игровых файлов
+    // начинается с чистого листа, и клиентские файлы ресурсов, добавленные
+    // раньше него, он стёр бы вместе со старым списком.
+    //
+    // До первого подключения — тоже: подписка ресурса на события должна стоять
+    // раньше первого события, а первым будет вход игрока.
+    server->startResources();
 
     if (!server->resources_.empty()) {
         std::string httpError;
@@ -102,9 +107,25 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         }
 
         dropSilentPeers();
+        reassignVehicles();
+        streamVehicles();
+        streamObjects();
+        broadcastWorld();
+        reviveDead();
+
+        // Скрипты — последними в такте, когда сессия уже приведена в порядок.
+        // Обработчик увидит мир таким, каким его увидят клиенты, а не застанет
+        // его на середине пересдачи машин.
+        events_.dispatch(script::Event{.kind = script::EventKind::Tick});
     }
 
     spdlog::info("остановка, игроков было: {}", players_.size());
+
+    // Ресурсы останавливаются до того, как сервер вытолкнет последнее. Иначе
+    // ресурс, прощающийся с игроками строкой в чат, говорил бы её в уже
+    // закрытую дверь.
+    stopResources();
+
     host_->flush();
 }
 
@@ -116,6 +137,13 @@ void Server::handleConnected(net::PeerId peer) {
 void Server::handleDisconnected(net::PeerId peer) {
     awaitingHello_.erase(peer);
 
+    // Скриптам — до уборки, а не после. Иначе обработчик получил бы ссылку на
+    // того, кого уже нет: ни имени, ни того, где он стоял, ни на чём ехал. А
+    // именно это и нужно тому, кто сохраняет игрока перед выходом.
+    if (const Player* leaving = players_.findByPeer(peer); leaving != nullptr) {
+        tellScripts(script::EventKind::PlayerDisconnect, leaving->id);
+    }
+
     const auto player = players_.removeByPeer(peer);
     if (!player) {
         spdlog::debug("соединение {} закрыто до представления", peer);
@@ -124,6 +152,16 @@ void Server::handleDisconnected(net::PeerId peer) {
 
     spdlog::info("игрок \"{}\" (id {}) отключился, осталось: {}", player->nickname, player->id,
                  players_.size());
+
+    // Где он сидел — забывается сразу. Машины при этом остаются: в них могли
+    // остаться пассажиры, и убрать машину вместе с ушедшим значило бы высадить
+    // их посреди дороги. Те, что он вёл, остаются без ведущего.
+    vehicles_.forgetPlayer(player->id);
+
+    // Пересмотр — немедленно, не дожидаясь очереди. Машины, которые вёл ушедший,
+    // до него стоят замершими, и полсекунды неподвижной машины посреди дороги
+    // видно всем.
+    reassignedAt_ = {};
 
     shared::PlayerLeft left;
     left.playerId = player->id;
@@ -167,6 +205,18 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::VehicleAppearance:
+        if (const auto appearance = shared::decode<shared::VehicleAppearance>(packet)) {
+            handleVehicleAppearance(peer, *appearance);
+        }
+        return;
+
+    case shared::MessageId::ClientEvent:
+        if (const auto event = shared::decode<shared::ClientEvent>(packet)) {
+            handleClientEvent(peer, *event);
+        }
+        return;
+
     case shared::MessageId::ChatSay:
         if (const auto say = shared::decode<shared::ChatSay>(packet)) {
             handleChatSay(peer, *say);
@@ -179,12 +229,6 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
-    case shared::MessageId::AdminAction:
-        if (const auto action = shared::decode<shared::AdminAction>(packet)) {
-            handleAdminAction(peer, *action);
-        }
-        return;
-
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -194,9 +238,18 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::PlayerLeft:
     case shared::MessageId::ChatLine:
     case shared::MessageId::DamageTaken:
-    case shared::MessageId::AdminOrder:
+    case shared::MessageId::PlayerTeleport:
     case shared::MessageId::MoneyChanged:
     case shared::MessageId::ResourceList:
+    case shared::MessageId::VehicleAdded:
+    case shared::MessageId::VehicleRemoved:
+    case shared::MessageId::VehicleAuthority:
+    case shared::MessageId::WorldState:
+    case shared::MessageId::PlayerLoadout:
+    case shared::MessageId::HealthChanged:
+    case shared::MessageId::ObjectAdded:
+    case shared::MessageId::ObjectRemoved:
+    case shared::MessageId::ServerEvent:
         spdlog::warn("соединение {} прислало серверное сообщение", peer);
         return;
     }
@@ -251,6 +304,11 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
 
     shared::ServerWelcome welcome;
     welcome.playerId = player.id;
+
+    // Точка появления приходит от сервера, а не зашита в клиент. Она — свойство
+    // сессии: хозяин вправе посадить игроков куда угодно, не пересобирая
+    // ничего, и сменить это одной строкой в server.cfg.
+    welcome.spawnPosition = config_.spawnPosition;
     welcome.tickRate = shared::kDefaultTickRate;
     sendTo(peer, welcome);
 
@@ -268,11 +326,22 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // нужно», а молчание клиент отличить от него не сможет и будет ждать.
     shared::ResourceList resources;
 
+    // Какие из раздаваемых файлов — страницы интерфейса. Это client-main
+    // ресурсов, названные составным именем: клиент по нему поймёт, какой из
+    // скачанных файлов открыть в CEF, а не будет гадать.
+    std::vector<std::string> pages;
+    for (const ScriptResource& resource : catalog_.all()) {
+        if (!resource.clientMain.empty()) {
+            pages.push_back(std::format("{}/{}", resource.name, resource.clientMain));
+        }
+    }
+
     for (const ResourceStore::Item& item : resources_.items()) {
         resources.entries.push_back(shared::ResourceEntry{
             .name = item.name,
             .hash = item.hash,
             .size = item.size,
+            .page = std::ranges::find(pages, item.name) != pages.end(),
         });
     }
 
@@ -281,6 +350,20 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     for (const auto& joined : existing) {
         sendTo(peer, joined);
     }
+
+    // Погода и время — сразу: мир, в который игрок вот-вот попадёт, обязан
+    // выглядеть так же, как у остальных, уже в первом кадре.
+    sendTo(peer, world_.snapshot());
+
+    // Здоровье — тоже: клиент о нём больше не свидетельствует, он о нём узнаёт,
+    // и до первого сообщения ему неоткуда знать, сколько у него жизни.
+    sendHealth(player, shared::kInvalidPlayerId);
+
+    // Машин здесь нет намеренно, хотя раньше они высылались все разом. Теперь
+    // клиент узнаёт только о том, что вокруг него, а где он — станет известно с
+    // первым же его снимком, через полсотни миллисекунд. Тогда их и вышлет
+    // ближайшая раздача.
+    streamedAt_ = {};
 
     shared::PlayerJoined announcement;
     announcement.playerId = player.id;
@@ -294,6 +377,19 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // игроков, а строка чата — лента событий. Одно другое не заменяет.
     announce(shared::ChatKind::Join, player.id, player.nickname,
              std::format("{} (id {}) зашёл на сервер", player.nickname, player.id));
+
+    // Скриптам — в самом конце, когда игроку уже сказано всё, что ему полагается
+    // при входе. Обработчик вправе тут же выдать ему оружие или поставить машину,
+    // и его распоряжения должны лечь поверх наших, а не под них.
+    const shared::PlayerId joined = player.id;
+
+    tellScripts(script::EventKind::PlayerConnect, joined);
+
+    // Появление — отдельным событием следом. Разделены они не для порядка: в
+    // сессии игрок появляется всякий раз заново после смерти, а входит один раз,
+    // и обработчики у этого разные. Здесь же они идут подряд просто потому, что
+    // точку появления сервер назвал в приветствии.
+    tellScripts(script::EventKind::PlayerSpawn, joined);
 }
 
 void Server::handlePing(net::PeerId peer, const shared::Ping& ping) {
@@ -305,7 +401,7 @@ void Server::handlePing(net::PeerId peer, const shared::Ping& ping) {
 }
 
 void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
-    const Player* player = players_.findByPeer(peer);
+    Player* player = players_.findByPeer(peer);
     if (player == nullptr) {
         // Состояние до рукопожатия рассылать некому и незачем.
         return;
@@ -315,8 +411,54 @@ void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
     // подменить одно поле, чтобы двигать чужого игрока.
     state.playerId = player->id;
 
-    const auto packet = shared::encode(state);
-    host_->broadcast(shared::Channel::State, shared::ByteView{packet}, peer);
+    // Патроны, наоборот, берутся у клиента и запоминаются: тратит их игра у
+    // владельца, и узнать их число сервер может только от него. Записывается оно
+    // в снаряжение, чтобы после смерти вернуть человеку то, с чем он ходил, а не
+    // полный магазин.
+    for (shared::WeaponSlot& slot : player->loadout) {
+        if (slot.weapon == state.weapon) {
+            slot.ammo = state.ammo;
+            break;
+        }
+    }
+
+    // Здоровье и броня — наоборот, проставляются сервером поверх присланного.
+    // Это и есть та перемена, ради которой всё затевалось: клиент о своём
+    // здоровье больше не свидетельствует, он о нём узнаёт.
+    state.health = player->health;
+    state.armour = player->armour;
+
+    // Где игрок стоит — запоминается: по этому серверу решает, кому вести какую
+    // машину. Верить здесь клиенту приходится, и это не беда: соврав о своём
+    // положении, он получит во владение машину, которой у него нет перед
+    // глазами, — то есть навредит себе.
+    player->position = state.position;
+
+    // Куда смотрит — тоже, и не для себя: сам сервер направлением взгляда не
+    // пользуется. Нужно оно скриптам — поставить машину перед человеком нельзя,
+    // не зная, куда он повёрнут.
+    player->heading = state.heading;
+
+    // Где игрок сидит — запоминается тоже, и вместе с местом: за рулём машину
+    // ведёт он и никто другой, а пассажир такого преимущества не даёт.
+    // Залезающий ещё не сидит — у него места нет.
+    const bool seated = shared::has(state.flags, shared::PlayerFlag::InVehicle);
+
+    const bool moved =
+        vehicles_.setSeat(player->id, seated ? state.vehicleId : shared::kInvalidVehicleId,
+                          seated ? state.seat : shared::kNoSeat);
+
+    // Пересел — пересматриваем ведущих немедленно. Пока пересмотр не прошёл,
+    // машина под севшим за руль остаётся чужой, то есть замороженной, и
+    // полсекунды неподвижного руля игрок принимает за поломку.
+    if (moved) {
+        reassignedAt_ = {};
+    }
+
+    // Только тем, кто рядом. Игроку незачем знать, как бежит человек за
+    // полкилометра от него: он его всё равно не увидит, а снимков это половина
+    // всего, что ходит по сети.
+    broadcastNear(state.position, shared::Channel::State, state, peer);
 }
 
 void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
@@ -325,13 +467,244 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
         return;
     }
 
-    // Хозяин машины проставляется сервером по той же причине, что и
-    // идентификатор игрока: иначе достаточно назвать чужой номер, чтобы возить
-    // чужую машину.
-    state.owner = player->id;
+    // Снимок принимается только от ведущего. Всё остальное — отставший снимок
+    // того, у кого машину уже забрали, или ошибка в клиенте; и то и другое
+    // дёрнуло бы машину назад, будь оно принято.
+    if (!vehicles_.applyState(player->id, state)) {
+        return;
+    }
 
-    const auto packet = shared::encode(state);
-    host_->broadcast(shared::Channel::State, shared::ByteView{packet}, peer);
+    // От машины, а не от её ведущего: вести машину можно и не сидя в ней, и
+    // считать видимость по тому, кто её ведёт, значило бы рассылать снимки не
+    // тем, кто её видит.
+    broadcastNear(state.position, shared::Channel::State, state, peer);
+}
+
+void Server::handleVehicleAppearance(net::PeerId peer, shared::VehicleAppearance appearance) {
+    const Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        return;
+    }
+
+    // Запоминается, а не только пересылается: тот, кто войдёт позже, этого
+    // сообщения уже не услышит, а машину увидит.
+    if (!vehicles_.applyAppearance(player->id, appearance)) {
+        return;
+    }
+
+    // Только тем, кто машину видит, и по надёжному каналу. Разослав её всем, мы
+    // заставили бы дальних запомнить цвет машины, которой у них нет, — и держать
+    // его до конца сессии, потому что забыть его им будет не по чему.
+    const VehicleDirectory::Vehicle* vehicle = vehicles_.find(appearance.id);
+
+    broadcastNear(vehicle->state.position, shared::Channel::Control, appearance, peer);
+}
+
+void Server::streamObjects() {
+    const float appears = config_.streamDistance * config_.streamDistance;
+    const float vanishes = appears * 1.21F;
+
+    for (auto& [peer, player] : players_) {
+        for (const auto& [id, object] : objects_.all()) {
+            // Не near: так называется макрос из windows.h, оставшийся там с
+            // шестнадцатиразрядных времён. Он пуст, и переменная с таким именем
+            // просто исчезает — вместе с внятностью сообщения об ошибке.
+            const bool nearby =
+                shared::distanceSquared(player.position, object.position) <= appears;
+
+            if (!nearby || player.streamedObjects.contains(id)) {
+                continue;
+            }
+
+            shared::ObjectAdded added;
+            added.id = id;
+            added.model = object.model;
+            added.position = object.position;
+            added.rotation = object.rotation;
+            sendTo(peer, added);
+
+            player.streamedObjects.insert(id);
+        }
+
+        for (auto it = player.streamedObjects.begin(); it != player.streamedObjects.end();) {
+            const ObjectDirectory::Object* object = objects_.find(*it);
+
+            const bool keep = object != nullptr &&
+                              shared::distanceSquared(player.position, object->position) <= vanishes;
+
+            if (keep) {
+                ++it;
+                continue;
+            }
+
+            shared::ObjectRemoved removed;
+            removed.id = *it;
+            sendTo(peer, removed);
+
+            it = player.streamedObjects.erase(it);
+        }
+    }
+}
+
+void Server::reviveDead() {
+    const auto now = std::chrono::steady_clock::now();
+
+    // Кого подняли за этот проход.
+    //
+    // Списком, а не объявлением на месте: обработчик события волен менять
+    // сессию, а мы посреди обхода таблицы игроков — одна вставка, и обход
+    // рассыплется.
+    std::vector<shared::PlayerId> revived;
+
+    for (auto& [peer, player] : players_) {
+        if (player.health != 0) {
+            // Живой отсчёта не ведёт: он начинается со смертью и кончается ею же.
+            player.diedAt = {};
+            continue;
+        }
+
+        if (player.diedAt == std::chrono::steady_clock::time_point{}) {
+            player.diedAt = now;
+            continue;
+        }
+
+        if (now - player.diedAt < kRespawnDelay) {
+            continue;
+        }
+
+        // Возрождает сервер, а не клиент, и это следует из того, что здоровье
+        // принадлежит серверу. Позволь мы клиенту воскресать самому — и любой
+        // мог бы объявить себя живым, не дожидаясь ничьего разрешения.
+        player.health = kFullHealth;
+        player.armour = 0;
+        player.diedAt = {};
+
+        sendHealth(player, shared::kInvalidPlayerId);
+
+        // Снаряжение возвращается вместе с жизнью: игра при смерти отбирает
+        // оружие, и без этого воскресший поднимался бы с пустыми руками.
+        sendLoadout(player, true);
+
+        revived.push_back(player.id);
+    }
+
+    for (const shared::PlayerId id : revived) {
+        tellScripts(script::EventKind::PlayerSpawn, id);
+    }
+}
+
+void Server::reassignVehicles() {
+    constexpr auto kReassignInterval = std::chrono::milliseconds{500};
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - reassignedAt_ < kReassignInterval) {
+        return;
+    }
+
+    reassignedAt_ = now;
+
+    std::vector<VehicleDirectory::PlayerPlacement> placements;
+    placements.reserve(players_.size());
+
+    for (const auto& [peer, player] : players_) {
+        placements.push_back(VehicleDirectory::PlayerPlacement{
+            .id = player.id,
+            .position = player.position,
+        });
+    }
+
+    for (const auto& change : vehicles_.reassign(placements)) {
+        shared::VehicleAuthority authority;
+        authority.id = change.id;
+        authority.owner = change.owner;
+        broadcast(authority);
+
+        spdlog::debug("машину {} отныне ведёт {}", change.id,
+                      change.owner == shared::kInvalidPlayerId ? -1
+                                                              : static_cast<int>(change.owner));
+    }
+}
+
+void Server::sendVehicleTo(net::PeerId peer, const VehicleDirectory::Vehicle& vehicle) {
+    shared::VehicleAdded added;
+    added.state = vehicle.state;
+    added.owner = vehicle.owner;
+    sendTo(peer, added);
+
+    // Внешность — следом за самой машиной, и только если её объявляли. Раньше
+    // неё нельзя: внешность накладывается на машину, а машины у получателя в
+    // это мгновение ещё нет.
+    if (vehicle.appearance) {
+        sendTo(peer, *vehicle.appearance);
+    }
+}
+
+void Server::streamVehicles() {
+    constexpr auto kStreamInterval = std::chrono::milliseconds{500};
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - streamedAt_ < kStreamInterval) {
+        return;
+    }
+
+    streamedAt_ = now;
+
+    // Границы две, и они разные. С одной машина появляется, за другой пропадает,
+    // и вторая дальше первой на десятую часть.
+    //
+    // Без этого запаса машина, оказавшаяся ровно на границе, заводилась бы и
+    // убиралась каждые полсекунды, пока игрок переминается с ноги на ногу: у
+    // клиента это непрерывное создание и удаление сущностей, а у игрока — машина,
+    // мигающая на горизонте.
+    const float appears = config_.streamDistance * config_.streamDistance;
+    const float vanishes = appears * 1.21F; // (1.1)^2
+
+    for (auto& [peer, player] : players_) {
+        // Сперва то, что приблизилось: о машине рассказывают раньше, чем о ней
+        // пойдут снимки, — иначе получатель отбросит их как принадлежащие
+        // неизвестной машине.
+        for (const auto& [id, vehicle] : vehicles_.all()) {
+            const bool nearby =
+                shared::distanceSquared(player.position, vehicle.state.position) <= appears;
+
+            if (!nearby || player.streamed.contains(id)) {
+                continue;
+            }
+
+            sendVehicleTo(peer, vehicle);
+            player.streamed.insert(id);
+        }
+
+        // Затем то, что отдалилось или исчезло. Отдалившаяся машина убирается у
+        // клиента тем же сообщением, что и убранная совсем: для него это одно и
+        // то же — перестать её показывать.
+        for (auto it = player.streamed.begin(); it != player.streamed.end();) {
+            const VehicleDirectory::Vehicle* vehicle = vehicles_.find(*it);
+
+            const bool keep =
+                vehicle != nullptr &&
+                shared::distanceSquared(player.position, vehicle->state.position) <= vanishes;
+
+            if (keep) {
+                ++it;
+                continue;
+            }
+
+            shared::VehicleRemoved removed;
+            removed.id = *it;
+            sendTo(peer, removed);
+
+            it = player.streamed.erase(it);
+        }
+    }
+}
+
+void Server::broadcastWorld() {
+    if (!world_.advance()) {
+        return;
+    }
+
+    broadcast(world_.snapshot());
 }
 
 void Server::handleChatSay(net::PeerId peer, const shared::ChatSay& say) {
@@ -352,7 +725,20 @@ void Server::handleChatSay(net::PeerId peer, const shared::ChatSay& say) {
         return;
     }
 
-    announce(shared::ChatKind::Say, player->id, player->nickname, std::move(text));
+    // Имя и номер берутся до объявления скриптам, а не после. Обработчик волен
+    // менять сессию, а список игроков живёт в таблице: одна вставка — и указатель
+    // на запись показывает в пустоту.
+    const shared::PlayerId author = player->id;
+    std::string nickname = player->nickname;
+
+    // Единственное событие, которое скрипт вправе отменить, — и ради него признак
+    // отмены вообще заведён: команду вида «/kick» нужно уметь перехватить и не
+    // пустить в общий чат.
+    if (!tellScripts(script::EventKind::PlayerChat, author, text)) {
+        return;
+    }
+
+    announce(shared::ChatKind::Say, author, std::move(nickname), std::move(text));
 }
 
 void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& report) {
@@ -367,60 +753,218 @@ void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& re
         return;
     }
 
-    const Player* victim = players_.findById(report.victim);
-    if (victim == nullptr) {
+    const shared::PlayerId attackerId = attacker->id;
+    const std::string attackerName = attacker->nickname;
+    const shared::Vec3 attackerAt = attacker->position;
+
+    Player* victim = players_.findById(report.victim);
+
+    if (victim == nullptr || victim->health == 0) {
         return;
     }
 
+    // Урон обрезается, а не отвергается. Число могло испортиться по дороге или
+    // прийти от ошибки в клиенте, и в обоих случаях выстрел был настоящим:
+    // отбросить его целиком значило бы сделать стрелявшего безобидным.
+    const std::uint16_t amount = std::min(report.amount, config_.maxDamagePerHit);
+    if (amount == 0) {
+        return;
+    }
+
+    // Попадание с другого конца карты не бывает. Проверка грубая и такой
+    // задумана: точную линию выстрела сервер не построит — мира у него нет, — а
+    // вот отличить перестрелку от доклада о попадании за километр может.
+    const float reach = config_.streamDistance * config_.streamDistance;
+    if (shared::distanceSquared(attackerAt, victim->position) > reach) {
+        spdlog::warn("игрок \"{}\" (id {}) доложил о попадании издалека", attackerName, attackerId);
+        return;
+    }
+
+    // Броня принимает удар первой и целиком. Так же считает и сама игра, и
+    // расходиться с ней здесь незачем: игрок судит о своей броне по её счётчику.
+    std::uint16_t left = amount;
+
+    const std::uint16_t absorbed = std::min(left, victim->armour);
+    victim->armour = static_cast<std::uint16_t>(victim->armour - absorbed);
+    left = static_cast<std::uint16_t>(left - absorbed);
+
+    victim->health = left >= victim->health ? 0 : static_cast<std::uint16_t>(victim->health - left);
+
+    // Здоровье — самому пострадавшему: остальные узнают его из снимка, который
+    // сервер и без того правит на своё значение перед рассылкой.
+    sendHealth(*victim, attackerId);
+
+    // Прежнее сообщение об уроне уходит следом и живёт по-прежнему. Здоровье оно
+    // больше не меняет — его меняет сервер, — но остаётся тем, чем и было:
+    // поводом показать игроку, кто и из чего по нему попал.
     shared::DamageTaken taken;
-    taken.attacker = attacker->id;
-    taken.amount = report.amount;
+    taken.attacker = attackerId;
+    taken.amount = amount;
     taken.weapon = report.weapon;
 
     // Надёжным каналом, в отличие от снимков состояния: потерянный снимок
     // заменит следующий, а потерянное попадание не повторится никогда.
     const auto packet = shared::encode(taken);
     host_->send(victim->peer, shared::Channel::Control, shared::ByteView{packet});
+
+    if (victim->health != 0) {
+        return;
+    }
+
+    const shared::PlayerId victimId = victim->id;
+
+    announce(shared::ChatKind::System, shared::kInvalidPlayerId, {},
+             std::format("{} убил игрока {}", attackerName, victim->nickname));
+
+    // Смерть от чужой руки объявляет тот, кто её нанёс: только здесь известен
+    // убийца и оружие. Смерть без убийцы — падение, утопление, воля скрипта —
+    // объявляется там, где здоровье обнулилось, и стрелявшего в ней нет.
+    script::Event death;
+    death.kind = script::EventKind::PlayerDeath;
+    death.player = script::Player{core_, victimId};
+    death.killer = script::Player{core_, attackerId};
+    death.weapon = report.weapon;
+
+    events_.dispatch(death);
 }
 
-void Server::handleAdminAction(net::PeerId peer, const shared::AdminAction& action) {
-    const Player* issuer = players_.findByPeer(peer);
-    if (issuer == nullptr) {
+void Server::sendHealth(const Player& player, shared::PlayerId attacker) {
+    shared::HealthChanged changed;
+    changed.health = player.health;
+    changed.armour = player.armour;
+    changed.attacker = attacker;
+
+    sendTo(player.peer, changed);
+}
+
+void Server::sendLoadout(const Player& player, bool replace) {
+    shared::PlayerLoadout loadout;
+    loadout.weapons = player.loadout;
+    loadout.replace = replace;
+
+    sendTo(player.peer, loadout);
+}
+
+void Server::handleClientEvent(net::PeerId peer, const shared::ClientEvent& event) {
+    const Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
         return;
     }
 
-    if (std::ranges::find(config_.admins, issuer->id) == config_.admins.end()) {
-        spdlog::warn("игрок \"{}\" (id {}) распоряжается, не имея на то права", issuer->nickname,
-                     issuer->id);
+    if (event.name.empty()) {
         return;
     }
 
-    shared::AdminOrder order;
-    order.command = action.command;
-    order.issuer = issuer->id;
-    order.position = action.position;
+    // Дальше — дело ресурсов. Сервер о смысле события не судит и судить не
+    // может: имена придумывает игровой режим, и знать их наперёд ему неоткуда.
+    // Право просить о чём бы то ни было проверяет тот, кто событие слушает.
+    script::Event delivered;
+    delivered.kind = script::EventKind::ClientEvent;
+    delivered.player = script::Player{core_, player->id};
+    delivered.name = event.name;
+    delivered.text = event.payload;
 
-    const auto packet = shared::encode(order);
+    events_.dispatch(delivered);
+}
 
-    // Пустая цель означает «всем», и это не мелочь: собрать к себе всю сессию —
-    // отдельное распоряжение, а не двадцать одинаковых.
-    if (action.target == shared::kInvalidPlayerId) {
-        host_->broadcast(shared::Channel::Control, shared::ByteView{packet}, peer);
+void Server::healthChanged(const Player& player) {
+    // Без нападавшего: сюда попадает то, что сервер или скрипт сделали сами, —
+    // лечение, броня, воскрешение. Урон от чужой руки уходит своим путём и
+    // называет стрелявшего.
+    sendHealth(player, shared::kInvalidPlayerId);
+}
 
-        spdlog::info("игрок \"{}\" распорядился всеми: {}", issuer->nickname,
-                     describe(action.command));
+void Server::loadoutChanged(const Player& player, bool replace) {
+    sendLoadout(player, replace);
+}
+
+void Server::teleported(const Player& player, const shared::Vec3& position) {
+    shared::PlayerTeleport teleport;
+    teleport.position = position;
+
+    sendTo(player.peer, teleport);
+}
+
+void Server::emitted(const Player& player, std::string_view name, std::string_view payload) {
+    shared::ServerEvent event;
+    event.name = std::string{name};
+    event.payload = std::string{payload};
+
+    sendTo(player.peer, event);
+}
+
+void Server::vehicleAdded(shared::VehicleId /*id*/) {
+    // Объявляет машину не это место, а ближайшая раздача — та же, что
+    // рассказывает о подъехавших. Так объявление уходит ровно тем, кто машину
+    // увидит, и ровно один раз: разошли мы его всем подряд, у дальних она
+    // завелась бы, а из их списка виденного выпала.
+    streamedAt_ = {};
+
+    // И пересмотр ведущих следом: заведённая машина пока ничья, и до пересмотра
+    // её никто не считает — она стоит неподвижно у просившего на глазах.
+    reassignedAt_ = {};
+}
+
+void Server::vehicleRemoved(shared::VehicleId id) {
+    shared::VehicleRemoved removed;
+    removed.id = id;
+    broadcast(removed);
+
+    // Из списков виденного — тоже, и вместе с рассылкой. Иначе раздача сочла бы,
+    // что машина «отдалилась», и послала бы второе такое же сообщение.
+    for (auto& [peer, player] : players_) {
+        player.streamed.erase(id);
+    }
+}
+
+void Server::objectAdded(shared::ObjectId /*id*/) {
+    streamedAt_ = {};
+}
+
+void Server::objectRemoved(shared::ObjectId id) {
+    shared::ObjectRemoved removed;
+    removed.id = id;
+    broadcast(removed);
+
+    for (auto& [peer, player] : players_) {
+        player.streamedObjects.erase(id);
+    }
+}
+
+void Server::worldChanged() {
+    broadcast(world_.snapshot());
+}
+
+void Server::chatLine(shared::PlayerId to, std::string text) {
+    shared::ChatLine line;
+
+    // Отправителем значится сервер, а не тот, кто велел. Скрипт — часть сервера,
+    // и приписывать его слова игроку значило бы позволить ему говорить чужим
+    // голосом.
+    line.kind = shared::ChatKind::System;
+    line.text = std::move(text);
+
+    if (to == shared::kInvalidPlayerId) {
+        spdlog::info("чат: [сервер] {}", line.text);
+        broadcast(line);
         return;
     }
 
-    const Player* target = players_.findById(action.target);
+    const Player* target = players_.findById(to);
     if (target == nullptr) {
         return;
     }
 
-    host_->send(target->peer, shared::Channel::Control, shared::ByteView{packet});
+    sendTo(target->peer, line);
+}
 
-    spdlog::info("игрок \"{}\" распорядился игроком \"{}\": {}", issuer->nickname,
-                 target->nickname, describe(action.command));
+bool Server::tellScripts(script::EventKind kind, shared::PlayerId about, std::string text) {
+    script::Event event;
+    event.kind = kind;
+    event.player = script::Player{core_, about};
+    event.text = std::move(text);
+
+    return events_.dispatch(event);
 }
 
 void Server::announce(shared::ChatKind kind, shared::PlayerId author, std::string nickname,
@@ -447,6 +991,96 @@ void Server::reject(net::PeerId peer, shared::RejectReason reason) {
     // закрытие и не поймёт причины.
     host_->flush();
     host_->disconnect(peer);
+}
+
+void Server::startResources() {
+    for (const std::string& complaint : catalog_.load(config_.resourceDirectory,
+                                                      config_.resources)) {
+        spdlog::warn("ресурс: {}", complaint);
+    }
+
+    ensureRuntimes();
+
+    for (const ScriptResource& resource : catalog_.all()) {
+        // Машина выбирается по типу. О ресурсе на языке, которого сервер не
+        // понимает, говорится прямо, а не молчанием: молча пропущенный игровой
+        // режим хозяин будет искать долго.
+        Runtime* const runtime = runtimeFor(resource.type);
+
+        if (runtime == nullptr) {
+            spdlog::error("ресурс \"{}\": машины для типа \"{}\" в сервере нет", resource.name,
+                          resource.type);
+            continue;
+        }
+
+        std::string error;
+
+        if (!runtime->start(resource, error)) {
+            spdlog::error("ресурс \"{}\" не поднят: {}", resource.name, error);
+            continue;
+        }
+
+        // Клиентская половина уходит в раздачу под составным именем: одинаково
+        // названные файлы разных ресурсов иначе сошлись бы в одно.
+        for (const std::string& file : resource.clientFiles) {
+            if (!resources_.add(resource.root / file, std::format("{}/{}", resource.name, file))) {
+                spdlog::warn("ресурс \"{}\": файл \"{}\" прочитать не удалось", resource.name,
+                             file);
+            }
+        }
+
+        spdlog::info("ресурс \"{}\" поднят ({}), клиенту файлов: {}", resource.name, resource.type,
+                     resource.clientFiles.size());
+    }
+}
+
+void Server::stopResources() {
+    for (const ScriptResource& resource : catalog_.all()) {
+        if (Runtime* const runtime = runtimeFor(resource.type); runtime != nullptr) {
+            runtime->stop(resource);
+        }
+    }
+}
+
+void Server::ensureRuntimes() {
+    // Машины заводятся под то, что встретилось в перечне, а не про запас.
+    //
+    // Это не бережливость ради бережливости. Node поднимает изоляты, потоки и
+    // свою кучу; голому серверу, у которого нет ни одного скрипта, всё это не
+    // нужно, а платить за него он бы стал памятью и временем запуска.
+    for (const ScriptResource& resource : catalog_.all()) {
+        if (runtimeFor(resource.type) != nullptr) {
+            continue;
+        }
+
+#ifdef OXYMP_WITH_JS
+        if (resource.type == "js") {
+            std::string error;
+
+            if (std::unique_ptr<JsRuntime> js = JsRuntime::create(core_, events_, error);
+                js != nullptr) {
+                runtimes_.push_back(std::move(js));
+                continue;
+            }
+
+            // Не повод не запускать сервер: без движка он лишится скриптов, но
+            // не сессии. Жаловаться при этом обязательно — иначе хозяин будет
+            // искать, почему его режим молчит.
+            spdlog::error("движок JS не поднялся: {}", error);
+            spdlog::error("ресурсы на JS работать не будут");
+        }
+#endif
+    }
+}
+
+Runtime* Server::runtimeFor(std::string_view type) const {
+    for (const std::unique_ptr<Runtime>& runtime : runtimes_) {
+        if (runtime->type() == type) {
+            return runtime.get();
+        }
+    }
+
+    return nullptr;
 }
 
 void Server::dropSilentPeers() {

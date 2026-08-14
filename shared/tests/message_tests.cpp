@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <oxymp/shared/math/joaat.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
 #include <oxymp/shared/resource/vault.hpp>
 
@@ -104,8 +105,10 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     sent.flags = PlayerFlag::Aiming | PlayerFlag::InVehicle;
     sent.weapon = 0x1B06D571;
     sent.aimAt = Vec3{10.0F, 20.0F, 30.0F};
-    sent.vehicleOwner = 3;
+    sent.vehicleId = 31;
     sent.seat = 1;
+    sent.action = PedAction::HeavyPunch;
+    sent.actionSequence = 42;
 
     const auto received = roundTrip(sent);
 
@@ -121,8 +124,117 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     CHECK_FALSE(has(received->flags, PlayerFlag::Dead));
     CHECK(received->weapon == 0x1B06D571);
     CHECK(received->aimAt == sent.aimAt);
-    CHECK(received->vehicleOwner == 3);
+    CHECK(received->vehicleId == 31);
     CHECK(received->seat == 1);
+    CHECK(received->action == PedAction::HeavyPunch);
+    CHECK(received->actionSequence == 42);
+}
+
+TEST_CASE("PlayerLoadout survives a round trip", "[messages]") {
+    PlayerLoadout sent;
+    sent.replace = true;
+    sent.weapons = {
+        WeaponSlot{.weapon = 0x1B06D571, .ammo = 250},
+        WeaponSlot{.weapon = 0x83BF0278, .ammo = 0},
+    };
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->replace);
+    REQUIRE(received->weapons.size() == 2);
+    CHECK(received->weapons[0].weapon == 0x1B06D571);
+    CHECK(received->weapons[0].ammo == 250);
+
+    // Ноль патронов — не то же, что отсутствие оружия: пустой ствол в руках
+    // остаётся стволом, и потерять эту разницу нельзя.
+    CHECK(received->weapons[1].weapon == 0x83BF0278);
+    CHECK(received->weapons[1].ammo == 0);
+}
+
+TEST_CASE("an overlong loadout is refused rather than trusted", "[messages]") {
+    // Длине из пакета верить нельзя: испорченное или враждебное число заставило
+    // бы получателя выделить память под список, которого нет.
+    ByteWriter writer;
+    writer.writeU8(static_cast<std::uint8_t>(MessageId::PlayerLoadout));
+    writer.writeU8(0);
+    writer.writeU16(kMaxWeaponSlots + 1);
+
+    const auto bytes = std::move(writer).take();
+    const auto received = decode<PlayerLoadout>(ByteView{bytes});
+
+    CHECK_FALSE(received.has_value());
+}
+
+TEST_CASE("HealthChanged survives a round trip", "[messages]") {
+    HealthChanged sent;
+    sent.health = 0;
+    sent.armour = 37;
+    sent.attacker = 4;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+
+    // Ноль здоровья — обычное значение, а не «поля нет»: именно им сервер
+    // сообщает о смерти.
+    CHECK(received->health == 0);
+    CHECK(received->armour == 37);
+    CHECK(received->attacker == 4);
+}
+
+TEST_CASE("PlayerState carries the ammo of the weapon in hand", "[messages]") {
+    // Без числа патронов получатель выдавал бы кукле полный магазин, и чужой
+    // игрок продолжал бы стрелять ровно тогда, когда хозяин перезаряжается.
+    PlayerState sent;
+    sent.weapon = 0x1B06D571;
+    sent.ammo = 17;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->weapon == 0x1B06D571);
+    CHECK(received->ammo == 17);
+}
+
+TEST_CASE("VehicleAdded carries the whole vehicle", "[messages]") {
+    // Объявление несёт состояние целиком, и это его смысл: получатель обязан
+    // суметь показать машину немедленно, не дожидаясь первого снимка. Вложенный
+    // снимок обязан пережить дорогу наравне с отдельным.
+    VehicleAdded sent;
+    sent.state.id = 9;
+    sent.state.model = 0x9B909C94;
+    sent.state.position = Vec3{1.0F, 2.0F, 3.0F};
+    sent.state.rotation = Vec3{0.0F, 0.0F, 90.0F};
+    sent.state.bodyHealth = 812;
+    sent.state.windowsBroken = 0b0000'0011;
+    sent.owner = 4;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->state.id == 9);
+    CHECK(received->state.model == 0x9B909C94);
+    CHECK(received->state.position == sent.state.position);
+    CHECK(received->state.rotation == sent.state.rotation);
+    CHECK(received->state.bodyHealth == 812);
+    CHECK(received->state.windowsBroken == 0b0000'0011);
+    CHECK(received->owner == 4);
+}
+
+TEST_CASE("VehicleAuthority carries an absent owner", "[messages]") {
+    // «Ведущего нет» — обычное положение вещей, а не поломка: брошенная вдали от
+    // всех машина стоит там, где её оставили. Признак этот едет тем же полем,
+    // что и настоящий номер игрока, и обязан отличаться от него после дороги.
+    VehicleAuthority sent;
+    sent.id = 17;
+    sent.owner = kInvalidPlayerId;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->id == 17);
+    CHECK(received->owner == kInvalidPlayerId);
 }
 
 TEST_CASE("PlayerState keeps the driver seat negative", "[messages]") {
@@ -139,22 +251,99 @@ TEST_CASE("PlayerState keeps the driver seat negative", "[messages]") {
 
 TEST_CASE("VehicleState survives a round trip", "[messages]") {
     VehicleState sent;
-    sent.owner = 2;
+    sent.id = 25;
     sent.model = 0x9B909C94;
     sent.position = Vec3{100.5F, -200.25F, 30.0F};
     sent.rotation = Vec3{1.0F, -2.0F, 175.5F};
     sent.velocity = Vec3{12.0F, 0.5F, -0.25F};
+    sent.angularVelocity = Vec3{0.0F, 0.0F, 1.75F};
+    sent.steer = -0.5F;
+    sent.throttle = 1.0F;
+    sent.brake = 0.25F;
     sent.bodyHealth = 640;
+    sent.engineHealth = 300;
+    sent.tankHealth = 950;
+    sent.flags = VehicleFlag::EngineOn | VehicleFlag::LightsOn;
+    sent.doorsOpen = 0b0000'0101;
+    sent.doorsBroken = 0b0000'0010;
+    sent.windowsBroken = 0b1000'0001;
+    sent.tyresBurst = 0b0000'1000;
 
     const auto received = roundTrip(sent);
 
     REQUIRE(received.has_value());
-    CHECK(received->owner == 2);
+    CHECK(received->id == 25);
     CHECK(received->model == 0x9B909C94);
     CHECK(received->position == sent.position);
     CHECK(received->rotation == sent.rotation);
     CHECK(received->velocity == sent.velocity);
+    CHECK(received->angularVelocity == sent.angularVelocity);
+    CHECK(received->steer == -0.5F);
+    CHECK(received->throttle == 1.0F);
+    CHECK(received->brake == 0.25F);
     CHECK(received->bodyHealth == 640);
+    CHECK(received->engineHealth == 300);
+    CHECK(received->tankHealth == 950);
+    CHECK(has(received->flags, VehicleFlag::EngineOn));
+    CHECK(has(received->flags, VehicleFlag::LightsOn));
+    CHECK_FALSE(has(received->flags, VehicleFlag::SirenOn));
+    CHECK(received->doorsOpen == 0b0000'0101);
+    CHECK(received->doorsBroken == 0b0000'0010);
+    CHECK(received->windowsBroken == 0b1000'0001);
+    CHECK(received->tyresBurst == 0b0000'1000);
+}
+
+TEST_CASE("VehicleAppearance survives a round trip", "[messages]") {
+    VehicleAppearance sent;
+    sent.id = 42;
+    sent.primaryColour = 12;
+    sent.secondaryColour = 111;
+    sent.pearlescentColour = 3;
+    sent.wheelColour = 156;
+    sent.plate = "OXYMP 1";
+    sent.plateStyle = 2;
+    sent.livery = 4;
+    sent.wheelType = 7;
+    sent.windowTint = 1;
+    sent.dirtLevel = 8.5F;
+    sent.mods[0] = 3;
+    sent.mods[kVehicleModSlots - 1] = 11;
+    sent.toggleMods = 1U << 18U;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->id == 42);
+    CHECK(received->primaryColour == 12);
+    CHECK(received->secondaryColour == 111);
+    CHECK(received->pearlescentColour == 3);
+    CHECK(received->wheelColour == 156);
+    CHECK(received->plate == "OXYMP 1");
+    CHECK(received->plateStyle == 2);
+    CHECK(received->livery == 4);
+    CHECK(received->wheelType == 7);
+    CHECK(received->windowTint == 1);
+    CHECK(received->dirtLevel == 8.5F);
+    CHECK(received->mods[0] == 3);
+    CHECK(received->mods[1] == kStockMod);
+    CHECK(received->mods[kVehicleModSlots - 1] == 11);
+    CHECK(received->toggleMods == 1U << 18U);
+}
+
+TEST_CASE("VehicleAppearance keeps stock places stock", "[messages]") {
+    // Заводское место обозначено минус единицей, а едет беззнаковым байтом.
+    // Приведи его обратно неверно — и на машине окажется деталь номер 255,
+    // которой у модели нет; игра на такое отвечает по-разному, и ни один из
+    // ответов не является тем, что хотел отправитель.
+    const VehicleAppearance sent;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->livery == kStockMod);
+    CHECK(received->wheelType == kStockMod);
+    CHECK(received->windowTint == kStockMod);
+    CHECK(std::ranges::all_of(received->mods, [](std::int8_t mod) { return mod == kStockMod; }));
 }
 
 TEST_CASE("chat messages survive a round trip", "[messages]") {
@@ -222,43 +411,6 @@ TEST_CASE("a debt stays a debt", "[messages]") {
     const auto received = roundTrip(owed);
     REQUIRE(received.has_value());
     CHECK(received->amount == -2'500);
-}
-
-TEST_CASE("admin messages survive a round trip", "[messages]") {
-    AdminAction action;
-    action.command = AdminCommand::Summon;
-    action.target = 2;
-    action.position = Vec3{10.5F, -20.25F, 30.0F};
-
-    const auto receivedAction = roundTrip(action);
-    REQUIRE(receivedAction.has_value());
-    CHECK(receivedAction->command == AdminCommand::Summon);
-    CHECK(receivedAction->target == 2);
-    CHECK(receivedAction->position == action.position);
-
-    AdminOrder order;
-    order.command = AdminCommand::Summon;
-    order.issuer = 0;
-    order.position = action.position;
-
-    const auto receivedOrder = roundTrip(order);
-    REQUIRE(receivedOrder.has_value());
-    CHECK(receivedOrder->command == AdminCommand::Summon);
-    CHECK(receivedOrder->issuer == 0);
-    CHECK(receivedOrder->position == order.position);
-}
-
-TEST_CASE("an admin action for everyone keeps its empty target", "[messages]") {
-    // Пустая цель означает «всем» и обязана дожить до сервера именно пустой:
-    // принятая за настоящий номер, она собрала бы к себе одного игрока вместо
-    // всех — и никто бы не понял, почему.
-    AdminAction sent;
-    sent.target = kInvalidPlayerId;
-
-    const auto received = roundTrip(sent);
-
-    REQUIRE(received.has_value());
-    CHECK(received->target == kInvalidPlayerId);
 }
 
 TEST_CASE("player zero is a real player", "[messages]") {
@@ -367,4 +519,58 @@ TEST_CASE("packing the same thing twice gives the same name", "[vault]") {
 
     CHECK(fingerprint(data) == fingerprint(data));
     CHECK(fingerprint(data).size() == 64);
+}
+
+TEST_CASE("the name hash matches what the game computes", "[protocol]") {
+    // Сверка с тем, что возвращает GET_HASH_KEY в самой игре: эти два значения
+    // клиент уже проверяет у себя при запуске, и разойтись с ними нельзя —
+    // сервер называет модель по имени, а создаёт её игра по числу.
+    CHECK(joaat("mp_m_freemode_01") == 0x705E61F2);
+    CHECK(joaat("WEAPON_UNARMED") == 0xA2719263);
+
+    // Регистр не значит ничего: игра приводит имя к нижнему сама.
+    CHECK(joaat("Adder") == joaat("adder"));
+
+    // Пустое имя даёт ноль, и это удобно: ноль у нас всюду означает «модели
+    // нет», и проверять пустую строку отдельно не приходится.
+    CHECK(joaat("") == 0);
+}
+
+TEST_CASE("a named event survives the trip", "[protocol]") {
+    ClientEvent event;
+    event.name = "admin:vehicle";
+    event.payload = R"({"model":"adder"})";
+
+    const auto packet = encode(event);
+    const auto back = decode<ClientEvent>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK(back->name == event.name);
+    CHECK(back->payload == event.payload);
+}
+
+TEST_CASE("an overlong event is cut, not refused", "[protocol]") {
+    ServerEvent event;
+    event.name = std::string(kMaxEventNameLength + 20, 'x');
+    event.payload = std::string(kMaxEventPayloadLength + 500, 'y');
+
+    // Обрезается у того, кто сочинил: отвергни получатель пакет целиком —
+    // отправитель об этом не узнал бы, а страница интерфейса молча замерла бы.
+    const auto packet = encode(event);
+    const auto back = decode<ServerEvent>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK(back->name.size() == kMaxEventNameLength);
+    CHECK(back->payload.size() == kMaxEventPayloadLength);
+}
+
+TEST_CASE("a teleport carries only where to", "[protocol]") {
+    PlayerTeleport teleport;
+    teleport.position = Vec3{.x = 1.5F, .y = -2.5F, .z = 3.5F};
+
+    const auto packet = encode(teleport);
+    const auto back = decode<PlayerTeleport>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK(back->position.y == -2.5F);
 }

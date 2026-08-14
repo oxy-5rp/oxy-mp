@@ -18,3 +18,6 @@ target_link_libraries(oxymp_rglpatch PRIVATE
     oxymp::shared
     spdlog::spdlog
 )
+
+# Подпись подмены звена BattlEye. Пустышка, пока OXYMP_SIGN выключен.
+oxymp_sign(oxymp_rglpatch)

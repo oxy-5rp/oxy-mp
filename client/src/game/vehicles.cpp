@@ -6,12 +6,12 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <cmath>
 
 namespace oxymp::client::game {
 namespace {
 
-/// Сколько пассажирских мест перебирается в поисках персонажа.
+/// Сколько пассажирских мест перебирается в поисках персонажа, если спросить у
+/// самой машины не удалось.
 ///
 /// Восемь с запасом: у самой вместительной машины игры мест меньше, а лишний
 /// пустой опрос не стоит ничего.
@@ -20,51 +20,27 @@ constexpr int kMaxPassengerSeats = 8;
 /// Дальность, с которой машина остаётся видимой, в метрах.
 constexpr int kLodDistance = 1000;
 
-/// Порядок углов поворота. Двойка — тот же, что и у камеры, и тот, в котором
-/// игра отдаёт и принимает поворот машины без пересчёта.
-constexpr int kRotationOrder = 2;
-
-/// Насколько машина должна разойтись со снимком, чтобы её переставить рывком.
-///
-/// Обычно расхождение закрывается плавно, но после потери связи или въезда в
-/// туннель машина оказывается за сотню метров, и доводить её туда плавно — это
-/// показать, как она едет сквозь дома.
-constexpr float kSnapDistance = 15.0F;
-
-/// Какую долю расхождения съедать за кадр, когда оно невелико.
-constexpr float kCorrectionRate = 0.35F;
-
-float distanceBetween(const shared::Vec3& from, const shared::Vec3& to) {
-    const float dx = to.x - from.x;
-    const float dy = to.y - from.y;
-    const float dz = to.z - from.z;
-
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
 } // namespace
 
 Vehicles::Vehicles(const NativeTable& table) noexcept
-    : requestModel_(table.handlerFor(natives::kRequestModel)),
+    : snapshot_(table),
+      requestModel_(table.handlerFor(natives::kRequestModel)),
       hasModelLoaded_(table.handlerFor(natives::kHasModelLoaded)),
       modelNoLongerNeeded_(table.handlerFor(natives::kSetModelAsNoLongerNeeded)),
       createVehicle_(table.handlerFor(natives::kCreateVehicle)),
       deleteVehicle_(table.handlerFor(natives::kDeleteVehicle)),
       doesExist_(table.handlerFor(natives::kDoesEntityExist)),
-      setCoords_(table.handlerFor(natives::kSetEntityCoordsNoOffset)),
-      setRotation_(table.handlerFor(natives::kSetEntityRotation)),
-      setVelocity_(table.handlerFor(natives::kSetEntityVelocity)),
-      getRotation_(table.handlerFor(natives::kGetEntityRotation)),
-      getVelocity_(table.handlerFor(natives::kGetEntityVelocity)),
-      getCoords_(table.handlerFor(natives::kGetEntityCoords)),
-      getModel_(table.handlerFor(natives::kGetEntityModel)),
-      engineOn_(table.handlerFor(natives::kSetVehicleEngineOn)),
       asMissionEntity_(table.handlerFor(natives::kSetEntityAsMissionEntity)),
       lodDistance_(table.handlerFor(natives::kSetEntityLodDist)),
       invincible_(table.handlerFor(natives::kSetEntityInvincible)),
+      freezePosition_(table.handlerFor(natives::kFreezeEntityPosition)),
+      onGroundProperly_(table.handlerFor(natives::kSetVehicleOnGroundProperly)),
+      engineOn_(table.handlerFor(natives::kSetVehicleEngineOn)),
       isInAnyVehicle_(table.handlerFor(natives::kIsPedInAnyVehicle)),
       vehiclePedIsIn_(table.handlerFor(natives::kGetVehiclePedIsIn)),
-      pedInSeat_(table.handlerFor(natives::kGetPedInVehicleSeat)) {}
+      pedInSeat_(table.handlerFor(natives::kGetPedInVehicleSeat)),
+      maxPassengers_(table.handlerFor(natives::kGetVehicleMaxNumberOfPassengers)),
+      gameTimer_(table.handlerFor(natives::kGetGameTimer)) {}
 
 Vehicles::~Vehicles() {
     // Машины здесь уже не убрать: разрушение приходится на выгрузку модуля, а
@@ -73,12 +49,10 @@ Vehicles::~Vehicles() {
 }
 
 bool Vehicles::ready() const noexcept {
-    return requestModel_ != nullptr && hasModelLoaded_ != nullptr && createVehicle_ != nullptr &&
-           deleteVehicle_ != nullptr && doesExist_ != nullptr && setCoords_ != nullptr &&
-           setRotation_ != nullptr && setVelocity_ != nullptr && getRotation_ != nullptr &&
-           getVelocity_ != nullptr && getCoords_ != nullptr && getModel_ != nullptr &&
-           engineOn_ != nullptr && asMissionEntity_ != nullptr && lodDistance_ != nullptr &&
-           isInAnyVehicle_ != nullptr && vehiclePedIsIn_ != nullptr && pedInSeat_ != nullptr;
+    return snapshot_.ready() && requestModel_ != nullptr && hasModelLoaded_ != nullptr &&
+           createVehicle_ != nullptr && deleteVehicle_ != nullptr && doesExist_ != nullptr &&
+           asMissionEntity_ != nullptr && lodDistance_ != nullptr && isInAnyVehicle_ != nullptr &&
+           vehiclePedIsIn_ != nullptr && pedInSeat_ != nullptr;
 }
 
 std::optional<Vehicles::Seat> Vehicles::seatOf(int ped) const {
@@ -91,8 +65,7 @@ std::optional<Vehicles::Seat> Vehicles::seatOf(int ped) const {
     }
 
     // Последний довод: не считать машиной ту, в которую персонаж только
-    // залезает. Пока он висит на подножке, машина ещё не его, и объявить её
-    // своей значит начать возить её по сети за чужой счёт.
+    // залезает. Пока он висит на подножке, он в ней ещё не сидит.
     const int vehicle = invokeNative<int>(vehiclePedIsIn_, ped, false);
     if (vehicle == 0) {
         return std::nullopt;
@@ -100,66 +73,87 @@ std::optional<Vehicles::Seat> Vehicles::seatOf(int ped) const {
 
     Seat seat;
     seat.vehicle = vehicle;
-    seat.driverPed = invokeNative<int>(pedInSeat_, vehicle, shared::kDriverSeat);
 
-    if (seat.driverPed == ped) {
+    if (invokeNative<int>(pedInSeat_, vehicle, shared::kDriverSeat) == ped) {
         seat.index = shared::kDriverSeat;
         return seat;
     }
 
-    for (int index = 0; index < kMaxPassengerSeats; ++index) {
+    // Сколько у этой модели мест, знает сама игра. Спрашиваем её, а не перебираем
+    // вслепую: у мотоцикла мест два, и опрашивать у него восьмое незачем.
+    const int seats = maxPassengers_ != nullptr
+                          ? invokeNative<int>(maxPassengers_, vehicle)
+                          : kMaxPassengerSeats;
+
+    for (int index = 0; index < std::max(seats, 1); ++index) {
         if (invokeNative<int>(pedInSeat_, vehicle, index) == ped) {
             seat.index = static_cast<std::int8_t>(index);
             return seat;
         }
     }
 
-    // Сидит, но места не нашлось: такое бывает у мест, которых у этой модели
-    // нет в обычной нумерации. Считаем пассажиром на первом месте — это лучше,
-    // чем объявить идущим пешком того, кто едет.
+    // Сидит, но места не нашлось: такое бывает у мест, которых у этой модели нет
+    // в обычной нумерации. Считаем пассажиром на первом месте — это лучше, чем
+    // объявить идущим пешком того, кто едет.
     seat.index = 0;
     return seat;
 }
 
-shared::VehicleState Vehicles::describe(int vehicle) const {
-    shared::VehicleState state;
-
-    if (!ready() || vehicle == 0) {
-        return state;
+shared::VehicleId Vehicles::idOf(int vehicle) const {
+    if (vehicle == 0) {
+        return shared::kInvalidVehicleId;
     }
 
-    state.model = invokeNative<std::uint32_t>(getModel_, vehicle);
+    const auto it = std::ranges::find_if(vehicles_, [vehicle](const auto& entry) {
+        return entry.second.vehicle == vehicle;
+    });
 
-    {
-        NativeContext context;
-        context.push(vehicle);
-        context.push(true);
-        getCoords_(context.address());
+    return it == vehicles_.end() ? shared::kInvalidVehicleId : it->first;
+}
 
-        state.position = shared::Vec3{context.result<float>(0), context.result<float>(1),
-                                      context.result<float>(2)};
+int Vehicles::handleFor(shared::VehicleId id) const {
+    const auto it = vehicles_.find(id);
+    return it == vehicles_.end() ? 0 : it->second.vehicle;
+}
+
+std::vector<shared::VehicleAppearance> Vehicles::describeOwnedAppearances(int localPed,
+                                                                         bool resample) {
+    /// Сколько машин разрешено снять за один кадр.
+    constexpr std::size_t kPerFrame = 2;
+
+    std::vector<shared::VehicleAppearance> appearances;
+
+    if (!ready()) {
+        return appearances;
     }
 
-    {
-        NativeContext context;
-        context.push(vehicle);
-        context.push(kRotationOrder);
-        getRotation_(context.address());
+    const auto seat = seatOf(localPed);
+    const int driven = seat && seat->index == shared::kDriverSeat ? seat->vehicle : 0;
 
-        state.rotation = shared::Vec3{context.result<float>(0), context.result<float>(1),
-                                      context.result<float>(2)};
+    for (auto& [id, entry] : vehicles_) {
+        if (!entry.ours) {
+            continue;
+        }
+
+        // Машина под нами — единственная, чью внешность мог изменить игрок.
+        const bool ours = entry.vehicle == driven;
+
+        if (entry.described && !(ours && resample)) {
+            continue;
+        }
+
+        shared::VehicleAppearance appearance = snapshot_.readAppearance(entry.vehicle);
+        appearance.id = id;
+
+        appearances.push_back(appearance);
+        entry.described = true;
+
+        if (appearances.size() >= kPerFrame) {
+            break;
+        }
     }
 
-    {
-        NativeContext context;
-        context.push(vehicle);
-        getVelocity_(context.address());
-
-        state.velocity = shared::Vec3{context.result<float>(0), context.result<float>(1),
-                                      context.result<float>(2)};
-    }
-
-    return state;
+    return appearances;
 }
 
 int Vehicles::spawn(const shared::VehicleState& state) {
@@ -174,11 +168,11 @@ int Vehicles::spawn(const shared::VehicleState& state) {
 
     // Последние признаки: машина не сетевая и не принадлежит скрипту. Сетевых в
     // одиночной игре не бывает, а принадлежность скрипту передаётся отдельно,
-    // ниже. Третий передаётся явно, чтобы не полагаться на то, что игра
-    // прочитает ноль из необъявленной ячейки нашего же контекста.
+    // ниже. Третий передаётся явно, чтобы не полагаться на то, что игра прочитает
+    // ноль из необъявленной ячейки нашего же контекста.
     const int vehicle =
         invokeNative<int>(createVehicle_, state.model, state.position.x, state.position.y,
-                          state.position.z, 0.0F, false, false, false);
+                          state.position.z, state.rotation.z, false, false, false);
     if (vehicle == 0) {
         return 0;
     }
@@ -188,19 +182,11 @@ int Vehicles::spawn(const shared::VehicleState& state) {
     invokeNative<void>(asMissionEntity_, vehicle, true, true);
     invokeNative<void>(lodDistance_, vehicle, kLodDistance);
 
-    // Неуязвима намеренно. Прочность машины считает её водитель у себя: разбей
-    // её кто-то здесь — и мы бы возили обломки под игрока, который едет целым.
-    if (invincible_ != nullptr) {
-        invokeNative<void>(invincible_, vehicle, true);
-    }
-
-    invokeNative<void>(engineOn_, vehicle, true, true, false);
-
     if (modelNoLongerNeeded_ != nullptr) {
         invokeNative<void>(modelNoLongerNeeded_, state.model);
     }
 
-    spdlog::debug("машина игрока {} показана номером {}", state.owner, vehicle);
+    spdlog::debug("машина {} показана номером {}", state.id, vehicle);
     return vehicle;
 }
 
@@ -217,86 +203,254 @@ void Vehicles::remove(int vehicle) const {
     deleteVehicle_(context.address());
 }
 
-void Vehicles::place(int vehicle, const shared::VehicleState& state) const {
-    NativeContext coords;
-    coords.push(vehicle);
-    coords.push(true);
-    getCoords_(coords.address());
+void Vehicles::answerTo(Entry& entry, shared::PlayerId owner, bool ours) const {
+    const bool ownerChanged = !entry.answered || entry.owner != owner || entry.ours != ours;
 
-    const shared::Vec3 actual{coords.result<float>(0), coords.result<float>(1),
-                              coords.result<float>(2)};
+    entry.owner = owner;
+    entry.ours = ours;
+    entry.answered = true;
 
-    const float error = distanceBetween(actual, state.position);
+    // Ничья машина замирает там, где её оставили. Считать её физику некому, а
+    // отпущенная без присмотра она сползёт по уклону или провалится сквозь
+    // землю, когда игра подгрузит мир под ней заново.
+    const bool shouldFreeze = owner == shared::kInvalidPlayerId;
 
-    // Далеко разошлись — ставим рывком. Вблизи — подводим долей расхождения за
-    // кадр: машина при этом остаётся физическим телом, её колёса крутятся, а
-    // подвеска отрабатывает дорогу. Ставить её точно по снимку каждый кадр
-    // означало бы отнять у неё физику и получить скользящую по земле коробку.
-    const shared::Vec3 target =
-        error > kSnapDistance
-            ? state.position
-            : shared::Vec3{std::lerp(actual.x, state.position.x, kCorrectionRate),
-                           std::lerp(actual.y, state.position.y, kCorrectionRate),
-                           std::lerp(actual.z, state.position.z, kCorrectionRate)};
+    if (freezePosition_ != nullptr && entry.frozen != shouldFreeze) {
+        // На колёса — перед тем как замереть, и только тогда. Машину, которую
+        // кто-то ведёт, поправит её ведущий; ничью не поправит никто, и
+        // застывшая в воздухе или наполовину в асфальте она такой и останется.
+        if (shouldFreeze && onGroundProperly_ != nullptr) {
+            invokeNative<void>(onGroundProperly_, entry.vehicle, 5.0F);
+        }
 
-    invokeNative<void>(setCoords_, vehicle, target.x, target.y, target.z, false, false, false);
-    invokeNative<void>(setRotation_, vehicle, state.rotation.x, state.rotation.y, state.rotation.z,
-                       kRotationOrder, true);
+        invokeNative<void>(freezePosition_, entry.vehicle, shouldFreeze);
+        entry.frozen = shouldFreeze;
+    }
 
-    // Скорость задаётся своя, а не выводится из перемещения: по ней игра
-    // крутит колёса, наклоняет кузов и решает, реветь ли двигателю.
-    invokeNative<void>(setVelocity_, vehicle, state.velocity.x, state.velocity.y,
-                       state.velocity.z);
+    if (!ownerChanged) {
+        return;
+    }
+
+    // Внешность придётся объявить заново, если машина стала нашей: пока её вёл
+    // другой, он мог её перекрасить, и наше прошлое объявление её больше не
+    // описывает.
+    entry.described = false;
+
+    // Неуязвимость зависит от того, чья машина, и в этом вся суть. Свою мы ведём
+    // по-настоящему: она мнётся, ломается и горит, и о случившемся рассказываем
+    // мы. Чужую трогать нельзя — уязвимая, она взорвалась бы здесь от одного
+    // выстрела и осталась бы целой у того, кто в ней едет.
+    //
+    // Что при этом теряется, стоит знать: вмятины. Их форма нативами не
+    // читается и не задаётся вовсе. Выбитые стёкла, оторванные двери, пробитые
+    // колёса и прочности передаются — они задаются явно.
+    if (invincible_ != nullptr) {
+        invokeNative<void>(invincible_, entry.vehicle, !ours);
+    }
+
+    // Зажигание: заглушить машину, оставшуюся без ведущего. У ведомой им
+    // распоряжаются снимки, а ничью снимками не поправить — их больше не будет.
+    if (engineOn_ != nullptr && owner == shared::kInvalidPlayerId) {
+        invokeNative<void>(engineOn_, entry.vehicle, false, true, false);
+    }
 }
 
-void Vehicles::sync(const std::vector<shared::VehicleState>& vehicles) {
+void Vehicles::dress(shared::VehicleId id, Entry& entry) {
+    const auto known = appearances_.find(id);
+
+    if (known == appearances_.end() || entry.dressed) {
+        return;
+    }
+
+    snapshot_.applyAppearance(entry.vehicle, known->second);
+    entry.dressed = true;
+}
+
+void Vehicles::applyAppearance(const shared::VehicleAppearance& appearance) {
+    if (appearance.id == shared::kInvalidVehicleId) {
+        return;
+    }
+
+    appearances_[appearance.id] = appearance;
+
+    const auto known = vehicles_.find(appearance.id);
+    if (known == vehicles_.end()) {
+        // Машины ещё нет — оденем, когда появится.
+        return;
+    }
+
+    // Внешность сменилась у уже показанной машины: накладываем заново.
+    known->second.dressed = false;
+    dress(appearance.id, known->second);
+}
+
+bool Vehicles::occupied(int vehicle) const {
+    if (vehicle == 0 || pedInSeat_ == nullptr) {
+        return false;
+    }
+
+    if (invokeNative<int>(pedInSeat_, vehicle, shared::kDriverSeat) != 0) {
+        return true;
+    }
+
+    const int seats = maxPassengers_ != nullptr ? invokeNative<int>(maxPassengers_, vehicle)
+                                                : kMaxPassengerSeats;
+
+    for (int index = 0; index < std::max(seats, 1); ++index) {
+        if (invokeNative<int>(pedInSeat_, vehicle, index) != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void Vehicles::sweep() {
     if (!ready()) {
         return;
     }
 
-    for (auto it = puppets_.begin(); it != puppets_.end();) {
-        const bool present = std::any_of(vehicles.begin(), vehicles.end(),
-                                         [&it](const shared::VehicleState& state) {
-                                             return state.owner == it->first;
-                                         });
+    for (auto it = vehicles_.begin(); it != vehicles_.end();) {
+        Entry& entry = it->second;
 
-        if (present) {
+        if (!entry.doomed) {
             ++it;
             continue;
         }
 
-        spdlog::debug("игрок {} вышел из машины, номер {} убран", it->first, it->second.vehicle);
-        remove(it->second.vehicle);
-        it = puppets_.erase(it);
-    }
-
-    for (const shared::VehicleState& state : vehicles) {
-        const auto known = puppets_.find(state.owner);
-
-        if (known == puppets_.end()) {
-            if (const int vehicle = spawn(state); vehicle != 0) {
-                puppets_.emplace(state.owner, Puppet{.vehicle = vehicle, .model = state.model});
-            }
+        // В машине ещё кто-то сидит. Такое бывает: чужой персонаж выходит из неё
+        // не мгновенно, а его хозяин мог и вовсе замолчать, не успев сказать, что
+        // вышел. Оставляем машину до следующего кадра — она уже помечена, и
+        // никуда от нас не денется.
+        //
+        // Удалить её сейчас значило бы оставить игре персонажа, сидящего в
+        // несуществующей машине. Игра при этом не падает на месте — она падает
+        // позже, на отрисовке, и след ведёт в d3d11, а не сюда.
+        if (occupied(entry.vehicle)) {
+            ++it;
             continue;
         }
 
-        Puppet& puppet = known->second;
+        spdlog::debug("машины {} больше не видно, номер {} убран", it->first, entry.vehicle);
 
-        // Машину могло не стать помимо нас, а хозяин мог пересесть в другую.
-        // И то и другое означает одно: эта нам больше не годится.
-        if (!invokeNative<bool>(doesExist_, puppet.vehicle) || puppet.model != state.model) {
-            remove(puppet.vehicle);
-            puppets_.erase(known);
-            continue;
-        }
-
-        place(puppet.vehicle, state);
+        remove(entry.vehicle);
+        appearances_.erase(it->first);
+        it = vehicles_.erase(it);
     }
 }
 
-int Vehicles::handleFor(shared::PlayerId owner) const {
-    const auto it = puppets_.find(owner);
-    return it == puppets_.end() ? 0 : it->second.vehicle;
+void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
+    if (!ready()) {
+        return;
+    }
+
+    // Длительность кадра — один раз на все машины: часы у игры одни, а машин
+    // бывает десяток.
+    const auto now = gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0;
+
+    // Первый кадр сравнивать не с чем, и отрицательная длительность после
+    // переполнения счётчика — тоже не длительность. И то и другое означает
+    // «времени не прошло»: расхождение просто подождёт следующего кадра.
+    const float seconds =
+        framedAt_ != 0 && now > framedAt_ ? static_cast<float>(now - framedAt_) / 1000.0F : 0.0F;
+
+    framedAt_ = now;
+
+    // Все машины считаются ушедшими, пока список не скажет обратного. Пометка
+    // снимается ниже с каждой, что в нём нашлась, а оставшиеся помеченными
+    // уберёт sweep — после того, как расставят людей.
+    for (auto& [id, entry] : vehicles_) {
+        entry.doomed = true;
+    }
+
+    for (const View& view : vehicles) {
+        const shared::VehicleState& state = view.state;
+
+        if (state.id == shared::kInvalidVehicleId) {
+            continue;
+        }
+
+        const bool ours = view.owner != shared::kInvalidPlayerId && view.owner == self;
+
+        auto known = vehicles_.find(state.id);
+
+        if (known == vehicles_.end()) {
+            const int vehicle = spawn(state);
+            if (vehicle == 0) {
+                // Модель ещё грузится. Заведём в одном из следующих кадров:
+                // сервер о машине не забудет, и список придёт снова.
+                continue;
+            }
+
+            // Прошлое состояние остаётся заводским, а не приравнивается к
+            // пришедшему. Только что заведённая машина именно такова: целая, с
+            // закрытыми дверями и целыми стёклами. Приравняй мы его — и
+            // повреждения, с которыми машина пришла, не наложились бы никогда:
+            // разницы с прошлым разом у них не оказалось бы.
+            known = vehicles_.emplace(state.id, Entry{.vehicle = vehicle, .model = state.model})
+                        .first;
+
+            answerTo(known->second, view.owner, ours);
+            dress(state.id, known->second);
+            continue;
+        }
+
+        Entry& entry = known->second;
+        entry.doomed = false;
+
+        // Машины могло не стать помимо нас — например, её убрал сам движок при
+        // переполнении своего предела. Заведём заново в следующем кадре.
+        if (!invokeNative<bool>(doesExist_, entry.vehicle)) {
+            vehicles_.erase(known);
+            continue;
+        }
+
+        answerTo(entry, view.owner, ours);
+        dress(state.id, entry);
+
+        // Свою машину не трогаем. Её ведёт игра, а мы лишь снимаем с неё снимки:
+        // наложить на неё пришедшее состояние значило бы бороться с собственной
+        // физикой — и проиграть ей, потому что физика считается каждый кадр, а
+        // снимки приходят двадцать раз в секунду.
+        if (ours) {
+            entry.applied = state;
+            continue;
+        }
+
+        snapshot_.applyMotion(entry.vehicle, state, seconds);
+        snapshot_.applyControls(entry.vehicle, state, entry.applied);
+        snapshot_.applyDamage(entry.vehicle, state, entry.applied);
+
+        entry.applied = state;
+    }
+}
+
+std::vector<shared::VehicleState> Vehicles::describeOwned(int localPed) const {
+    std::vector<shared::VehicleState> snapshots;
+
+    if (!ready()) {
+        return snapshots;
+    }
+
+    // За рулём какой машины мы сидим — спрашивается один раз, а не для каждой
+    // ведомой: машин у нас бывает десяток, а сидим мы в лучшем случае в одной.
+    const auto seat = seatOf(localPed);
+    const int driven =
+        seat && seat->index == shared::kDriverSeat ? seat->vehicle : 0;
+
+    for (const auto& [id, entry] : vehicles_) {
+        if (!entry.ours) {
+            continue;
+        }
+
+        shared::VehicleState state = snapshot_.read(entry.vehicle, entry.vehicle == driven);
+        state.id = id;
+        state.model = entry.model;
+
+        snapshots.push_back(state);
+    }
+
+    return snapshots;
 }
 
 void Vehicles::clear() {
@@ -304,11 +458,12 @@ void Vehicles::clear() {
         return;
     }
 
-    for (const auto& [owner, puppet] : puppets_) {
-        remove(puppet.vehicle);
+    for (const auto& [id, entry] : vehicles_) {
+        remove(entry.vehicle);
     }
 
-    puppets_.clear();
+    vehicles_.clear();
+    appearances_.clear();
 }
 
 } // namespace oxymp::client::game
