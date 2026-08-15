@@ -77,6 +77,39 @@ foreach(name IN LISTS client_files)
     endif()
 endforeach()
 
+# То, что кладут в папку игрока помимо бинарников: подготовка машины,
+# сертификат издателя и объяснение для человека.
+#
+# Подготовка нужна не от прихоти. oxyMP внедряет модуль в процесс игры — так же,
+# как RAGE MP и alt:V, — и машинные проверки Защитника Windows считают это
+# признаком вредоноса: сборку уносит в карантин прямо на запуске. Спрятать
+# поведение нельзя и не нужно; можно один раз сказать системе, что этой папке
+# доверяют. Этим «Установить.cmd» и занимается.
+#
+# Имя по-русски: его читает и запускает человек, а не программа.
+set(dist_extras
+    "install.cmd:Установить.cmd"
+    "setup.ps1:setup.ps1"
+    "oxymp.cer:oxymp.cer"
+    "readme.txt:ЧИТАЙ_МЕНЯ.txt"
+)
+
+foreach(pair IN LISTS dist_extras)
+    string(REPLACE ":" ";" parts "${pair}")
+    list(GET parts 0 source)
+    list(GET parts 1 target)
+
+    set(from "${CMAKE_CURRENT_LIST_DIR}/../launcher/dist/${source}")
+
+    if(EXISTS "${from}")
+        # Сертификат необязателен: сборка без подписи его не выпускает, и
+        # подготовка тогда просто скажет, что доверять нечему.
+        configure_file("${from}" "${client}/${target}" COPYONLY)
+    elseif(NOT source STREQUAL "oxymp.cer")
+        message(WARNING "нет ${source}: папка клиента будет неполной")
+    endif()
+endforeach()
+
 # Образец настроек кладётся рядом с сервером, но не поверх уже настроенного:
 # перезаписать чужой server.cfg своим образцом — значит стереть работу хозяина
 # сервера при первом же обновлении.
