@@ -51,16 +51,19 @@ if(OXYMP_WITH_JS)
     target_link_libraries(oxymp_server PRIVATE oxymp::script_js)
     target_compile_definitions(oxymp_server PRIVATE OXYMP_WITH_JS)
 
-    # libnode.dll кладётся рядом с собранным сервером сразу же.
+    # libnode.dll кладётся к собранному серверу сразу же — и в тот же каталог,
+    # в который его кладёт раскладка раздачи.
     #
-    # Иначе запустить его из каталога сборки было бы нельзя: Windows ищет
-    # библиотеки рядом с исполняемым файлом, а не там, откуда его собирали. Ждать
-    # раскладки по каталогам раздачи ради того, чтобы проверить одну правку, —
-    # лишний шаг на каждом обороте.
+    # Иначе запустить сервер из каталога сборки было бы нельзя, а ждать
+    # раскладки ради проверки одной правки — лишний шаг на каждом обороте.
+    # Каталог обязан совпадать с тем, где движок ищет себя сам
+    # (script-js/src/node_library.cpp): разъедутся — и сервер, собранный и
+    # разложенный, не найдёт движка.
     add_custom_command(TARGET oxymp_server POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${OXYMP_NODE_DLL}" "$<TARGET_FILE_DIR:oxymp_server>"
-        COMMENT "libnode.dll рядом с сервером"
+                "${OXYMP_NODE_DLL}"
+                "$<TARGET_FILE_DIR:oxymp_server>/${OXYMP_NODE_SUBDIRECTORY}/libnode.dll"
+        COMMENT "libnode.dll в ${OXYMP_NODE_SUBDIRECTORY}"
         VERBATIM
     )
 endif()
@@ -78,9 +81,20 @@ endif()
 # проект собирается со статической: на чужой машине их может не быть, а
 # сообщение «не найден MSVCP140.dll» ничего не объясняет тому, кто его увидел.
 #
-# Здесь это решается тем, чем не решается у клиента: сервер — обычный
-# исполняемый файл, и Windows ищет его зависимости в его же каталоге. Клиент
-# такого не может — он живёт в чужом процессе, и ищут ему рядом с GTA5.exe.
+# **Именно рядом, а не в подкаталоге, и это не небрежность.** Зависимости
+# исполняемого файла Windows разрешает до первой его строки и ищет их только
+# рядом с ним самим: подгрузить их по требованию, как libnode.dll, нельзя —
+# на них стоит сам код, который эту подгрузку выполнял бы. Унести их в папку
+# можно было бы одним способом: собрать сервер со статической библиотекой
+# времени выполнения, а движок скриптов вынести отдельной DLL с границей на
+# чистом C. Это большая работа, и её цена — три места вместо одного при всяком
+# пополнении списка того, что доступно скрипту.
+#
+# Три и ровно три. Раньше сюда копировалось всё, что нашла CMake, — девять
+# файлов, включая concrt140 и четыре спутника msvcp140. Ни один из них не нужен:
+# ни сервер, ни libnode.dll на них не ссылаются (проверено `dumpbin /dependents`
+# на обоих). Остальное, что им требуется, — api-ms-win-crt-* — часть самой
+# Windows начиная с десятой и лежит в System32.
 #
 # Только выпускные: отладочные Microsoft распространять запрещает, и сборка их
 # сюда не берёт (CMAKE_INSTALL_DEBUG_LIBRARIES не выставляется).
@@ -88,7 +102,20 @@ if(MSVC)
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
     include(InstallRequiredSystemLibraries)
 
+    set(OXYMP_SERVER_RUNTIME_LIBRARIES
+        msvcp140.dll
+        vcruntime140.dll
+        vcruntime140_1.dll
+        CACHE INTERNAL "Библиотеки Visual C++, без которых сервер не запустится")
+
     foreach(runtime_library IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        get_filename_component(runtime_name "${runtime_library}" NAME)
+        string(TOLOWER "${runtime_name}" runtime_name)
+
+        if(NOT runtime_name IN_LIST OXYMP_SERVER_RUNTIME_LIBRARIES)
+            continue()
+        endif()
+
         add_custom_command(TARGET oxymp_server POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "${runtime_library}" "$<TARGET_FILE_DIR:oxymp_server>"

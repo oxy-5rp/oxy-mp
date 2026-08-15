@@ -4,9 +4,12 @@
 
 #include <spdlog/spdlog.h>
 
+#include <cstddef>
 #include <cwchar>
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -25,6 +28,29 @@ constexpr const wchar_t* kGameExecutable = L"GTA5.exe";
 /// Rockstar, и единственное место, где её ещё можно дополнить, — это подмена
 /// звена. Изнутри процесса командную строку уже не переписать.
 constexpr const wchar_t* kStraightIntoFreemode = L"-StraightIntoFreemode";
+
+/// Доводы лаунчера Rockstar, которым до игры доходить не следует.
+///
+/// Остальные доводы не разбираются вовсе — см. replaceExecutable, — и эти два
+/// перечислены поимённо не из желания навести порядок, а потому что каждый
+/// из них ломает своё.
+///
+/// `-scDiscordClientId` — номер приложения Rockstar в Discord. Его читает
+/// `socialclub.dll`, загруженная в игру, и объявляет через `discord_partner_sdk.dll`,
+/// что человек играет в GTA V в сюжетном режиме. Для нас это неправда: игрок в
+/// сессии oxyMP, и о ней Discord рассказывает клиент — своим приложением и
+/// своими словами. Два показа спорят между собой, и игрок видит то одно, то
+/// другое.
+///
+/// `-rglLanguage` — язык, назначенный лаунчером. Игра предпочитает его
+/// собственной настройке, и оттого язык в её меню «переключается и возвращается
+/// обратно»: игрок выбирает другой, а игра продолжает читать то, что ей сказали
+/// при запуске. Без этого довода она берёт язык оттуда, откуда и должна, — из
+/// своей настройки, а не из чужой.
+constexpr std::wstring_view kStrippedArguments[] = {
+    L"-scDiscordClientId",
+    L"-rglLanguage",
+};
 
 /// Перехват один на процесс, поэтому и состояние одно: обработчику неоткуда
 /// узнать, кому он принадлежит.
@@ -74,12 +100,85 @@ std::wstring executableFromCommandLine(const std::wstring& commandLine) {
     return token;
 }
 
+/// Конец слова, начавшегося в start. Кавычки учитываются: значение довода
+/// может быть взято в них, и пробел внутри кавычек слова не заканчивает.
+std::size_t wordEnd(const std::wstring& commandLine, std::size_t start) {
+    bool quoted = false;
+
+    for (std::size_t at = start; at < commandLine.size(); ++at) {
+        if (commandLine[at] == L'"') {
+            quoted = !quoted;
+        } else if (commandLine[at] == L' ' && !quoted) {
+            return at;
+        }
+    }
+
+    return commandLine.size();
+}
+
+/// Начинается ли слово с этого довода. Сравнение без учёта регистра: лаунчер
+/// пишет доводы как ему угодно, а игра их так и читает.
+bool isArgument(std::wstring_view word, std::wstring_view name) {
+    if (word.size() < name.size()) {
+        return false;
+    }
+
+    if (::_wcsnicmp(word.data(), name.data(), name.size()) != 0) {
+        return false;
+    }
+
+    // Довод целиком, а не начало другого: `-rglLanguage` не должен уносить с
+    // собой выдуманный `-rglLanguageOverride`.
+    return word.size() == name.size() || word[name.size()] == L'=';
+}
+
+/// Убирает названные доводы из командной строки вместе с их значениями.
+///
+/// Путь к программе не разбирается: он стоит первым и словом не считается.
+std::wstring withoutArguments(const std::wstring& commandLine) {
+    const std::size_t executable = executableTokenLength(commandLine);
+
+    std::wstring result = commandLine.substr(0, executable);
+
+    std::size_t at = executable;
+
+    while (at < commandLine.size()) {
+        const std::size_t start = commandLine.find_first_not_of(L' ', at);
+        if (start == std::wstring::npos) {
+            break;
+        }
+
+        const std::size_t end = wordEnd(commandLine, start);
+        const std::wstring_view word{commandLine.data() + start, end - start};
+
+        bool stripped = false;
+        for (const std::wstring_view name : kStrippedArguments) {
+            if (isArgument(word, name)) {
+                stripped = true;
+                spdlog::info("довод лаунчера {} до игры не доходит",
+                             std::filesystem::path{std::wstring{word}}.string());
+                break;
+            }
+        }
+
+        if (!stripped) {
+            // Вместе с пробелами перед словом: так остаток строки сохраняется
+            // ровно таким, каким его составил лаунчер.
+            result.append(commandLine, at, end - at);
+        }
+
+        at = end;
+    }
+
+    return result;
+}
+
 /// Заменяет путь к программе в командной строке, оставляя доводы как были.
 ///
-/// Доводы не разбираются и не отсеиваются намеренно: их составил лаунчер, и
-/// среди них есть и `-fromRGL`, без которого игра закрывается с ERR_NO_LAUNCHER,
-/// и `@commandline.txt`, и язык. Знать, какие из них чьи, нам незачем — важно
-/// лишь то, что запускается по этому пути.
+/// Доводы, кроме названных в kStrippedArguments, не разбираются намеренно: их
+/// составил лаунчер, и среди них есть и `-fromRGL`, без которого игра
+/// закрывается с ERR_NO_LAUNCHER, и `@commandline.txt`. Знать, какие из них
+/// чьи, нам незачем — важно лишь то, что запускается по этому пути.
 std::wstring replaceExecutable(const std::wstring& commandLine, const std::wstring& executable) {
     const std::wstring quoted = L'"' + executable + L'"';
 
@@ -143,7 +242,8 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
                         information);
     }
 
-    std::wstring replacedCommandLine = replaceExecutable(requestedCommandLine, game);
+    std::wstring replacedCommandLine =
+        withoutArguments(replaceExecutable(requestedCommandLine, game));
 
     if (order.straightIntoFreemode) {
         replacedCommandLine += L' ';

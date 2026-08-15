@@ -1,5 +1,6 @@
 #include <oxymp/script/js/engine.hpp>
 
+#include "node_library.hpp"
 #include "resource.hpp"
 
 #include <spdlog/spdlog.h>
@@ -59,6 +60,12 @@ Process& process() {
 
     if (node.ready) {
         return true;
+    }
+
+    // Сама библиотека движка — первым делом и до всякого обращения к Node:
+    // подгружается она по требованию, и до этой строки в процессе её нет.
+    if (!ensureNodeLibrary(error)) {
+        return false;
     }
 
     // Своё имя, а не argv сервера: доводы командной строки oxyMP к Node не

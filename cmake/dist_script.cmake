@@ -35,27 +35,37 @@ set(server_files
     oxymp-server.exe
 )
 
-# Движок игровых режимов и библиотеки Visual C++, без которых сервер не
-# запустится.
+# Библиотеки Visual C++, без которых сервер не запустится.
 #
-# Библиотеки понадобились оттого, что сервер собирается с динамической — того
-# требует libnode.dll. У клиента их нет и быть не может: он живёт в чужом
-# процессе, и Windows ищет ему зависимости рядом с GTA5.exe. Сервер — обычный
-# исполняемый файл, и рядом с ним они находятся.
+# Понадобились они оттого, что сервер собирается с динамической — того требует
+# libnode.dll. У клиента их нет и быть не может: он живёт в чужом процессе, и
+# Windows ищет ему зависимости рядом с GTA5.exe. Сервер — обычный исполняемый
+# файл, и рядом с ним они находятся. Рядом, а не в подкаталоге: зависимости
+# исполняемого файла Windows ищет только там — почему это так и чего стоило бы
+# обойти, написано в server/CMakeLists.txt.
 #
 # В отдельном перечне, потому что всего этого может не быть вовсе: сервер
 # собирается и без скриптов, и жаловаться на отсутствие того, чего не просили,
 # незачем. Копируется то, что нашлось рядом с собранным сервером, — складывает их
 # туда сама сборка.
 set(server_optional_files
-    libnode.dll
     msvcp140.dll
+    vcruntime140.dll
+    vcruntime140_1.dll
+)
+
+# То, что раскладка клала в корень сервера прежде.
+#
+# Убирается оттого, что каталог раздачи обновляют поверх прежнего, а не заводят
+# заново: не убери мы этого, стомегабайтный libnode.dll остался бы в корне
+# навсегда — рядом с собой же, лежащим теперь в modules/js. Убираются только
+# файлы, которые клала сюда сама раскладка; чужого она не трогает.
+set(server_obsolete_files
+    libnode.dll
     msvcp140_1.dll
     msvcp140_2.dll
     msvcp140_atomic_wait.dll
     msvcp140_codecvt_ids.dll
-    vcruntime140.dll
-    vcruntime140_1.dll
     concrt140.dll
 )
 
@@ -102,6 +112,30 @@ foreach(name IN LISTS server_optional_files)
         file(COPY "${DIST_BIN}/${name}" DESTINATION "${server}")
     endif()
 endforeach()
+
+foreach(name IN LISTS server_obsolete_files)
+    if(EXISTS "${server}/${name}")
+        file(REMOVE "${server}/${name}")
+        message(STATUS "убрано из прежней раскладки: ${name}")
+    endif()
+endforeach()
+
+# Движок игровых режимов — отдельным каталогом, как у alt:V.
+#
+# Путь тот же, по которому движок ищет себя сам (script-js/src/node_library.cpp)
+# и по которому его кладёт сборка рядом с собранным сервером. Три места, и
+# разъехаться им нельзя: разъехавшись, они дают сервер, который собрался,
+# разложился и не нашёл движка.
+if(EXISTS "${DIST_BIN}/modules")
+    file(GLOB_RECURSE module_files RELATIVE "${DIST_BIN}/modules" "${DIST_BIN}/modules/*")
+
+    foreach(relative IN LISTS module_files)
+        get_filename_component(subdirectory "${relative}" DIRECTORY)
+
+        file(COPY "${DIST_BIN}/modules/${relative}"
+             DESTINATION "${server}/modules/${subdirectory}")
+    endforeach()
+endif()
 
 # Chromium переносится целиком, кроме своего кеша.
 #

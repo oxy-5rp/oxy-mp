@@ -15,6 +15,7 @@ add_library(oxymp_script_js STATIC
     src/bindings.cpp
     src/convert.cpp
     src/engine.cpp
+    src/node_library.cpp
     src/resource.cpp
 )
 
