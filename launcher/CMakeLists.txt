@@ -59,6 +59,8 @@ target_link_libraries(oxymp_launcher PRIVATE version)
 # интерфейс изнутри игры.
 add_dependencies(oxymp_launcher oxymp_client oxymp_rglpatch oxymp_cefsub oxymp_cef_runtime)
 
+oxymp_version_info(oxymp_launcher "oxyMP — запуск игры и подключение к серверу")
+
 # Подпись. Лаунчер — то, что запускает игрок, и первое, обо что спотыкается
 # SmartScreen; ему подпись нужнее всего. Пустышка, пока OXYMP_SIGN выключен.
 oxymp_sign(oxymp_launcher)

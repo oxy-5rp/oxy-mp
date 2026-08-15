@@ -86,6 +86,8 @@ set_target_properties(oxymp_cefsub PROPERTIES
 
 target_link_libraries(oxymp_cefsub PRIVATE oxymp::options oxymp::cef)
 
+oxymp_version_info(oxymp_cefsub "oxyMP — подпроцесс движка интерфейса")
+
 # Подпись отдельного процесса CEF: он тоже наш исполняемый файл и запускается у
 # игрока. Пустышка, пока OXYMP_SIGN выключен.
 oxymp_sign(oxymp_cefsub)

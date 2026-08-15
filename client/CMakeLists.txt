@@ -106,5 +106,9 @@ if(WIN32)
     )
 endif()
 
+if(WIN32)
+    oxymp_version_info(oxymp_client "oxyMP — игровая часть клиента")
+endif()
+
 # Подпись внедряемого модуля. Пустышка, пока OXYMP_SIGN выключен.
 oxymp_sign(oxymp_client)

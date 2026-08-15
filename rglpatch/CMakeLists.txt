@@ -19,5 +19,7 @@ target_link_libraries(oxymp_rglpatch PRIVATE
     spdlog::spdlog
 )
 
+oxymp_version_info(oxymp_rglpatch "oxyMP — запуск игры мимо BattlEye")
+
 # Подпись подмены звена BattlEye. Пустышка, пока OXYMP_SIGN выключен.
 oxymp_sign(oxymp_rglpatch)

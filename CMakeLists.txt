@@ -78,6 +78,10 @@ include(cmake/node.cmake)
 # известна к моменту, когда её вызывают; по умолчанию не делает ничего.
 include(cmake/sign.cmake)
 
+# Сведения о файле: версия, издатель, описание. Тоже раньше целей — по той же
+# причине, что и подпись.
+include(cmake/version_info.cmake)
+
 add_subdirectory(memscan)
 add_subdirectory(gamesig)
 add_subdirectory(shared)
