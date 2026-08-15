@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <string_view>
 
-#include "hud_page.hpp"
 #include "loading_art.hpp"
+#include "overlay.hpp"
 
 namespace oxymp::client::game {
 namespace {
@@ -54,9 +54,9 @@ std::string toBase64(std::string_view bytes) {
 } // namespace
 
 std::string composePage() {
-    const std::size_t marker = ui::hudPage.find(kArtMarker);
+    const std::size_t marker = ui::overlayPage.find(kArtMarker);
     if (marker == std::string_view::npos) {
-        return std::string{ui::hudPage};
+        return std::string{ui::overlayPage};
     }
 
     std::string style = R"(<style>:root{--art:url("data:image/jpeg;base64,)";
@@ -64,11 +64,11 @@ std::string composePage() {
     style += R"(")}</style>)";
 
     std::string page;
-    page.reserve(ui::hudPage.size() + style.size());
+    page.reserve(ui::overlayPage.size() + style.size());
 
-    page += ui::hudPage.substr(0, marker);
+    page += ui::overlayPage.substr(0, marker);
     page += style;
-    page += ui::hudPage.substr(marker + kArtMarker.size());
+    page += ui::overlayPage.substr(marker + kArtMarker.size());
 
     return page;
 }

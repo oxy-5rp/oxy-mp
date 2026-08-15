@@ -132,19 +132,19 @@ private:
 /// подвисанием картинки.
 ///
 /// Атомарные поля читаются по отдельности, поэтому снимок может застать
-/// мгновение, когда состояние уже новое, а число игроков ещё старое. Для
-/// показаний на экране это безразлично — расхождение живёт один кадр.
+/// мгновение, когда состояние уже новое, а номер игрока ещё старый. Для
+/// происходящего в кадре это безразлично — расхождение живёт один кадр.
+///
+/// Числа, которые здесь когда-то были ради показа, — число игроков и задержка —
+/// отсюда ушли вместе с уголком интерфейса. Осталось то, чем игровая часть
+/// пользуется по делу.
 class SessionStatus {
 public:
-    /// Что показывать на экране.
+    /// Что игровой части нужно знать о сессии.
     struct Snapshot {
         ConnectionState state = ConnectionState::Waiting;
-        std::size_t players = 0;
 
-        /// Время оборота до сервера, отрицательное — пока неизвестно.
-        int latencyMilliseconds = -1;
-
-        /// Наш номер на сервере. Нужен не только для показа: сидя за рулём, мы
+        /// Наш номер на сервере. Нужен не для показа: сидя за рулём, мы
         /// называем себя хозяином машины, а назвать себя можно только числом,
         /// которое выдал сервер.
         shared::PlayerId playerId = shared::kInvalidPlayerId;
@@ -154,12 +154,6 @@ public:
         /// От сервера, а не из сборки клиента: точка появления — свойство
         /// сессии, и хозяин вправе поменять её одной строкой в server.cfg.
         std::optional<shared::Vec3> spawn;
-
-        /// Деньги игрока, как их считает сервер.
-        ///
-        /// Известны не сразу: сервер присылает их сразу за приветствием, но до
-        /// того показывать нечего, и прочерк честнее нуля.
-        std::optional<std::int64_t> money;
 
         [[nodiscard]] bool inSession() const noexcept {
             return state == ConnectionState::Connected;
@@ -178,22 +172,9 @@ public:
         spawnKnown_.store(true, std::memory_order_release);
     }
 
-    void update(ConnectionState state, std::size_t players,
-                std::optional<std::chrono::milliseconds> latency,
-                shared::PlayerId playerId) noexcept {
+    void update(ConnectionState state, shared::PlayerId playerId) noexcept {
         state_.store(state, std::memory_order_relaxed);
-        players_.store(static_cast<std::uint32_t>(players), std::memory_order_relaxed);
-        latency_.store(latency.has_value() ? static_cast<std::int32_t>(latency->count()) : -1,
-                       std::memory_order_relaxed);
         playerId_.store(playerId, std::memory_order_relaxed);
-    }
-
-    /// Деньги приходят отдельным сообщением и меняются редко, поэтому пишутся
-    /// отдельно от остального: складывать их в общий update значило бы требовать
-    /// их у каждого, кто обновляет задержку.
-    void setMoney(std::int64_t amount) noexcept {
-        money_.store(amount, std::memory_order_relaxed);
-        moneyKnown_.store(true, std::memory_order_relaxed);
     }
 
     [[nodiscard]] Snapshot snapshot() const noexcept {
@@ -203,8 +184,6 @@ public:
 
         return Snapshot{
             .state = state_.load(std::memory_order_relaxed),
-            .players = players_.load(std::memory_order_relaxed),
-            .latencyMilliseconds = latency_.load(std::memory_order_relaxed),
             .playerId = playerId_.load(std::memory_order_relaxed),
             .spawn = spawnKnown ? std::optional{shared::Vec3{
                                       .x = spawnX_.load(std::memory_order_relaxed),
@@ -212,19 +191,12 @@ public:
                                       .z = spawnZ_.load(std::memory_order_relaxed),
                                   }}
                                 : std::nullopt,
-            .money = moneyKnown_.load(std::memory_order_relaxed)
-                         ? std::optional{money_.load(std::memory_order_relaxed)}
-                         : std::nullopt,
         };
     }
 
 private:
     std::atomic<ConnectionState> state_{ConnectionState::Waiting};
-    std::atomic<std::uint32_t> players_{0};
-    std::atomic<std::int32_t> latency_{-1};
     std::atomic<shared::PlayerId> playerId_{shared::kInvalidPlayerId};
-    std::atomic<std::int64_t> money_{0};
-    std::atomic<bool> moneyKnown_{false};
 
     std::atomic<float> spawnX_{0.0F};
     std::atomic<float> spawnY_{0.0F};

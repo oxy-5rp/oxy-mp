@@ -21,45 +21,6 @@ constexpr wchar_t kEscape = 0x1B;
 /// Ниже этого кода лежат управляющие символы, которым в строке не место.
 constexpr wchar_t kFirstPrintable = 0x20;
 
-/// Какая латинская буква или цифра лежит на этой клавише.
-///
-/// Ноль — значит на клавише нет ничего, что годилось бы в название модели.
-///
-/// Коды клавиш описывают место на клавиатуре, а не то, что на ней нарисовано:
-/// VK_A — это клавиша слева от S, чем бы она ни была подписана в текущей
-/// раскладке. Отсюда и всё свойство: набор идёт латиницей при любой раскладке,
-/// и переключать её не нужно — а в GTA и невозможно.
-char latinFromKey(WPARAM key) {
-    if (key >= 'A' && key <= 'Z') {
-        // Строчные: названия моделей в игре записаны строчными, и приводить
-        // регистр потом — лишний шаг, на котором можно ошибиться.
-        return static_cast<char>(key - 'A' + 'a');
-    }
-
-    if (key >= '0' && key <= '9') {
-        return static_cast<char>(key);
-    }
-
-    if (key >= VK_NUMPAD0 && key <= VK_NUMPAD9) {
-        return static_cast<char>(key - VK_NUMPAD0 + '0');
-    }
-
-    switch (key) {
-    case VK_SPACE:
-        return ' ';
-
-    // Подчёркивание — главный разделитель в названиях моделей игры:
-    // mp_m_freemode_01, s_m_y_cop_01, a_c_chop. Лежит оно там же, где дефис, и
-    // различает их Shift — ровно как в любой раскладке.
-    case VK_OEM_MINUS:
-    case VK_SUBTRACT:
-        return (::GetKeyState(VK_SHIFT) & 0x8000) != 0 ? '_' : '-';
-
-    default:
-        return 0;
-    }
-}
-
 bool isHighSurrogate(wchar_t symbol) {
     return symbol >= 0xD800 && symbol <= 0xDBFF;
 }
@@ -134,6 +95,22 @@ TextEntry::~TextEntry() {
 LRESULT CALLBACK TextEntry::proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     TextEntry* const entry = g_entry;
 
+    // Смена раскладки исполняется здесь и до игры, всегда — не только во время
+    // набора.
+    //
+    // Windows не меняет раскладку сама: она посылает окну просьбу, и меняет
+    // только тот, кто передаст её DefWindowProc. GTA просьбу съедает — оттого
+    // раскладка в ней «переключается и возвращается обратно», о чём знает всякий,
+    // кто пробовал писать в игровой чат по-русски. Игре раскладка безразлична:
+    // клавиатуру она читает кодами клавиш, то есть местами на клавиатуре.
+    //
+    // А нам не безразлична: реплику в чат набирают буквами, и какими именно —
+    // решает раскладка. Без этой строки половина игроков не могла бы написать в
+    // чате ни слова на своём языке.
+    if (message == WM_INPUTLANGCHANGEREQUEST) {
+        return ::DefWindowProcW(window, message, wparam, lparam);
+    }
+
     if (entry != nullptr && entry->handle(message, wparam)) {
         return 0;
     }
@@ -154,12 +131,6 @@ bool TextEntry::handle(UINT message, WPARAM wparam) {
 
     switch (message) {
     case WM_CHAR:
-        // В латинском режиме символы приходят из кодов клавиш, а не отсюда:
-        // здесь они уже испорчены раскладкой. Съедаем, чтобы их не увидела игра.
-        if (mode_ == Mode::Latin) {
-            return true;
-        }
-
         switch (const auto symbol = static_cast<wchar_t>(wparam)) {
         case kBackspace:
             eraseLastCharacter(text_);
@@ -196,25 +167,6 @@ bool TextEntry::handle(UINT message, WPARAM wparam) {
             text_.clear();
             outcome_ = Outcome::Cancelled;
             return true;
-        }
-
-        if (message == WM_KEYDOWN && mode_ == Mode::Latin) {
-            switch (wparam) {
-            case VK_RETURN:
-                active_ = false;
-                outcome_ = Outcome::Submitted;
-                return true;
-
-            case VK_BACK:
-                eraseLastCharacter(text_);
-                return true;
-
-            default:
-                if (const char symbol = latinFromKey(wparam); symbol != 0) {
-                    append(static_cast<wchar_t>(symbol));
-                }
-                return true;
-            }
         }
 
         return true;
@@ -265,11 +217,10 @@ void TextEntry::append(wchar_t symbol) {
     }
 }
 
-void TextEntry::begin(Mode mode) {
+void TextEntry::begin() {
     const std::lock_guard guard{mutex_};
 
     active_ = true;
-    mode_ = mode;
     text_.clear();
     outcome_ = Outcome::Typing;
     pendingSurrogate_ = 0;

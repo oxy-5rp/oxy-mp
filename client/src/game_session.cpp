@@ -601,7 +601,7 @@ void GameSession::handleTyping() {
 
     // Строку просит один только чат: больше её просить в клиенте некому.
     if (!textEntry_->active() && pressedOnce(kChatKey)) {
-        textEntry_->begin(game::TextEntry::Mode::Free);
+        textEntry_->begin();
     }
 
     if (textEntry_->active()) {

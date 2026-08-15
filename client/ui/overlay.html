@@ -12,10 +12,18 @@
 <!--art-->
 
 <style>
-  /* Игровой интерфейс oxyMP.
+  /* Всё, что клиент рисует поверх игры, и ничего сверх этого.
      Страница рисуется CEF прямо в память и попадает в кадр игры текстурой.
      Окна у неё нет вовсе, а размер равен размеру кадра игры — поэтому разметка
      раскладывается по углам экрана, как в любой игре.
+
+     Здесь ровно четыре вещи: экран загрузки, чат, консоль и окно разрыва связи.
+     Своего уголка с состоянием сессии, деньгами и списком игроков здесь больше
+     нет, и это не упрощение ради упрощения. Всё это — правила игрового режима, а
+     они принадлежат серверу: захочет режим показать деньги — покажет своей
+     страницей. Клиент показывает только то, чего сервер показать не может:
+     загрузку до подключения, разрыв связи после него и чат, который сервер
+     разносит сам, ещё до всякого ресурса.
 
      Фон прозрачный по-настоящему, четвёртым каналом: панели могут быть какими
      угодно тёмными и полупрозрачными, сквозь них будет видно игру. Прежнему
@@ -24,7 +32,6 @@
 
   :root {
     --accent: #4cc2ff;
-    --accent-dim: rgba(76, 194, 255, .16);
     --text: #e6ebf3;
     --muted: #808b9f;
     --panel: rgba(11, 14, 20, .86);
@@ -54,8 +61,8 @@
 
   /* --- Экран загрузки ---------------------------------------------------- */
 
-  /* Живёт на той же странице, что и интерфейс, и уходит, когда игрок в мире и с
-     сервером всё решилось.
+  /* Живёт на той же странице, что и всё остальное, и уходит, когда игрок в мире
+     и с сервером всё решилось.
 
      Раскладка взята у самой игры и у знакомых мультиплееров: картинка во весь
      кадр, знак внизу слева, ход загрузки внизу справа. Так у экрана есть ровно
@@ -180,156 +187,63 @@
 
   .loading .meta b { color: #9aa6b8; font-weight: 500; }
 
-  /* --- Уголок в правом верхнем углу ------------------------------------- */
+  /* --- Чат --------------------------------------------------------------- */
 
-  /* Уголок появляется вместе с игроком в мире и исчезает, стоит игре
-     остановиться. Останавливается она на меню паузы: скриптовый тик при этом не
-     идёт, и уголок, оставленный на экране, застыл бы поверх меню на последнем
-     своём состоянии. */
-  /* Признака «голый клиент» здесь больше нет, и это исправление, а не отказ от
-     замысла. Замысел был верен — что показать игроку, решает сервер, — но
-     выключателя к нему так и не появилось: поднять признак было некому, и он
-     оставался поднятым всегда. Чат от этого не показывался ни разу.
+  /* Сделан по образцу RAGE MP, и вплоть до мелочей: левый верхний угол, десяток
+     последних строк, тёмная подложка под ними и строка набора внизу той же
+     подложки. Человек, пришедший оттуда, не должен ничему учиться заново.
 
-     Чат при этом и не должен был прятаться. Он не принадлежит игровому режиму:
-     сервер разносит реплики сам, ещё до всякого ресурса, — ровно как голый
-     сервер RAGE MP. Прятать от игрока то, что сервер ему шлёт, незачем.
+     Углы прямые, а не скруглённые: у RAGE MP они прямые, и это единственное, чем
+     чат отличается от обычной панели интерфейса.
 
-     Появится своё окно у ресурса — оно и будет решать, что показывать. Гасить
-     ради этого чат, который работает, не нужно. */
+     Чат появляется вместе с игроком в мире и исчезает, стоит игре остановиться.
+     Останавливается она на меню паузы: скриптовый тик при этом не идёт, и чат,
+     оставленный на экране, застыл бы поверх меню на последнем своём состоянии. */
+  .chat {
+    position: fixed;
+    left: 14px;
+    top: 14px;
+    width: 34%;
+    min-width: 420px;
+    max-width: 640px;
+    padding: 7px 11px;
+    background: rgba(0, 0, 0, .45);
+  }
 
-  body:not(.ready) .hud,
-  body:not(.alive) .hud,
   body:not(.ready) .chat,
   body:not(.alive) .chat { display: none; }
 
-  .hud {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    width: 340px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-  }
-
-  .server {
-    padding: 9px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  /* Деньги набраны цифрами одной ширины: счёт меняется на ходу, и без этого
-     соседние разряды дёргались бы при каждом изменении. */
-  .money {
-    padding: 7px 12px;
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    font-variant-numeric: tabular-nums;
-    font-size: 19px;
-    font-weight: 500;
-    color: var(--good);
-  }
-
-  .money .sign { font-size: 14px; opacity: .75; }
-
-  .server .top {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-
-  .brand { font-size: 15px; font-weight: 600; letter-spacing: .4px; }
-  .brand b { color: var(--accent); font-weight: 600; }
-
-  .state { font-size: 11px; color: var(--good); }
-  .state.off { color: var(--bad); }
-
-  .meta {
-    font-size: 11px;
-    color: var(--muted);
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  /* --- Список игроков --------------------------------------------------- */
-
-  .roster { padding: 8px 12px; max-height: 200px; overflow: hidden; }
-
-  .roster h4 {
-    margin: 0 0 4px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1.1px;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-
-  .roster ul { margin: 0; padding: 0; list-style: none; }
-
-  .roster li {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    padding: 1px 0;
-  }
-
-  .roster li.self { color: var(--accent); }
-  .roster .id { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-  .hint {
-    font-size: 10px;
-    color: #59637a;
-    letter-spacing: .3px;
-    text-align: right;
-    padding-right: 2px;
-  }
-
-  /* --- Чат в левом верхнем углу ----------------------------------------- */
-
-  .chat {
-    position: fixed;
-    left: 16px;
-    top: 16px;
-    width: 520px;
-    max-height: 300px;
-    display: flex;
-    flex-direction: column;
-    padding: 8px 12px 10px;
-  }
-
   /* Пустой чат не рисуется вовсе: тёмный прямоугольник без единой строки
      закрывал бы собой угол экрана просто так. */
-  body:not(.has-chat):not(.typing) .chat { display: none !important; }
+  body:not(.has-chat):not(.typing) .chat { display: none; }
 
   .lines {
-    overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    font-size: 13px;
+    gap: 1px;
+    overflow: hidden;
+    font-size: 14px;
+
+    /* Тень под каждой строкой: чат лежит на игре, и белое по светлому небу
+       читалось бы не лучше, чем белое по белому. Подложка одна на всех и
+       выручает не везде. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .95);
   }
 
   .lines div { word-wrap: break-word; }
   .lines .join { color: var(--good); }
   .lines .leave { color: var(--bad); }
-  .lines .system { color: var(--muted); font-style: italic; }
+  .lines .system { color: #ffd479; }
 
+  /* Строка набора — внизу той же подложки, отделённая чертой. Пока не набирают,
+     её нет вовсе: у RAGE MP она тоже появляется только на время набора. */
   .entry {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
-    font-size: 13px;
     display: none;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, .18);
+    font-size: 14px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .95);
   }
 
   body.typing .entry { display: block; }
@@ -345,6 +259,9 @@
 
   /* --- Консоль ---------------------------------------------------------- */
 
+  /* Только чтение и только по F8 — ровно как встроенная консоль RAGE MP.
+     Набирать в ней нечего: команд у клиента нет, а те, что есть у режима, идут
+     через чат. */
   .console-view {
     position: fixed;
     inset: 0;
@@ -364,6 +281,8 @@
   }
 
   .console-view h3 { margin: 0; font-size: 15px; font-weight: 600; }
+
+  .console-view .hint { font-size: 11px; color: var(--muted); }
 
   .log {
     flex: 1;
@@ -473,34 +392,7 @@
   <div class="meta">игрок <b id="loading-nickname">—</b></div>
 </div>
 
-<div class="hud">
-  <div class="card server">
-    <div class="top">
-      <span class="brand">oxy<b>MP</b></span>
-      <span class="state" id="state">ожидание</span>
-    </div>
-    <div class="meta">
-      <span id="address">—</span>
-      <span id="ping"></span>
-      <span id="me"></span>
-    </div>
-  </div>
-
-  <!-- Деньги отдельной карточкой, а не строкой в общей мелочи: это единственное
-       число, на которое игрок смотрит нарочно, а не мельком. -->
-  <div class="card money">
-    <span class="sign">$</span><span id="money">—</span>
-  </div>
-
-  <div class="card roster">
-    <h4>В сессии</h4>
-    <ul id="roster"></ul>
-  </div>
-
-  <div class="hint">ё — меню · T — чат · F8 — консоль · F5 — полёт</div>
-</div>
-
-<div class="card chat">
+<div class="chat">
   <div class="lines" id="lines"></div>
   <div class="entry"><span id="typed"></span><span class="caret"></span></div>
 </div>
@@ -523,8 +415,6 @@
 </div>
 
 <script>
-  const CONNECTION = ['ожидание', 'подключение', 'представляемся', 'в сессии', 'отказано'];
-
   /// Состояние соединения, при котором игрок уже в сессии.
   const IN_SESSION = 3;
 
@@ -552,8 +442,8 @@
   // Уровни spdlog: trace, debug, info, warn, err, critical, off.
   const LEVEL = ['dbg', 'dbg', '', 'warn', 'err', 'err', ''];
 
-  // Сколько строк держится на экране. Больше не нужно: чат читают на ходу, а
-  // историю целиком хранит журнал клиента.
+  // Сколько строк держится на экране. Столько же держит чат RAGE MP: больше не
+  // нужно — чат читают на ходу, а историю целиком хранит журнал клиента.
   const CHAT_KEEP = 12;
   const LOG_KEEP = 400;
 
@@ -571,29 +461,6 @@
 
     while (box.childElementCount > keep) {
       box.removeChild(box.firstElementChild);
-    }
-  }
-
-  function renderRoster(players, own) {
-    const box = document.getElementById('roster');
-    box.textContent = '';
-
-    for (const player of players) {
-      const row = document.createElement('li');
-      if (player.id === own) {
-        row.className = 'self';
-      }
-
-      const name = document.createElement('span');
-      name.textContent = player.name;
-
-      const id = document.createElement('span');
-      id.className = 'id';
-      id.textContent = player.id;
-
-      row.appendChild(name);
-      row.appendChild(id);
-      box.appendChild(row);
     }
   }
 
@@ -673,31 +540,6 @@
   // «наружу → страница» у него нет, зато есть выполнение кода в её окружении.
   window.oxymp = {
     receive(s) {
-
-      const connected = s.connection === IN_SESSION;
-
-      const state = document.getElementById('state');
-      state.textContent = CONNECTION[s.connection] || '—';
-      state.className = 'state' + (!connected && s.troubled ? ' off' : '');
-
-      if (s.address !== undefined) {
-        document.getElementById('address').textContent = s.address || '—';
-      }
-
-      document.getElementById('ping').textContent = s.latency >= 0 ? s.latency + ' мс' : '';
-
-      // null — сервер ещё не сказал, сколько у нас денег. Прочерк, а не ноль:
-      // ноль здесь означал бы разорение, а не незнание.
-      if (s.money !== undefined) {
-        document.getElementById('money').textContent =
-          s.money === null ? '—' : s.money.toLocaleString('ru-RU');
-      }
-      document.getElementById('me').textContent = s.playerId >= 0 ? 'id ' + s.playerId : '';
-
-      if (s.roster) {
-        renderRoster(s.roster, s.playerId);
-      }
-
       for (const line of s.chat || []) {
         append(lines, line.text, KIND[line.kind] || 'say', CHAT_KEEP);
         document.body.classList.add('has-chat');

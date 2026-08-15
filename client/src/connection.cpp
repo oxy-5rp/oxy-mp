@@ -433,10 +433,16 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    // Деньги сервер присылает, а клиенту их показать негде: уголка интерфейса
+    // больше нет, и заводить ради одного числа свой — значит заводить клиенту
+    // правила игры. Показывать деньги будет страница игрового режима, когда
+    // клиентская часть ресурсов появится; до тех пор сообщение принимается и
+    // молча откладывается.
+    //
+    // Ветка не удалена нарочно: без неё разбор упёрся бы в предупреждение о
+    // неразобранном значении перечисления, а это тот самый случай, когда
+    // молчание должно быть написано явно.
     case shared::MessageId::MoneyChanged:
-        if (const auto money = shared::decode<shared::MoneyChanged>(packet)) {
-            money_ = money->amount;
-        }
         return;
 
     case shared::MessageId::ResourceList:
@@ -688,10 +694,6 @@ std::vector<shared::Vec3> Connection::takeTeleports() {
 
 std::vector<shared::ServerEvent> Connection::takeServerEvents() {
     return std::exchange(serverEvents_, {});
-}
-
-std::optional<std::int64_t> Connection::takeMoney() {
-    return std::exchange(money_, std::nullopt);
 }
 
 std::optional<std::vector<shared::ResourceEntry>> Connection::takeResources() {

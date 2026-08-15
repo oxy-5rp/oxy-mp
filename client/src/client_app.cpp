@@ -529,27 +529,6 @@ std::vector<SessionVehicleView> describeSessionVehicles(const Connection& connec
     return vehicles;
 }
 
-/// Кто сейчас в сессии, включая нас, — для списка на экране.
-std::vector<UiFeed::Participant> describeRoster(const Connection& connection,
-                                                const std::string& own) {
-    std::vector<UiFeed::Participant> roster;
-    roster.reserve(connection.remotePlayers().size() + 1);
-
-    if (connection.localPlayerId() != shared::kInvalidPlayerId) {
-        roster.push_back(UiFeed::Participant{.id = connection.localPlayerId(), .nickname = own});
-    }
-
-    for (const auto& [id, player] : connection.remotePlayers()) {
-        roster.push_back(UiFeed::Participant{.id = id, .nickname = player.nickname});
-    }
-
-    // По номеру, а не по порядку в карте: список на экране не должен
-    // перетасовываться сам по себе от кадра к кадру.
-    std::ranges::sort(roster, {}, &UiFeed::Participant::id);
-
-    return roster;
-}
-
 /// Собирает игровую часть клиента.
 ///
 /// Отдельной функцией, а не внутри run: сюда стягиваются все причины, по
@@ -780,16 +759,11 @@ void run() {
         connection.update(std::chrono::milliseconds{50});
 
         const std::size_t players = connection.remotePlayers().size();
-        const std::optional<std::chrono::milliseconds> latency = connection.latency();
 
-        status.update(connection.state(), players, latency, connection.localPlayerId());
+        status.update(connection.state(), connection.localPlayerId());
 
         if (const auto spawn = connection.spawnPosition()) {
             status.setSpawn(*spawn);
-        }
-
-        if (const auto money = connection.takeMoney()) {
-            status.setMoney(*money);
         }
 
         // Загрузка идёт здесь, в сетевом потоке, и это не выбор из удобства:
@@ -842,18 +816,11 @@ void run() {
             connection.state() != ConnectionState::Connected &&
             std::chrono::steady_clock::now() - connectionStartedAt >= kSilenceBeforeAlarm;
 
-        const int latencyMilliseconds =
-            latency.has_value() ? static_cast<int>(latency->count()) : -1;
-
         const DisconnectReason lost = connection.disconnectReason();
 
         feed.setConnection(UiFeed::Connection{
             .state = static_cast<unsigned int>(connection.state()),
-            .players = players,
-            .latencyMilliseconds = latencyMilliseconds,
-            .playerId = connection.localPlayerId(),
             .troubled = troubled,
-            .money = status.snapshot().money,
             .disconnect = static_cast<unsigned int>(lost),
 
             // Объяснение прикладывается только к отказу: его сервер назвал
@@ -863,7 +830,6 @@ void run() {
                                     ? std::string{describe(*connection.rejectReason())}
                                     : std::string{},
         });
-        feed.setRoster(describeRoster(connection, settings.nickname));
 
         // Игроков на сервере на одного больше, чем чужих: себя в списке чужих
         // нет, а в Discord показывается общее число.

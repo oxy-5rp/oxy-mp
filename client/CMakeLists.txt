@@ -78,7 +78,7 @@ if(WIN32)
     # gamesig нужен только здесь: работа с внутренностями игры начинается и
     # заканчивается в модуле, который в неё внедряется. Бот-клиент, собранный
     # из того же ядра, про игру не знает вовсе.
-    oxymp_embed_text(oxymp_client ui/hud_page.html hudPage oxymp::client::game::ui)
+    oxymp_embed_text(oxymp_client ui/overlay.html overlayPage oxymp::client::game::ui)
 
     # Картинка экрана загрузки встраивается тем же способом, что и разметка, и по
     # той же причине: страница доходит до CEF ссылкой с данными, у которой нет

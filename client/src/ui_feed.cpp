@@ -94,32 +94,6 @@ void UiFeed::setConnection(const Connection& connection) {
     connection_ = connection;
 }
 
-void UiFeed::setRoster(std::vector<Participant> roster) {
-    const std::lock_guard guard{mutex_};
-
-    // Сравнение, а не безусловная замена: список приходит каждый оборот
-    // сетевого потока, а меняется считаные разы за сессию. Отдавать его
-    // странице заново двадцать раз в секунду — значит перестраивать её разметку
-    // на ровном месте.
-    if (roster.size() == roster_.size()) {
-        bool same = true;
-
-        for (std::size_t i = 0; i < roster.size(); ++i) {
-            if (roster[i].id != roster_[i].id || roster[i].nickname != roster_[i].nickname) {
-                same = false;
-                break;
-            }
-        }
-
-        if (same) {
-            return;
-        }
-    }
-
-    roster_ = std::move(roster);
-    rosterChanged_ = true;
-}
-
 void UiFeed::pushChat(shared::ChatKind kind, std::string text) {
     const std::lock_guard guard{mutex_};
 
@@ -148,9 +122,7 @@ void UiFeed::setConsoleVisible(bool visible) {
 
 void UiFeed::forgetDelivered() {
     const std::lock_guard guard{mutex_};
-
     sessionChanged_ = true;
-    rosterChanged_ = true;
 }
 
 std::string UiFeed::takeUpdate() {
@@ -163,46 +135,19 @@ std::string UiFeed::takeUpdate() {
                        std::chrono::steady_clock::now() - beatAt_ < kTickTimeout;
 
     std::string message = std::format(
-        R"({{"connection":{},"players":{},"latency":{},"playerId":{},"troubled":{},)"
+        R"({{"connection":{},"troubled":{},)"
         R"("consoleVisible":{},"inputActive":{},"inputText":"{}",)"
-        R"("stage":{},"ready":{},"alive":{},"money":{},)"
+        R"("stage":{},"ready":{},"alive":{},)"
         R"("disconnect":{},"disconnectDetail":"{}")",
-        connection_.state, connection_.players, connection_.latencyMilliseconds,
-        // Отсутствие номера доходит до страницы отрицательным числом, а не
-        // огромным: наибольшее беззнаковое выглядит как настоящий номер игрока,
-        // и страница показала бы «id 4294967295».
-        connection_.playerId == shared::kInvalidPlayerId
-            ? -1
-            : static_cast<std::int64_t>(connection_.playerId),
-        connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0, inputActive_ ? 1 : 0,
-        escape(inputText_), static_cast<unsigned int>(stage_),
-        ready_ ? 1 : 0, alive ? 1 : 0,
-        // Неизвестные деньги доходят до страницы как null, а не как ноль: ноль —
-        // это разорение, а нам нужно «сервер ещё не сказал».
-        connection_.money.has_value() ? std::format("{}", *connection_.money) : "null",
-        connection_.disconnect, escape(connection_.disconnectDetail));
+        connection_.state, connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0,
+        inputActive_ ? 1 : 0, escape(inputText_), static_cast<unsigned int>(stage_),
+        ready_ ? 1 : 0, alive ? 1 : 0, connection_.disconnect,
+        escape(connection_.disconnectDetail));
 
     if (sessionChanged_) {
         sessionChanged_ = false;
         message += std::format(R"(,"address":"{}","nickname":"{}")", escape(address_),
                                escape(nickname_));
-    }
-
-    if (rosterChanged_) {
-        rosterChanged_ = false;
-
-        message += R"(,"roster":[)";
-
-        for (std::size_t i = 0; i < roster_.size(); ++i) {
-            if (i != 0) {
-                message += ',';
-            }
-
-            message += std::format(R"({{"id":{},"name":"{}"}})", roster_[i].id,
-                                   escape(roster_[i].nickname));
-        }
-
-        message += ']';
     }
 
     if (!chat_.empty()) {

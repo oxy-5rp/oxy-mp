@@ -254,12 +254,6 @@ public:
     /// не меняется, пока соединение живо.
     [[nodiscard]] std::optional<std::vector<shared::ResourceEntry>> takeResources();
 
-    /// Забирает новый счёт денег, если он приходил.
-    ///
-    /// Не очередь, в отличие от соседей: промежуточные суммы никому не нужны,
-    /// важна последняя. Пусто — значит с прошлого раза ничего не менялось.
-    [[nodiscard]] std::optional<std::int64_t> takeMoney();
-
     [[nodiscard]] ConnectionState state() const noexcept { return state_; }
 
     [[nodiscard]] shared::PlayerId localPlayerId() const noexcept { return localPlayerId_; }
@@ -365,9 +359,6 @@ private:
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::ServerEvent> serverEvents_;
     std::vector<shared::VehicleAppearance> vehicleAppearances_;
-
-    /// Последний присланный счёт денег, ещё не забранный.
-    std::optional<std::int64_t> money_;
 
     /// Последнее присланное состояние мира, ещё не забранное.
     std::optional<shared::WorldState> world_;
