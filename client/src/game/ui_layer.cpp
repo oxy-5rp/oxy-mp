@@ -388,7 +388,10 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
 
     state.hook = PresentHook::install(
         [&state](IDXGISwapChain* swapchain) {
-            const bool menuOpen = state.menu != nullptr && state.menu->opened();
+            // Тот же вопрос, что и везде: нужен ли странице ввод. Открытая
+            // консоль считается наравне с открытым меню — она живёт на той же
+            // странице и точно так же закрывает собой игру.
+            const bool menuOpen = state.pageWantsInput();
 
             // Пока открыто меню, свой экран загрузки не рисуется вовсе.
             //

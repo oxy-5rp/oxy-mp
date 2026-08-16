@@ -351,12 +351,40 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
         spdlog::info("нажатия доходят очередью сообщений");
     }
 
+    const auto key = static_cast<unsigned>(message.wParam);
+    const auto scan = static_cast<unsigned>((message.lParam >> 16) & 0xFF);
+
+    // Свои клавиши разбираются прежде вопроса «нужен ли странице ввод», и
+    // порядок здесь тот же, что у двух других путей. Иначе получалось бы, что
+    // закрытое меню уже не открыть: спросив сперва, мы отвечали бы «ввод не
+    // нужен» и уходили, не дойдя до клавиши, которой его как раз и просят.
+    if (message.message != WM_CHAR) {
+        if (key == VK_F1) {
+            if (down && toggle_) {
+                toggle_();
+            }
+            return true;
+        }
+
+        if (key == VK_F8) {
+            if (down && console_) {
+                console_();
+            }
+            return true;
+        }
+
+        if (key == VK_F4 && held(VK_MENU)) {
+            if (down && quit_) {
+                spdlog::info("Alt+F4 — выходим из игры");
+                quit_();
+            }
+            return true;
+        }
+    }
+
     if (!wanted_ || !wanted_()) {
         return false;
     }
-
-    const auto key = static_cast<unsigned>(message.wParam);
-    const auto scan = static_cast<unsigned>((message.lParam >> 16) & 0xFF);
 
     // Готовая буква из очереди только съедается, а странице не отдаётся.
     //
@@ -365,20 +393,6 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
     // игра держит своей. Съедать её при этом обязательно: игре она не нужна, а
     // оставленная в очереди, она дошла бы до её же разбора ввода.
     if (message.message == WM_CHAR) {
-        return true;
-    }
-
-    if (key == VK_F1) {
-        if (down && toggle_) {
-            toggle_();
-        }
-        return true;
-    }
-
-    if (key == VK_F8) {
-        if (down && console_) {
-            console_();
-        }
         return true;
     }
 

@@ -10,8 +10,27 @@
 #include <string>
 #include <utility>
 
+#include <windows.h>
+
 namespace oxymp::config {
 namespace {
+
+/// Язык, на котором меню заговорит при первом запуске.
+///
+/// У страницы их два — `en` и `ru`, — и выбирать между ними по языку Windows
+/// честнее, чем всегда брать английский: человек, у которого система по-русски,
+/// с большой вероятностью ждёт русского и здесь. У нашего образца alt:V в
+/// настройках стоит `ru`, и выбирал его не человек.
+///
+/// Это только умолчание: выбранное игроком на странице ложится в файл и с этого
+/// мгновения решает всё.
+[[nodiscard]] const char* defaultLanguage() {
+    // Младшие десять бит — сам язык, старшие — его местная разновидность.
+    // Разновидность здесь не важна: русский он и в Казахстане русский.
+    constexpr WORD kRussian = 0x19;
+
+    return PRIMARYLANGID(::GetUserDefaultUILanguage()) == kRussian ? "ru" : "en";
+}
 
 /// Умолчания — они же перечень того, какие настройки вообще бывают.
 ///
@@ -44,7 +63,7 @@ toml::table defaults() {
         {"gtaPlatform", "rgl"},
         {"gtapath", ""},
         {"heapSize", 1024},
-        {"lang", "en"},
+        {"lang", defaultLanguage()},
         {"lastip", ""},
         {"launcherSkin", ""},
         {"launcherSkinsDisabled", toml::array{}},
