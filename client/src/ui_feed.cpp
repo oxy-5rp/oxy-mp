@@ -1,6 +1,7 @@
 #include "ui_feed.hpp"
 
 #include <format>
+#include <utility>
 
 namespace oxymp::client {
 namespace {
@@ -56,17 +57,14 @@ void UiFeed::trim(std::vector<Line>& lines) {
     lines.erase(lines.begin(), lines.begin() + static_cast<std::ptrdiff_t>(lines.size() - kPending));
 }
 
-void UiFeed::describeSession(std::string address, std::string nickname) {
-    const std::lock_guard guard{mutex_};
-
-    address_ = std::move(address);
-    nickname_ = std::move(nickname);
-    sessionChanged_ = true;
-}
-
 void UiFeed::setStage(shared::LoadStage stage) {
     const std::lock_guard guard{mutex_};
     stage_ = stage;
+}
+
+shared::LoadStage UiFeed::stage() const {
+    const std::lock_guard guard{mutex_};
+    return stage_;
 }
 
 void UiFeed::setWorldReady() {
@@ -94,10 +92,6 @@ void UiFeed::beat() {
     beatAt_ = std::chrono::steady_clock::now();
 }
 
-void UiFeed::setConnection(const Connection& connection) {
-    const std::lock_guard guard{mutex_};
-    connection_ = connection;
-}
 
 void UiFeed::pushChat(shared::ChatKind kind, std::string text) {
     const std::lock_guard guard{mutex_};
@@ -120,15 +114,27 @@ void UiFeed::setInput(bool active, std::string text) {
     inputText_ = std::move(text);
 }
 
-void UiFeed::setConsoleVisible(bool visible) {
+
+std::vector<UiFeed::Line> UiFeed::takeConsole() {
     const std::lock_guard guard{mutex_};
-    consoleVisible_ = visible;
+    return std::exchange(console_, {});
 }
 
-void UiFeed::forgetDelivered() {
+void UiFeed::setMenuOpen(bool open) {
     const std::lock_guard guard{mutex_};
-    sessionChanged_ = true;
+    menuOpen_ = open;
 }
+
+bool UiFeed::menuOpen() const {
+    const std::lock_guard guard{mutex_};
+    return menuOpen_;
+}
+
+void UiFeed::setGameMenuOpen(bool open) {
+    const std::lock_guard guard{mutex_};
+    gameMenuOpen_ = open;
+}
+
 
 std::string UiFeed::takeUpdate() {
     const std::lock_guard guard{mutex_};
@@ -140,29 +146,13 @@ std::string UiFeed::takeUpdate() {
                        std::chrono::steady_clock::now() - beatAt_ < kTickTimeout;
 
     std::string message = std::format(
-        R"({{"connection":{},"troubled":{},)"
-        R"("consoleVisible":{},"inputActive":{},"inputText":"{}",)"
-        R"("stage":{},"ready":{},"alive":{},)"
-        R"("disconnect":{},"disconnectDetail":"{}")",
-        connection_.state, connection_.troubled ? 1 : 0, consoleVisible_ ? 1 : 0,
-        inputActive_ ? 1 : 0, escape(inputText_), static_cast<unsigned int>(stage_),
-        ready_ ? 1 : 0, alive ? 1 : 0, connection_.disconnect,
-        escape(connection_.disconnectDetail));
-
-    if (sessionChanged_) {
-        sessionChanged_ = false;
-        message += std::format(R"(,"address":"{}","nickname":"{}")", escape(address_),
-                               escape(nickname_));
-    }
+        R"({{"inputActive":{},"inputText":"{}","ready":{},"alive":{},"menu":{})",
+        inputActive_ ? 1 : 0, escape(inputText_), ready_ ? 1 : 0, alive ? 1 : 0,
+        (menuOpen_ || gameMenuOpen_) ? 1 : 0);
 
     if (!chat_.empty()) {
         message += std::format(R"(,"chat":{})", linesToJson(chat_));
         chat_.clear();
-    }
-
-    if (!console_.empty()) {
-        message += std::format(R"(,"console":{})", linesToJson(console_));
-        console_.clear();
     }
 
     message += '}';

@@ -40,6 +40,9 @@ public:
     /// Escape при этом остаётся игре и странице: страница закрывает им свои
     /// разговоры, а игра — своё меню паузы.
     ///
+    /// console зовётся по F8 и означает «игрок просит консоль». Консоль живёт на
+    /// той же странице и открывается поверх меню, открытого или закрытого.
+    ///
     /// quit зовётся по Alt+F4 и означает «игрок просит выйти из игры». Отбирается
     /// это сочетание у игры намеренно: у неё на него свой разговор с вопросом
     /// «выйти?», а выход из oxyMP один и тот же — тот, которым выходит меню.
@@ -47,6 +50,7 @@ public:
                                                             cefui::Browser& browser,
                                                             std::function<bool()> wanted,
                                                             std::function<void()> toggle,
+                                                            std::function<void()> console,
                                                             std::function<void()> quit,
                                                             std::string& error);
 
@@ -122,6 +126,7 @@ private:
     cefui::Browser* browser_ = nullptr;
     std::function<bool()> wanted_;
     std::function<void()> toggle_;
+    std::function<void()> console_;
     std::function<void()> quit_;
 
     /// Было ли меню открыто в прошлое сообщение.

@@ -65,6 +65,13 @@ struct ServerWelcome {
     Vec3 spawnPosition;
     std::uint16_t tickRate = kDefaultTickRate;
 
+    /// Как сервер себя называет.
+    ///
+    /// Приходит в приветствии, а не спрашивается отдельно: имя нужно ровно
+    /// тому, кто уже вошёл, и лишнего разговора ради одной строки не стоит.
+    /// Меню показывает его вместо адреса — так же, как alt:V.
+    std::string name;
+
     void write(ByteWriter& writer) const;
     [[nodiscard]] static ServerWelcome read(ByteReader& reader);
 };

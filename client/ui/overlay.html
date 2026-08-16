@@ -54,8 +54,6 @@
     cursor: none;
   }
 
-  body:not(.console) .console-view { display: none; }
-
   /* --- Чат --------------------------------------------------------------- */
 
   /* Сделан по образцу RAGE MP, и вплоть до мелочей: левый верхний угол, десяток
@@ -81,6 +79,13 @@
 
   body:not(.ready) .chat,
   body:not(.alive) .chat { display: none; }
+
+  /* Под меню — своим или игровым — не рисуется ничего.
+     Чат поверх меню читается как второй разговор поверх первого, а нужен он
+     ровно там, где идёт игра. Прежде это выводилось из давности последнего
+     кадра: меню паузы останавливает мир, а с ним и наш тик. Вывод оказался
+     неверным — тик идёт, и чат оставался лежать поверх игрового меню. */
+  body.menu .chat { display: none; }
 
   /* Пустой чат не рисуется вовсе: тёмный прямоугольник без единой строки
      закрывал бы собой угол экрана просто так. */
@@ -126,48 +131,6 @@
   }
   @keyframes blink { 50% { opacity: 0; } }
 
-  /* --- Консоль ---------------------------------------------------------- */
-
-  /* Только чтение и только по F8 — ровно как встроенная консоль RAGE MP.
-     Набирать в ней нечего: команд у клиента нет, а те, что есть у режима, идут
-     через чат. */
-  .console-view {
-    position: fixed;
-    inset: 0;
-    padding: 26px 30px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    background: rgba(6, 8, 11, .93);
-  }
-
-  .console-view header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
-  }
-
-  .console-view h3 { margin: 0; font-size: 15px; font-weight: 600; }
-
-  .console-view .hint { font-size: 11px; color: var(--muted); }
-
-  .log {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    font: 12px/1.55 "Cascadia Mono", Consolas, monospace;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-  }
-
-  .log div { white-space: pre-wrap; word-break: break-word; color: #b9c3d4; }
-  .log .warn { color: #ffcc66; }
-  .log .err  { color: var(--bad); }
-  .log .dbg  { color: #6d7688; }
-
 </style>
 </head>
 <body>
@@ -177,27 +140,14 @@
   <div class="entry"><span id="typed"></span><span class="caret"></span></div>
 </div>
 
-<div class="console-view">
-  <header>
-    <h3>Консоль oxyMP</h3>
-    <span class="hint">F8 — закрыть</span>
-  </header>
-  <div class="log" id="log"></div>
-</div>
-
 <script>
   const KIND = ['say', 'join', 'leave', 'system'];
-
-  // Уровни spdlog: trace, debug, info, warn, err, critical, off.
-  const LEVEL = ['dbg', 'dbg', '', 'warn', 'err', 'err', ''];
 
   // Сколько строк держится на экране. Столько же держит чат RAGE MP: больше не
   // нужно — чат читают на ходу, а историю целиком хранит журнал клиента.
   const CHAT_KEEP = 12;
-  const LOG_KEEP = 400;
 
   const lines = document.getElementById('lines');
-  const log = document.getElementById('log');
 
   function append(box, text, className, keep) {
     const row = document.createElement('div');
@@ -222,13 +172,9 @@
         document.body.classList.add('has-chat');
       }
 
-      for (const line of s.console || []) {
-        append(log, line.text, LEVEL[line.kind] || '', LOG_KEEP);
-      }
-
+      document.body.classList.toggle('menu', !!s.menu);
       document.body.classList.toggle('ready', !!s.ready);
       document.body.classList.toggle('alive', !!s.alive);
-      document.body.classList.toggle('console', !!s.consoleVisible);
       document.body.classList.toggle('typing', !!s.inputActive);
       document.getElementById('typed').textContent = s.inputText || '';
     }

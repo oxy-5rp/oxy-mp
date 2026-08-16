@@ -250,6 +250,14 @@ struct UiLayer::State {
         spdlog::debug("страница интерфейса подогнана: {}x{}", wanted, high);
     }
 
+    /// Нужен ли странице ввод прямо сейчас.
+    ///
+    /// Не то же самое, что «открыто меню»: консоль страницы живёт поверх меню и
+    /// вне его — открытая при закрытом меню, она всё равно принимает набор.
+    [[nodiscard]] bool pageWantsInput() const {
+        return menu != nullptr && (menu->opened() || menu->consoleOpen());
+    }
+
     /// Ставит перехват ввода, как только окно игры появилось.
     void catchInput() {
         if (input != nullptr || menu == nullptr || menuSurface.browser == nullptr) {
@@ -264,8 +272,8 @@ struct UiLayer::State {
         std::string error;
 
         input = MenuInput::install(
-            game, *menuSurface.browser, [this] { return menu->opened(); },
-            [this] { menu->toggle(); }, quit, error);
+            game, *menuSurface.browser, [this] { return pageWantsInput(); },
+            [this] { menu->toggle(); }, [this] { menu->toggleConsole(); }, quit, error);
 
         if (input == nullptr) {
             spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);
@@ -286,7 +294,21 @@ struct UiLayer::State {
         while (!stopped.load()) {
             fitToWindow();
             catchInput();
+
+            // Про открытое меню знают все, кому это важно: свой слой по нему
+            // прячется, игровая сессия по нему отбирает у игры ввод.
+            feed->setMenuOpen(pageWantsInput());
+
             overlay.browser->post(feed->takeUpdate());
+
+            // Журнал уходит в консоль страницы. Своей консоли у клиента больше
+            // нет: у страницы alt:V она есть, умеет больше и открывается той же
+            // клавишей.
+            if (menu != nullptr) {
+                for (const UiFeed::Line& line : feed->takeConsole()) {
+                    menu->pushLog(line.kind, line.text);
+                }
+            }
 
             // Ожидание разбито на короткие доли, и между ними разбирается
             // очередь сообщений. Это не украшение: низкоуровневый перехват

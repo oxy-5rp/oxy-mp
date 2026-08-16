@@ -22,6 +22,7 @@ void ServerWelcome::write(ByteWriter& writer) const {
     writer.writeU32(playerId);
     writer.writeVec3(spawnPosition);
     writer.writeU16(tickRate);
+    writer.writeString(name);
 }
 
 ServerWelcome ServerWelcome::read(ByteReader& reader) {
@@ -29,6 +30,7 @@ ServerWelcome ServerWelcome::read(ByteReader& reader) {
     message.playerId = reader.readU32();
     message.spawnPosition = reader.readVec3();
     message.tickRate = reader.readU16();
+    message.name = reader.readString();
     return message;
 }
 

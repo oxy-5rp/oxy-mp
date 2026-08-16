@@ -323,6 +323,12 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // ничего, и сменить это одной строкой в server.cfg.
     welcome.spawnPosition = config_.spawnPosition;
     welcome.tickRate = shared::kDefaultTickRate;
+
+    // Имя сервера — то, что игрок увидит в меню вместо адреса. Знает его один
+    // только сервер: в адресе его нет, а каталога, где спросить, у oxyMP тоже
+    // нет.
+    welcome.name = config_.name;
+
     sendTo(peer, welcome);
 
     // Деньги — сразу за приветствием: до них клиент показывает прочерк, и чем

@@ -1,5 +1,7 @@
 #include "world_hold.hpp"
 
+#include "code_patch.hpp"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -52,81 +54,6 @@ constexpr std::size_t kWriteImmediateOffset = 6;
 constexpr std::uint8_t kCallOpcode = 0xE8;
 constexpr std::uint8_t kNop = 0x90;
 constexpr std::size_t kCallLength = 5;
-
-/// Переходник: `mov rax, адрес; jmp rax`.
-///
-/// Нужен затем, что `call rel32` дотягивается только на два гигабайта, а наш
-/// модуль Windows кладёт в память где ей вздумается — рядом с игрой он
-/// оказывается разве что случайно. Поэтому вызов идёт не к нам, а в клочок
-/// памяти, выделенный рядом с самой игрой, и уже он прыгает по полному адресу.
-constexpr std::uint8_t kThunkTemplate[] = {
-    0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, imm64
-    0xFF, 0xE0,                         // jmp rax
-};
-
-/// Смещение адреса внутри переходника.
-constexpr std::size_t kThunkAddressOffset = 2;
-
-/// Насколько далеко от игры соглашаемся выделить переходник.
-///
-/// Меньше двух гигабайт, и с запасом: смещение в `call rel32` знаковое, и
-/// упираться в самую его границу незачем.
-constexpr std::uintptr_t kThunkReach = 0x7000'0000;
-
-/// Пишет байты в код игры, открыв его на запись и закрыв обратно.
-[[nodiscard]] bool writeCode(void* where, const void* what, std::size_t size,
-                             std::string& error) {
-    DWORD previous = 0;
-    if (::VirtualProtect(where, size, PAGE_EXECUTE_READWRITE, &previous) == 0) {
-        error = std::format("не удалось открыть код игры для записи: код ошибки Windows {}",
-                            ::GetLastError());
-        return false;
-    }
-
-    std::memcpy(where, what, size);
-
-    DWORD restored = 0;
-    ::VirtualProtect(where, size, previous, &restored);
-
-    ::FlushInstructionCache(::GetCurrentProcess(), where, size);
-
-    return true;
-}
-
-/// Выделяет исполняемый клочок памяти в пределах досягаемости `call rel32`.
-[[nodiscard]] void* allocateNear(std::uintptr_t anchor, std::size_t size) {
-    SYSTEM_INFO info{};
-    ::GetSystemInfo(&info);
-
-    const std::uintptr_t step = info.dwAllocationGranularity;
-    if (step == 0) {
-        return nullptr;
-    }
-
-    // Шагаем от места записи в обе стороны: ближе — лучше, а какая из сторон
-    // окажется свободной, заранее не известно.
-    for (std::uintptr_t distance = step; distance < kThunkReach; distance += step) {
-        const std::uintptr_t candidates[] = {
-            anchor > distance ? (anchor - distance) & ~(step - 1) : 0,
-            (anchor + distance) & ~(step - 1),
-        };
-
-        for (const std::uintptr_t candidate : candidates) {
-            if (candidate == 0) {
-                continue;
-            }
-
-            void* const memory =
-                ::VirtualAlloc(reinterpret_cast<void*>(candidate), size, MEM_COMMIT | MEM_RESERVE,
-                               PAGE_EXECUTE_READWRITE);
-            if (memory != nullptr) {
-                return memory;
-            }
-        }
-    }
-
-    return nullptr;
-}
 
 } // namespace
 
@@ -265,22 +192,10 @@ std::unique_ptr<WorldHold> WorldHold::install(const EngineAddresses& addresses,
 
     std::memcpy(state->original, state->site, kWriteLength);
 
-    state->thunk =
-        allocateNear(reinterpret_cast<std::uintptr_t>(state->site), sizeof(kThunkTemplate));
+    state->thunk = code::makeThunk(reinterpret_cast<std::uintptr_t>(state->site),
+                                   reinterpret_cast<const void*>(&gameThreadHold), error);
     if (state->thunk == nullptr) {
-        error = "рядом с игрой не нашлось памяти под переходник";
         return nullptr;
-    }
-
-    {
-        std::uint8_t thunk[sizeof(kThunkTemplate)];
-        std::memcpy(thunk, kThunkTemplate, sizeof(thunk));
-
-        void (*const target)() = &gameThreadHold;
-        std::memcpy(thunk + kThunkAddressOffset, &target, sizeof(target));
-
-        std::memcpy(state->thunk, thunk, sizeof(thunk));
-        ::FlushInstructionCache(::GetCurrentProcess(), state->thunk, sizeof(thunk));
     }
 
     const auto site = reinterpret_cast<std::uintptr_t>(state->site);
@@ -302,9 +217,9 @@ std::unique_ptr<WorldHold> WorldHold::install(const EngineAddresses& addresses,
     // вправе прийти к нам в любой миг, и прийти ей нужно к готовому.
     active_ = state.get();
 
-    if (!writeCode(state->site, patch, sizeof(patch), error)) {
+    if (!code::write(state->site, patch, sizeof(patch), error)) {
         active_ = nullptr;
-        ::VirtualFree(state->thunk, 0, MEM_RELEASE);
+        code::release(state->thunk);
         return nullptr;
     }
 
@@ -337,13 +252,13 @@ WorldHold::~WorldHold() {
     }
 
     std::string error;
-    if (!writeCode(state_->site, state_->original, kWriteLength, error)) {
+    if (!code::write(state_->site, state_->original, kWriteLength, error)) {
         spdlog::error("не удалось вернуть запись состояния на место: {}", error);
     }
 
     active_ = nullptr;
 
-    ::VirtualFree(state_->thunk, 0, MEM_RELEASE);
+    code::release(state_->thunk);
 }
 
 void WorldHold::release() noexcept {

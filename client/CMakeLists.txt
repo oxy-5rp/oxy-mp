@@ -30,10 +30,15 @@ if(WIN32)
         src/game_session.cpp
         src/menu.cpp
         src/resource_cache.cpp
+        src/server_history.cpp
         src/ui_feed.cpp
         src/game/appearance.cpp
+        src/game/bink_sound.cpp
         src/game/controls.cpp
+        src/game/code_patch.cpp
         src/game/crash_log.cpp
+        src/game/custom_text.cpp
+        src/game/discord_block.cpp
         src/game/engine_addresses.cpp
         src/game/environment.cpp
         src/game/file_system.cpp

@@ -285,11 +285,13 @@ private:
     bool onlineMapEnabled_ = false;
 
     /// Показана ли консоль. Переключается по F8.
-    bool consoleVisible_ = false;
 
 
     /// Жаловались ли уже, что перехват клавиатуры не встал.
     bool textEntryFailed_ = false;
+
+    /// Сказали ли уже, что ввод у игры отобран открытым меню.
+    bool menuSuppressed_ = false;
 };
 
 } // namespace oxymp::client

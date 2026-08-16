@@ -1,5 +1,7 @@
 #include "menu.hpp"
 
+#include "server_history.hpp"
+
 #include <oxymp/cefui/browser.hpp>
 #include <oxymp/config/settings.hpp>
 #include <oxymp/config/skin.hpp>
@@ -8,6 +10,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -28,6 +32,9 @@ constexpr const char* kPageUrl = "http://ui/index.html";
 
 constexpr const char* kSettingsFile = "oxymp.toml";
 constexpr const char* kSkinFile = "skin.bin";
+
+/// Куда игрок заходил и что отметил звёздочкой.
+constexpr const char* kHistoryFile = "history.servers";
 
 /// Ветвь сборки. Страница показывает её рядом с версией.
 constexpr const char* kBranch = "release";
@@ -92,8 +99,18 @@ struct Menu::State {
     config::Settings settings;
     std::optional<config::Skin> skin;
 
+    /// История серверов. Правится из потока CEF, оттуда же и пишется.
+    ServerHistory history;
+
     /// Открыто ли меню. Читает поток игры — отсюда и счётчик вместо блокировки.
     std::atomic<bool> opened{true};
+
+    /// Открыта ли консоль страницы. Читается оттуда же и по той же причине.
+    ///
+    /// Ведётся у нас, а не спрашивается у страницы: открываем её мы, по F8, и
+    /// `ui:open` про неё ничего не говорит — она живёт поверх меню и вне его.
+    /// Страница сообщает обратно только о том, что закрыла её сама.
+    std::atomic<bool> consoleOpen{false};
 
     /// События страницы, на которые нам нечем ответить.
     ///
@@ -102,6 +119,7 @@ struct Menu::State {
     std::set<std::string, std::less<>> unanswered;
 
     [[nodiscard]] std::filesystem::path settingsPath() const { return directory / kSettingsFile; }
+    [[nodiscard]] std::filesystem::path historyPath() const { return directory / kHistoryFile; }
 
     /// Отдаёт странице событие с готовым списком доводов.
     ///
@@ -121,45 +139,34 @@ struct Menu::State {
     ///
     /// Отдельно от sendInitialState, потому что спрашивают его дважды: при
     /// загрузке страницы и по кнопке обновления на странице серверов.
-    [[nodiscard]] nlohmann::json recentServers() {
-        std::string lastAddress;
-        nlohmann::json recent = nlohmann::json::array();
+    [[nodiscard]] static nlohmann::json toJson(const std::vector<ServerHistory::Entry>& list) {
+        nlohmann::json array = nlohmann::json::array();
 
-        {
-            const std::lock_guard guard{mutex};
-
-            lastAddress = settings.text("lastip");
-
-            // Первым в недавних — тот сервер, на котором игрок был в прошлый
-            // раз. Это и есть «недавний» в прямом смысле слова; у alt:V список
-            // ровно такой. Прежде здесь были только серверы из оформления —
-            // то есть чужой выбор, а не свой, — и вернуться туда, откуда вышел,
-            // можно было только набрав адрес заново.
-            if (!lastAddress.empty()) {
-                recent.push_back(nlohmann::json{
-                    {"name", lastAddress},
-                    {"id", ""},
-                    {"url", lastAddress},
-                });
-            }
-
-            if (skin.has_value()) {
-                for (const config::Skin::Server& server : skin->servers) {
-                    // Тот же адрес дважды в списке ни к чему.
-                    if (server.address == lastAddress) {
-                        continue;
-                    }
-
-                    recent.push_back(nlohmann::json{
-                        {"name", server.name},
-                        {"id", server.id},
-                        {"url", server.address},
-                    });
-                }
-            }
+        for (const ServerHistory::Entry& entry : list) {
+            array.push_back(nlohmann::json{
+                {"name", entry.name},
+                {"id", entry.id},
+                {"url", entry.url},
+            });
         }
 
-        return recent;
+        return array;
+    }
+
+    [[nodiscard]] nlohmann::json recentServers() {
+        const std::lock_guard guard{mutex};
+
+        // История ведётся сама и лежит в history.servers рядом с клиентом.
+        // Прежде «недавним» звался ровно один адрес — `lastip` из настроек, — и
+        // список из одной строки был не историей, а её обещанием.
+        //
+        // Страница разворачивает присланное задом наперёд: она ждёт список от
+        // старых к новым, а у нас он от новых к старым. Разворачиваем здесь, а
+        // не там: в её исходники мы не пишем.
+        std::vector<ServerHistory::Entry> recent = history.recent();
+        std::ranges::reverse(recent);
+
+        return toJson(recent);
     }
 
     /// Отдаёт странице оба её списка серверов: недавние и общий.
@@ -171,7 +178,73 @@ struct Menu::State {
     /// список она показывает честной надписью «серверов нет».
     void sendServers() {
         emit("servers:recent:update", nlohmann::json::array({recentServers()}));
-        emit("servers:update", nlohmann::json::array({nlohmann::json::array()}));
+        emit("servers:favorite:update", nlohmann::json::array({favoriteServers()}));
+
+        // Общий список серверов — из оформления, если оно есть, и пустой, если
+        // нет. Своего каталога у oxyMP нет и не предвидится: некому его вести.
+        // Но послать список обязательно — пока `servers:update` не пришёл,
+        // страница держит его «загружающимся» и крутит колесо до конца запуска.
+        emit("servers:update", nlohmann::json::array({skinServers()}));
+    }
+
+    [[nodiscard]] nlohmann::json favoriteServers() {
+        const std::lock_guard guard{mutex};
+        return toJson(history.favorite());
+    }
+
+    /// Серверы из оформления — тот самый список, что показывает страница.
+    [[nodiscard]] nlohmann::json skinServers() {
+        const std::lock_guard guard{mutex};
+
+        nlohmann::json array = nlohmann::json::array();
+        if (!skin.has_value()) {
+            return array;
+        }
+
+        for (const config::Skin::Server& server : skin->servers) {
+            // Поля те же, что у страницы: она ждёт узел и порт отдельно, а у нас
+            // адрес один строкой. Порт отделяется по последнему двоеточию — так
+            // же, как его отделяет клиент при подключении.
+            std::string host = server.address;
+            int port = 0;
+
+            if (const std::size_t colon = host.rfind(':'); colon != std::string::npos) {
+                port = std::atoi(host.c_str() + colon + 1);
+                host.resize(colon);
+            }
+
+            // Поля перечислены все, какие ждёт страница, и пустые — тоже: она
+            // читает их без проверки, и отсутствующее поле превратилось бы у неё
+            // в `undefined` посреди разметки.
+            array.push_back(nlohmann::json{
+                {"id", server.id},
+                {"name", server.name},
+                {"host", host},
+                {"port", port},
+                {"players", 0},
+                {"maxPlayers", 0},
+                {"locked", false},
+                {"gameMode", ""},
+                {"website", ""},
+                {"language", ""},
+                {"description", ""},
+                {"verified", false},
+                {"promoted", false},
+                {"useEarlyAuth", false},
+                {"earlyAuthUrl", ""},
+                {"useCdn", false},
+                {"cdnUrl", ""},
+                {"useVoiceChat", false},
+                {"tags", nlohmann::json::array()},
+                {"bannerUrl", ""},
+                {"branch", "release"},
+                {"build", 0},
+                {"version", ""},
+                {"lastUpdate", 0},
+            });
+        }
+
+        return array;
     }
 
     /// Отдаёт странице перечень устройств записи.
@@ -328,6 +401,32 @@ struct Menu::State {
             return;
         }
 
+        if (name == "servers:favorite:add") {
+            addFavorite(arguments);
+            return;
+        }
+
+        if (name == "servers:favorite:remove") {
+            removeFavorite(arguments);
+            return;
+        }
+
+        if (name == "console:setState") {
+            // Страница закрыла консоль сама — например уведя её в прозрачный
+            // вид. Не узнав об этом, мы держали бы клавиатуру у страницы, а игра
+            // осталась бы без управления.
+            const bool open = !arguments.empty() && arguments[0].is_boolean() &&
+                              arguments[0].get<bool>();
+
+            consoleOpen.store(open);
+            return;
+        }
+
+        if (name == "console:execute") {
+            executeConsoleLine(arguments);
+            return;
+        }
+
         // Прочее страница шлёт по своему устройству — обновить список серверов,
         // перечислить устройства записи, выполнить строку в консоли. Отвечать ей
         // пока нечем, и молчание здесь честнее выдуманного ответа.
@@ -370,15 +469,34 @@ struct Menu::State {
         const std::string password =
             arguments.size() > 1 && arguments[1].is_string() ? arguments[1].get<std::string>() : "";
 
+        // Страница присылает следом опознаватель и имя сервера, если знает их, —
+        // то есть когда игрок выбрал сервер из списка, а не набрал адрес руками.
+        const std::string id =
+            arguments.size() > 2 && arguments[2].is_string() ? arguments[2].get<std::string>() : "";
+        const std::string name =
+            arguments.size() > 3 && arguments[3].is_string() ? arguments[3].get<std::string>() : "";
+
         {
             // Адрес запоминается до попытки, а не после успеха: игрок, у
             // которого сервер не поднялся, при следующем запуске увидит тот же
-            // адрес и попробует снова, а не станет набирать его заново.
+            // адрес и попробует снова, а не станет набирать его заново. По той
+            // же причине сюда же попадает и история.
             const std::lock_guard guard{mutex};
 
             settings.set("lastip", std::string_view{address});
             settings.save(settingsPath());
+
+            history.visited(ServerHistory::Entry{
+                .name = name.empty() ? address : name,
+                .id = id,
+                .url = address,
+            });
+            history.save(historyPath());
         }
+
+        // Список недавних меняется прямо сейчас — страница должна увидеть это
+        // сразу, а не при следующем запуске.
+        sendServers();
 
         if (actions.connect) {
             actions.connect(address, password);
@@ -409,6 +527,75 @@ struct Menu::State {
         }
     }
 
+    /// Отмечает сервер звёздочкой. Страница присылает опознаватель и имя.
+    void addFavorite(const nlohmann::json& arguments) {
+        if (arguments.empty() || !arguments[0].is_string()) {
+            return;
+        }
+
+        ServerHistory::Entry entry;
+        entry.id = arguments[0].get<std::string>();
+        entry.name = arguments.size() > 1 && arguments[1].is_string()
+                         ? arguments[1].get<std::string>()
+                         : entry.id;
+
+        {
+            const std::lock_guard guard{mutex};
+
+            // Адрес берётся из оформления: страница его не присылает, а без него
+            // по звёздочке некуда было бы вернуться.
+            if (skin.has_value()) {
+                for (const config::Skin::Server& server : skin->servers) {
+                    if (server.id == entry.id) {
+                        entry.url = server.address;
+                        break;
+                    }
+                }
+            }
+
+            history.addFavorite(std::move(entry));
+            history.save(historyPath());
+        }
+
+        sendServers();
+    }
+
+    void removeFavorite(const nlohmann::json& arguments) {
+        if (arguments.empty() || !arguments[0].is_string()) {
+            return;
+        }
+
+        {
+            const std::lock_guard guard{mutex};
+
+            history.removeFavorite(arguments[0].get<std::string>());
+            history.save(historyPath());
+        }
+
+        sendServers();
+    }
+
+    /// Исполняет строку, набранную в консоли страницы.
+    ///
+    /// Отправляется она в чат — тем же путём, каким игрок отправил бы её сам.
+    /// Своих правил игры у клиента нет и не должно появиться (см. CLAUDE.md), а
+    /// команды принадлежат ресурсам сервера: `/help` разбирает он. Строка,
+    /// уходящая в никуда, была бы хуже — набранная команда молча пропадала бы.
+    void executeConsoleLine(const nlohmann::json& arguments) {
+        if (arguments.empty() || !arguments[0].is_string()) {
+            return;
+        }
+
+        std::string line = arguments[0].get<std::string>();
+        if (line.empty()) {
+            return;
+        }
+
+        if (actions.say) {
+            actions.say(std::move(line));
+        }
+    }
+
     void resetSkin() {
         {
             const std::lock_guard guard{mutex};
@@ -435,6 +622,7 @@ std::unique_ptr<Menu> Menu::create(cefui::Browser& browser, std::filesystem::pat
 
     state.settings = config::Settings::load(state.settingsPath());
     state.skin = config::Skin::load(state.directory / kSkinFile);
+    state.history = ServerHistory::load(state.historyPath());
 
     // Подписка раньше загрузки: страница шлёт `loaded` в конце своего запуска, и
     // подпишись мы после — первое же её слово ушло бы в никуда.
@@ -459,6 +647,56 @@ bool Menu::opened() const noexcept {
     return state_ != nullptr && state_->opened.load();
 }
 
+bool Menu::consoleOpen() const noexcept {
+    return state_ != nullptr && state_->consoleOpen.load();
+}
+
+void Menu::toggleConsole() {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    // Своим счётчиком, а не просьбой перевернуть: страница отвечает о консоли
+    // только тогда, когда закрывает её сама, и переворот вслепую разошёлся бы с
+    // ней при первом же таком случае.
+    const bool open = !state_->consoleOpen.load();
+    state_->consoleOpen.store(open);
+
+    state_->emit("console:open", nlohmann::json::array({open}));
+}
+
+void Menu::pushLog(unsigned int level, std::string_view text) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    // Строка собирается из двух событий: `console:push` кладёт кусок в буфер,
+    // `console:end` закрывает строку и приписывает ей источник и важность. Так
+    // устроена консоль страницы — она умеет раскрашивать строку по кускам, а нам
+    // раскрашивать нечего: у журнала цвет один на строку.
+    constexpr int kWhite = 14;
+
+    // Уровни spdlog: trace, debug, info, warn, err, critical, off. Виды строк у
+    // страницы: 0 обычная, 1 предупреждение, 2 ошибка, 3 отладочная.
+    const int kind = [level] {
+        switch (level) {
+        case 0:
+        case 1:
+            return 3;
+        case 3:
+            return 1;
+        case 4:
+        case 5:
+            return 2;
+        default:
+            return 0;
+        }
+    }();
+
+    state_->emit("console:push", nlohmann::json::array({kWhite, std::string{text}}));
+    state_->emit("console:end", nlohmann::json::array({"oxymp", kind}));
+}
+
 std::string Menu::playerName() const {
     if (state_ == nullptr) {
         return {};
@@ -478,17 +716,43 @@ void Menu::toggle() {
     }
 }
 
-void Menu::connecting(std::string_view address) {
+void Menu::connecting(std::string_view name) {
     if (state_ != nullptr) {
-        state_->emit("connection:setServer",
-                     nlohmann::json::array({nlohmann::json{{"name", address}, {"url", address}}}));
+        // Строкой, а не объектом. Объект здесь был, и страница показывала его
+        // как есть — игрок видел в заголовке `{"name":"127.0.0.1:7788",...}`.
+        // Она ждёт именно строку и подставляет её в заголовок без разбора.
+        state_->emit("connection:setServer", nlohmann::json::array({std::string{name}}));
         state_->emit("connection:connecting");
+    }
+}
+
+void Menu::nameServer(std::string_view name) {
+    if (state_ != nullptr) {
+        state_->emit("connection:setServer", nlohmann::json::array({std::string{name}}));
+    }
+}
+
+void Menu::validatingResources(std::size_t done, std::size_t total) {
+    if (state_ != nullptr) {
+        state_->emit("connection:validatingResources", nlohmann::json::array({done, total}));
+    }
+}
+
+void Menu::downloadingResources(std::size_t done, std::size_t total) {
+    if (state_ != nullptr) {
+        state_->emit("connection:downloadingResources", nlohmann::json::array({done, total}));
     }
 }
 
 void Menu::loadingResources() {
     if (state_ != nullptr) {
         state_->emit("connection:startingResources");
+    }
+}
+
+void Menu::startingGame(unsigned int stage, unsigned int stages) {
+    if (state_ != nullptr) {
+        state_->emit("connection:startingGame", nlohmann::json::array({stage, stages}));
     }
 }
 

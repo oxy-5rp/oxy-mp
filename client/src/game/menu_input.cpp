@@ -160,6 +160,7 @@ constexpr int kMaxLayouts = 16;
 std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& browser,
                                               std::function<bool()> wanted,
                                               std::function<void()> toggle,
+                                              std::function<void()> console,
                                               std::function<void()> quit, std::string& error) {
     if (window == nullptr) {
         error = "окна игры нет: ввод для меню не перехватить";
@@ -177,6 +178,7 @@ std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& brows
     input->browser_ = &browser;
     input->wanted_ = std::move(wanted);
     input->toggle_ = std::move(toggle);
+    input->console_ = std::move(console);
     input->quit_ = std::move(quit);
 
     // Указатель ставится раньше подмены: подменённый обработчик вправе получить
@@ -373,6 +375,13 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
         return true;
     }
 
+    if (key == VK_F8) {
+        if (down && console_) {
+            console_();
+        }
+        return true;
+    }
+
     // Смена раскладки — своим кругом, тем же, что и у низкоуровневого перехвата.
     if (down && isLayoutSwitch(key)) {
         layout_ = nextLayout(layout_ == nullptr ? foregroundLayout() : layout_);
@@ -441,6 +450,15 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     if (key == VK_F1) {
         if (down && toggle_) {
             toggle_();
+        }
+        return true;
+    }
+
+    // F8 — консоль страницы. Тоже в обе стороны и независимо от меню: консоль
+    // живёт поверх него и вне его.
+    if (key == VK_F8) {
+        if (down && console_) {
+            console_();
         }
         return true;
     }
@@ -602,6 +620,18 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
     }
 
     if (message == WM_KEYUP && wparam == VK_F1) {
+        return 0;
+    }
+
+    if (message == WM_KEYDOWN && wparam == VK_F8) {
+        if (console_) {
+            console_();
+        }
+
+        return 0;
+    }
+
+    if (message == WM_KEYUP && wparam == VK_F8) {
         return 0;
     }
 

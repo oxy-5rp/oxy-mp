@@ -179,7 +179,7 @@ std::vector<std::uint8_t> ResourceCache::download(const std::string& url,
 
 std::vector<ResourceCache::Ready> ResourceCache::sync(
     const std::string& serverAddress, std::uint16_t serverPort,
-    const std::vector<shared::ResourceEntry>& wanted) {
+    const std::vector<shared::ResourceEntry>& wanted, const Progress& report) {
     std::vector<Ready> ready;
 
     if (wanted.empty()) {
@@ -190,13 +190,22 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
     spdlog::info("сервер предлагает ресурсов: {}", wanted.size());
 
+    std::size_t done = 0;
+
     for (const shared::ResourceEntry& entry : wanted) {
         // Расшифрованное лежит под отпечатком, а не под именем: имя у разных
         // серверов может совпасть при разном содержимом, отпечаток — нет.
         const std::filesystem::path unpacked = directory_ / (entry.hash + "-" + entry.name);
 
         std::error_code ec;
-        if (std::filesystem::exists(unpacked, ec)) {
+        const bool cached = std::filesystem::exists(unpacked, ec);
+
+        if (report) {
+            report(done, wanted.size(), !cached);
+        }
+        ++done;
+
+        if (cached) {
             spdlog::info("ресурс {} уже есть", entry.name);
             ready.push_back(Ready{.name = entry.name, .path = unpacked});
             continue;

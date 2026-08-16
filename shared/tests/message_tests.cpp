@@ -57,6 +57,7 @@ TEST_CASE("ServerWelcome survives a round trip", "[messages]") {
     sent.playerId = 42;
     sent.spawnPosition = Vec3{-1234.5F, 567.25F, 88.0F};
     sent.tickRate = 30;
+    sent.name = "Тестовый сервер";
 
     const auto received = roundTrip(sent);
 
@@ -64,6 +65,7 @@ TEST_CASE("ServerWelcome survives a round trip", "[messages]") {
     CHECK(received->playerId == 42);
     CHECK(received->spawnPosition == sent.spawnPosition);
     CHECK(received->tickRate == 30);
+    CHECK(received->name == "Тестовый сервер");
 }
 
 TEST_CASE("ServerReject survives a round trip", "[messages]") {

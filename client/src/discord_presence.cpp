@@ -1,5 +1,7 @@
 #include "discord_presence.hpp"
 
+#include "game/discord_block.hpp"
+
 #include <spdlog/spdlog.h>
 
 #include <array>
@@ -100,6 +102,10 @@ void DiscordPresence::disconnect() {
 bool DiscordPresence::connect() {
     for (int index = 0; index < kPipeCount; ++index) {
         const std::wstring name = std::format(L"\\\\.\\pipe\\discord-ipc-{}", index);
+
+        // Метка «свой»: показ игры в Discord мы затыкаем перехватом этого же
+        // вызова, и без метки заткнули бы заодно и себя.
+        const game::DiscordBlock::Ours ours;
 
         const HANDLE pipe = ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                           OPEN_EXISTING, 0, nullptr);
@@ -204,16 +210,22 @@ bool DiscordPresence::send(std::uint32_t opcode, const std::string& payload) {
 }
 
 std::string DiscordPresence::describe(const Presence& presence) const {
-    const std::string server =
-        presence.server.empty() ? std::string{"неизвестно"} : escape(presence.server);
-
     // Первая строка — где играет, вторая — кто и сколько народу. Порядок не
     // случаен: Discord показывает первую крупнее, а на вопрос «куда зайти, чтобы
     // играть вместе» отвечает именно адрес.
-    const std::string details = std::format("Сервер {}", server);
+    //
+    // Показ идёт и до всякого сервера: игрок, выбирающий его в меню, уже
+    // запустил oxyMP. Прежде показ начинался с первой попытки подключения, и
+    // человек, стоящий в меню, для Discord не играл ни во что.
+    const std::string details =
+        presence.inMenu ? std::string{"В меню"}
+                        : std::format("Сервер {}", presence.server.empty()
+                                                       ? std::string{"неизвестно"}
+                                                       : escape(presence.server));
 
     const std::string state =
-        presence.connected
+        presence.inMenu ? std::string{"Выбирает сервер"}
+        : presence.connected
             ? std::format("ID {} · Игроков: {}", presence.playerId, presence.players)
             : std::string{"Подключение…"};
 

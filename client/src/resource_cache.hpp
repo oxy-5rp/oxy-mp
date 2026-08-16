@@ -3,6 +3,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,15 @@ public:
         std::filesystem::path path;
     };
 
+    /// Как идут дела: сколько ресурсов разобрано из скольких и качаем ли мы
+    /// прямо сейчас.
+    ///
+    /// Нужен затем, что закачка занимает столько, сколько занимает, а меню всё
+    /// это время показывает одну строку. Различать сверку и закачку обязательно:
+    /// первая проходит мгновенно, вторая — минутами, и одно слово на обе
+    /// означало бы «зависло» ровно в том случае, когда всё идёт хорошо.
+    using Progress = std::function<void(std::size_t done, std::size_t total, bool downloading)>;
+
     /// Заводит кеш в указанном каталоге. Каталог создаётся при надобности.
     explicit ResourceCache(std::filesystem::path directory);
 
@@ -47,7 +57,8 @@ public:
     /// обойтись без него, а не отказаться играть.
     [[nodiscard]] std::vector<Ready> sync(const std::string& serverAddress,
                                           std::uint16_t serverPort,
-                                          const std::vector<shared::ResourceEntry>& wanted);
+                                          const std::vector<shared::ResourceEntry>& wanted,
+                                          const Progress& report);
 
 private:
     /// Качает один ресурс. Возвращает зашифрованное содержимое.

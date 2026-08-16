@@ -481,8 +481,10 @@ void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
     nextPingAt_ = Clock::now();
     nextStateAt_ = Clock::now();
 
-    spdlog::info("сервер принял: наш id {}, темп {} тактов в секунду", welcome.playerId,
-                 welcome.tickRate);
+    serverName_ = welcome.name;
+
+    spdlog::info("сервер принял: наш id {}, темп {} тактов в секунду, имя \"{}\"",
+                 welcome.playerId, welcome.tickRate, welcome.name);
 }
 
 void Connection::handleReject(const shared::ServerReject& reject) {

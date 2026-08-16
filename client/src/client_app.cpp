@@ -6,7 +6,10 @@
 #include "session_mail.hpp"
 #include "ui_feed.hpp"
 
+#include "game/bink_sound.hpp"
 #include "game/crash_log.hpp"
+#include "game/custom_text.hpp"
+#include "game/discord_block.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/environment.hpp"
 #include "game/file_system.hpp"
@@ -338,6 +341,12 @@ constexpr const char* kDiscordClientId = "1526620827586658455";
 
 /// Как называется окно игры, пока в ней работает oxyMP.
 constexpr const char* kWindowTitle = "oxy:Multiplayer";
+
+/// Как называется сам oxyMP там, где на него смотрит игрок.
+///
+/// Прежде всего — в меню паузы самой игры: там стояло «GTA ONLINE», и это была
+/// неправда. Игрок в нашей сессии, а не в чужой.
+constexpr const char* kProductName = "Oxy Multiplayer";
 
 /// Сколько сервер вправе молчать, прежде чем об этом стоит сказать игроку.
 ///
@@ -672,7 +681,13 @@ enum class MenuStage {
     /// Ещё ничего не сказано либо сказано «подключаемся к серверу».
     Connecting,
 
-    /// Сказано «идёт вход в игру»: сервер принял, мир грузится.
+    /// Сказано «ресурсы»: идёт сверка и закачка того, что предложил сервер.
+    Resources,
+
+    /// Сказано «грузим игру»: сервер принял, мир грузится. Самая долгая часть.
+    Starting,
+
+    /// Сказано «входим в мир»: мир загружен, идёт появление персонажа.
     Joining,
 
     Connected,
@@ -689,14 +704,33 @@ enum class MenuStage {
 /// Разница в минуты: сеть отвечает за доли секунды, а игрок в это время ещё едет
 /// по загрузке, и меню, убранное по сетевому признаку, открыло бы ему пустой мир
 /// без персонажа.
-void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed, MenuStage& stage) {
+/// Сколько стадий у входа в мир. Столько же значений у shared::LoadStage.
+constexpr unsigned int kLoadStages = 6;
+
+/// Что меню уже знает о ходе подключения.
+///
+/// Одной записью, а не тремя отдельными переменными: все три меняются вместе и
+/// нужны одному и тому же разговору.
+struct MenuProgress {
+    /// О чём говорили последним.
+    MenuStage stage = MenuStage::Connecting;
+
+    /// На каком делении полосы «грузим игру» остановились.
+    unsigned int loadStage = 0;
+
+    /// Назвали ли странице имя сервера. Оно приходит однажды, с приветствием.
+    bool named = false;
+};
+
+void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed,
+              MenuProgress& progress) {
     if (menu == nullptr) {
         return;
     }
 
     if (connection.state() == ConnectionState::Rejected) {
-        if (stage != MenuStage::Failed) {
-            stage = MenuStage::Failed;
+        if (progress.stage != MenuStage::Failed) {
+            progress.stage = MenuStage::Failed;
 
             menu->failed(connection.rejectReason().has_value()
                              ? describe(*connection.rejectReason())
@@ -707,9 +741,9 @@ void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed, Menu
 
     // Игрок был в сессии и остался без неё. Повторные попытки идут своим чередом,
     // и удавшаяся скажет «подключились» заново.
-    if (stage == MenuStage::Connected &&
+    if (progress.stage == MenuStage::Connected &&
         connection.disconnectReason() == DisconnectReason::Lost) {
-        stage = MenuStage::Lost;
+        progress.stage = MenuStage::Lost;
         menu->disconnected("связь с сервером потеряна");
         return;
     }
@@ -718,19 +752,43 @@ void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed, Menu
         return;
     }
 
+    // Имя сервера — то, что он назвал сам. До приветствия в заголовке стоит
+    // адрес: другого имени у нас в этот миг нет.
+    if (!progress.named && !connection.serverName().empty()) {
+        progress.named = true;
+        menu->nameServer(connection.serverName());
+    }
+
     if (!feed.ready()) {
-        // Сервер принял, мир ещё грузится. Строка на странице меняется с
-        // «подключаемся к серверу» на «входим в игру» — и висит там минуты,
-        // ровно столько, сколько идёт загрузка.
-        if (stage == MenuStage::Connecting) {
-            stage = MenuStage::Joining;
+        // Сервер принял, а игрок ещё не в мире. Это самая долгая часть — минуты,
+        // — и одной строкой на всю её длину дело не обходится: пока идёт
+        // загрузка, страница показывает ход по стадиям, а как только игрок
+        // появился в мире, говорит «входим в игру».
+        //
+        // Прежде здесь говорилось одно «входим в игру» на всё время, и игрок
+        // минутами смотрел на строку, по которой нельзя понять, идёт ли хоть
+        // что-нибудь.
+        if (!feed.playerInWorld()) {
+            const auto reached = static_cast<unsigned int>(feed.stage());
+
+            if (progress.stage != MenuStage::Starting || reached != progress.loadStage) {
+                progress.stage = MenuStage::Starting;
+                progress.loadStage = reached;
+
+                menu->startingGame(reached, kLoadStages);
+            }
+            return;
+        }
+
+        if (progress.stage != MenuStage::Joining) {
+            progress.stage = MenuStage::Joining;
             menu->joining();
         }
         return;
     }
 
-    if (stage != MenuStage::Connected) {
-        stage = MenuStage::Connected;
+    if (progress.stage != MenuStage::Connected) {
+        progress.stage = MenuStage::Connected;
         menu->connected();
     }
 }
@@ -811,14 +869,6 @@ void run() {
     // а не через разделяемую память, как до экрана загрузки.
     UiFeed feed;
 
-    // Адрес называется только тогда, когда он есть. Без него экран загрузки
-    // рассказывал бы игроку про 127.0.0.1 — умолчание, к которому мы никуда не
-    // идём: сервер выбирается в меню, и до выбора говорить нечего.
-    feed.describeSession(startup.addressGiven
-                             ? std::format("{}:{}", settings.address, settings.port)
-                             : std::string{},
-                         settings.nickname);
-
     // Ловушка падений ставится раньше всего остального: всё, что делает клиент
     // дальше, вправе уронить игру, и от этого мгновения в журнале должна
     // остаться строка, а не обрыв.
@@ -892,6 +942,49 @@ void run() {
         }
     }
 
+    // Надписи игры подменяются сразу за перехватами: в меню паузы у oxyMP не
+    // должно быть написано «GTA ONLINE» — игрок в нашей сессии, а не в чужой.
+    std::unique_ptr<game::CustomText> gameText;
+
+    if (engine != nullptr && hooksReady) {
+        std::string error;
+
+        gameText = game::CustomText::install(*engine, error);
+        if (gameText == nullptr) {
+            spdlog::error("надписи игры останутся её собственными: {}", error);
+        } else {
+            gameText->set("FE_THDR_GTAO", kProductName);
+            gameText->set("PM_PANE_LEAVE", "Отключиться");
+        }
+    }
+
+    // Звук вступительного ролика. Сам ролик убрать нельзя — правка, которая его
+    // убирала, останавливала загрузку мира, — а звук можно.
+    std::unique_ptr<game::BinkSound> binkSound;
+
+    if (hooksReady) {
+        std::string error;
+
+        binkSound = game::BinkSound::mute(error);
+        if (binkSound == nullptr) {
+            spdlog::warn("ролик прозвучит как прежде: {}", error);
+        }
+    }
+
+    // Показ игры в Discord затыкается независимо от движка: он идёт от Social
+    // Club, а опознание сигнатур ему не нужно вовсе — перехватывается обычная
+    // функция Windows. Нужен только сам механизм перехвата.
+    std::unique_ptr<game::DiscordBlock> discordBlock;
+
+    if (hooksReady) {
+        std::string error;
+
+        discordBlock = game::DiscordBlock::install(error);
+        if (discordBlock == nullptr) {
+            spdlog::error("показ игры в Discord останется: {}", error);
+        }
+    }
+
     // Интерфейс внутри кадра игры поднимается сразу за перехватами и раньше
     // всего остального, и это не вкусовщина, а единственный способ показать
     // экран загрузки вовремя.
@@ -909,6 +1002,14 @@ void run() {
     // Чего меню просит у сети. Объявлено раньше слоя интерфейса и переживает
     // его: обработчики страницы держат ссылку на эту запись.
     ConnectRequest request;
+
+    // Почта между этим потоком и игровым: реплики чата и попадания. Всё
+    // остальное между ними — состояние, у которого важно только последнее
+    // значение; здесь наоборот, каждое событие обязано дойти ровно один раз.
+    //
+    // Раньше слоя интерфейса и по той же причине: в неё кладёт строки консоль
+    // страницы, а её обработчики держат ссылку отсюда.
+    SessionMail mail;
 
     if (hooksReady) {
         std::string uiError;
@@ -951,6 +1052,11 @@ void run() {
 
         actions.disconnect = [&request] { request.askDisconnect(); };
 
+        // Строка из консоли страницы уходит в чат — тем же путём, каким игрок
+        // отправил бы её сам. Ничего сверх этого консоль не даёт и не должна:
+        // своих правил игры у клиента нет, команды разбирает сервер.
+        actions.say = [&mail](std::string text) { mail.postChat(std::move(text)); };
+
         // Журнал открывается тем, чем его открыл бы сам игрок, — блокнотом по
         // выбору Windows. Своего окна для чтения журнала клиент не заводит:
         // сотня строк текста в кадре игры хуже читается, чем в любом редакторе.
@@ -989,11 +1095,6 @@ void run() {
     // Обратное направление: сюда поток игры кладёт своё положение, а сетевой
     // забирает и отправляет серверу.
     LocalState localState;
-
-    // Почта между этим потоком и игровым: реплики чата и попадания. Всё
-    // остальное между ними — состояние, у которого важно только последнее
-    // значение; здесь наоборот, каждое событие обязано дойти ровно один раз.
-    SessionMail mail;
 
     std::unique_ptr<game::ScriptStartup> scriptStartup;
     std::unique_ptr<GameSession> session;
@@ -1066,7 +1167,7 @@ void run() {
     Connection::Settings active = settings;
 
     // Что меню уже знает о соединении.
-    MenuStage menuStage = MenuStage::Connecting;
+    MenuProgress menuProgress;
 
     while (!g_stopRequested.load()) {
         // Заголовок окна выправляется на каждом обороте, а не только при живом
@@ -1092,7 +1193,7 @@ void run() {
 
             status.update(ConnectionState::Waiting, shared::kInvalidPlayerId);
 
-            menuStage = MenuStage::Lost;
+            menuProgress = MenuProgress{.stage = MenuStage::Lost};
         }
 
         if (connection == nullptr) {
@@ -1107,6 +1208,12 @@ void run() {
             }
 
             if (!start) {
+                // Показ в Discord идёт и здесь, пока игрок выбирает сервер.
+                // Прежде он начинался с первой попытки подключения — то есть
+                // человек, стоящий в меню, для Discord не играл ни во что, а
+                // запустивший игру без сервера не играл вовсе никогда.
+                discord.update(Presence{.inMenu = true});
+
                 std::this_thread::sleep_for(std::chrono::milliseconds{50});
                 continue;
             }
@@ -1128,9 +1235,6 @@ void run() {
             // настройки, ни в журнал. Строка живёт ровно до конца попытки.
             active.password = start->password;
 
-            feed.describeSession(std::format("{}:{}", active.address, active.port),
-                                 active.nickname);
-
             if (menu != nullptr) {
                 menu->connecting(start->address);
             }
@@ -1150,7 +1254,7 @@ void run() {
             connection = std::make_unique<Connection>(active);
 
             connectionStartedAt = std::chrono::steady_clock::now();
-            menuStage = MenuStage::Connecting;
+            menuProgress = MenuProgress{};
         }
 
         connection->update(std::chrono::milliseconds{50});
@@ -1166,23 +1270,36 @@ void run() {
         // Загрузка идёт здесь, в сетевом потоке, и это не выбор из удобства:
         // качать в потоке игры значило бы остановить кадр на время закачки.
         if (const auto offered = connection->takeResources()) {
-            // Меню на это время показывает «ресурсы»: закачка идёт в этом же
-            // потоке и занимает столько, сколько занимает, а молчащая страница
-            // выглядит как зависшая.
+            // Ход разбора ресурсов страница показывает по-настоящему: отдельно
+            // сверку того, что уже лежит в кеше, отдельно закачку недостающего,
+            // и обе — с делением «столько-то из стольких». Закачка идёт в этом
+            // же потоке и занимает столько, сколько занимает; молчащая страница
+            // всё это время выглядела бы зависшей.
+            const auto report = [menu](std::size_t done, std::size_t total, bool downloading) {
+                if (menu == nullptr) {
+                    return;
+                }
+
+                if (downloading) {
+                    menu->downloadingResources(done, total);
+                } else {
+                    menu->validatingResources(done, total);
+                }
+            };
+
+            for (const ResourceCache::Ready& item :
+                 resources.sync(active.address, active.port, *offered, report)) {
+                feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
+            }
+
+            // Разложенное сервер теперь запускает — об этом странице и говорим.
             if (menu != nullptr) {
                 menu->loadingResources();
             }
 
-            for (const ResourceCache::Ready& item : resources.sync(active.address, active.port,
-                                                                   *offered)) {
-                feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
-            }
-
-            // Стадия сбрасывается назад: следующий оборот скажет странице «входим
-            // в игру» заново, и она сменит строку сама.
-            if (menuStage == MenuStage::Joining) {
-                menuStage = MenuStage::Connecting;
-            }
+            // Стадия сбрасывается назад: следующий оборот расскажет про загрузку
+            // мира заново, и страница сменит строку сама.
+            menuProgress.stage = MenuStage::Resources;
         }
         roster.replace(describeRemotePlayers(*connection), describeSessionVehicles(*connection));
 
@@ -1222,31 +1339,16 @@ void run() {
                                          : line.text);
         }
 
-        const bool troubled =
-            connection->state() != ConnectionState::Connected &&
-            std::chrono::steady_clock::now() - connectionStartedAt >= kSilenceBeforeAlarm;
-
-        const DisconnectReason lost = connection->disconnectReason();
-
-        feed.setConnection(UiFeed::Connection{
-            .state = static_cast<unsigned int>(connection->state()),
-            .troubled = troubled,
-            .disconnect = static_cast<unsigned int>(lost),
-
-            // Объяснение прикладывается только к отказу: его сервер назвал
-            // сам. У оборванной связи причины нет — есть только то, что её
-            // больше нет, и придумывать здесь объяснение значило бы солгать.
-            .disconnectDetail = connection->rejectReason().has_value()
-                                    ? std::string{describe(*connection->rejectReason())}
-                                    : std::string{},
-        });
-
-        tellMenu(menu, *connection, feed, menuStage);
+        tellMenu(menu, *connection, feed, menuProgress);
 
         // Игроков на сервере на одного больше, чем чужих: себя в списке чужих
         // нет, а в Discord показывается общее число.
         discord.update(Presence{
-            .server = std::format("{}:{}", active.address, active.port),
+            // Имя сервера, если он назвался, и адрес, пока нет: человеку в
+            // Discord имя говорит больше, а адрес — то, по чему к нему зайдут.
+            .server = connection->serverName().empty()
+                          ? std::format("{}:{}", active.address, active.port)
+                          : connection->serverName(),
             .playerId = connection->localPlayerId(),
             .players = players + 1,
             .connected = connection->state() == ConnectionState::Connected,
