@@ -41,6 +41,9 @@ public:
 
         /// Выйти из игры.
         std::function<void()> quit;
+
+        /// Показать журнал клиента. Страница просит об этом из своей консоли.
+        std::function<void()> openLog;
     };
 
     /// Заводит меню на уже созданной странице.
@@ -79,9 +82,20 @@ public:
     /// Имена состояний — те же, что у alt:V: `connection:connecting`,
     /// `connection:connected`, `connection:failed`. Страница знает их наизусть,
     /// и переименовать их нельзя, не поправив её.
+    ///
+    /// Порядок у нас свой, но из её же слов: подключаемся к серверу — забираем
+    /// ресурсы — входим в игру — вошли. Каждое слово страница показывает своей
+    /// строкой на своём языке, и придумывать к ним подписи не нужно.
     void connecting(std::string_view address);
+
+    /// Идёт загрузка ресурсов сервера.
+    void loadingResources();
+
+    /// Сервер принял, идёт вход в мир. Это самая долгая часть: минуты.
+    void joining();
+
     void connected();
-    void disconnected();
+    void disconnected(std::string_view reason);
     void failed(std::string_view reason);
 
 private:

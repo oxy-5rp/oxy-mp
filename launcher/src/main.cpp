@@ -4,9 +4,9 @@
 // В каталог игры ничего не записывается: все файлы проекта лежат рядом с этим
 // исполняемым файлом, а настройки уезжают в игру переменными окружения.
 
-#include "connect_window.hpp"
 #include "game_locator.hpp"
 #include "game_mirror.hpp"
+#include "launcher_window.hpp"
 #include "paths.hpp"
 #include "session.hpp"
 
@@ -30,9 +30,13 @@ void printUsage() {
                  "        [--game <каталог игры>] [--client <путь к модулю>]\n"
                  "        [--direct | --attach | --standalone] [--freemode]\n"
                  "        [--netgame | --netgame-full] [--session] [--no-ui]\n\n"
-                 "  (по умолчанию) показать окно подключения. Игра запускается через\n"
-                 "             Rockstar Games Launcher, но вместо GTA5_BE.exe тот поднимает\n"
-                 "             сразу GTA5.exe: игра числится запущенной, BattlEye не встаёт.\n"
+                 "  (по умолчанию) показать окно лаунчера и запустить игру. Игра\n"
+                 "             запускается через Rockstar Games Launcher, но вместо\n"
+                 "             GTA5_BE.exe тот поднимает сразу GTA5.exe: игра числится\n"
+                 "             запущенной, BattlEye не встаёт. Сервер при этом не\n"
+                 "             называется: его выбирают в меню внутри игры, по F1.\n"
+                 "  --server   идти к названному серверу, не спрашивая меню. Для скриптов\n"
+                 "             и проверок: в игре меню нажимать некому.\n"
                  "  --no-ui    не показывать окно, запустить сразу — для скриптов.\n"
                  "  --direct   запустить GTA5.exe напрямую, без лаунчера Rockstar. BattlEye\n"
                  "             тоже не встаёт, но лаунчер об игре не знает и не показывает\n"
@@ -72,7 +76,11 @@ int main(int argc, char** argv) {
     paths.ensure();
 
     oxymp::launcher::Session::Settings settings;
-    settings.server = "127.0.0.1:" + std::to_string(oxymp::shared::kDefaultServerPort);
+
+    // Адреса по умолчанию больше нет, и это не упущение. Клиент без адреса
+    // никуда не идёт сам: он поднимает меню и ждёт, пока сервер выберет игрок, —
+    // как alt:V. Адрес в ключе `--server` остаётся для запуска из скрипта и для
+    // проверок, где меню нажимать некому.
     settings.nickname = "player";
     settings.clientModule = paths.clientModule();
     settings.launcherPatch = paths.launcherPatch();
@@ -185,10 +193,14 @@ int main(int argc, char** argv) {
             // Без журнала лаунчер работает, падать из-за него — нельзя.
         }
 
-        return oxymp::launcher::ConnectWindow::run(paths, std::move(settings));
+        return oxymp::launcher::LauncherWindow::run(paths, std::move(settings));
     }
 
-    spdlog::info("сервер: {}, имя: {}", settings.server, settings.nickname);
+    if (settings.server.empty()) {
+        spdlog::info("сервер не назван: клиент поднимет меню и будет ждать выбора");
+    } else {
+        spdlog::info("сервер: {}, имя: {}", settings.server, settings.nickname);
+    }
 
     auto game = oxymp::launcher::Session::run(
         settings, [](oxymp::launcher::Progress progress, std::string_view text) {

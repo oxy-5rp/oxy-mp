@@ -4,13 +4,16 @@
 
 #include <include/cef_client.h>
 #include <include/cef_parser.h>
+#include <include/cef_task.h>
 #include <include/wrapper/cef_helpers.h>
 
 #include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <mutex>
+#include <utility>
 
 namespace oxymp::cefui {
 namespace {
@@ -22,6 +25,40 @@ namespace {
 /// целиком. Файла на диске при этом не заводится — ровно то же, чем обходился
 /// прежний движок.
 constexpr const char* kDataPrefix = "data:text/html;charset=utf-8;base64,";
+
+/// Работа, отданная потоку Chromium.
+///
+/// Нужна оттого, что нажатия клавиш Chromium принимает только в своём потоке. С
+/// мышью он снисходителен, с клавиатурой — нет, и это стоило целой правки: буквы
+/// уходили в браузер из чужого потока и пропадали без следа. Ни ошибки, ни
+/// записи в журнале — просто ничего не набиралось.
+class Work : public CefTask {
+public:
+    explicit Work(std::function<void()> work) : work_{std::move(work)} {}
+
+    void Execute() override {
+        if (work_) {
+            work_();
+        }
+    }
+
+private:
+    std::function<void()> work_;
+
+    IMPLEMENT_REFCOUNTING(Work);
+    DISALLOW_COPY_AND_ASSIGN(Work);
+};
+
+/// Делает работу в потоке Chromium: прямо сейчас, если мы уже в нём, иначе —
+/// его же очередью.
+void onBrowserThread(std::function<void()> work) {
+    if (CefCurrentlyOn(TID_UI)) {
+        work();
+        return;
+    }
+
+    CefPostTask(TID_UI, new Work{std::move(work)});
+}
 
 /// Как Chromium называет эту кнопку в событии нажатия.
 cef_mouse_button_type_t buttonType(Browser::MouseButton button) {
@@ -311,7 +348,11 @@ std::unique_ptr<Browser> Browser::create(int width, int height, PaintHandler onP
     window.SetAsWindowless(nullptr);
 
     CefBrowserSettings settings;
-    settings.windowless_frame_rate = 20;
+
+    // Шестьдесят кадров в секунду, а не двадцать, и это не роскошь: указатель
+    // мыши в меню рисует сама страница, и её частота — это частота указателя.
+    // На двадцати он заметно отставал от руки.
+    settings.windowless_frame_rate = 60;
 
     // Фон прозрачный. Настоящий, в четвёртом канале, а не порогом яркости: там,
     // где страница ничего не нарисовала, сквозь неё видно игру.
@@ -529,7 +570,8 @@ void Browser::releaseMouse() {
     browser->GetHost()->SendMouseMoveEvent(state_->mouseAt(-1, -1), true);
 }
 
-void Browser::sendKey(KeyAction action, unsigned code, bool shift, bool control, bool alt) {
+void Browser::sendKey(KeyAction action, unsigned code, unsigned scan, bool shift, bool control,
+                      bool alt) {
     if (state_ == nullptr) {
         return;
     }
@@ -558,6 +600,18 @@ void Browser::sendKey(KeyAction action, unsigned code, bool shift, bool control,
 
     event.windows_key_code = static_cast<int>(code);
 
+    // Родной код клавиши — то самое число, которое Windows кладёт в старшее
+    // слово параметра сообщения о нажатии: счётчик повторов в младшем слове и
+    // аппаратный код за ним. Chromium читает его и без него разбирает событие не
+    // полностью — набранное до поля ввода не доходит.
+    event.native_key_code = static_cast<int>(1u | (scan & 0xFFu) << 16);
+
+    if (action == KeyAction::Up) {
+        // Признаки «клавиша была нажата» и «отпускается»: у сообщения об
+        // отпускании они стоят всегда.
+        event.native_key_code |= static_cast<int>(0xC0000000u);
+    }
+
     if (action == KeyAction::Char) {
         event.character = static_cast<char16_t>(code);
         event.unmodified_character = event.character;
@@ -566,7 +620,7 @@ void Browser::sendKey(KeyAction action, unsigned code, bool shift, bool control,
     event.modifiers = (shift ? EVENTFLAG_SHIFT_DOWN : 0u) |
                       (control ? EVENTFLAG_CONTROL_DOWN : 0u) | (alt ? EVENTFLAG_ALT_DOWN : 0u);
 
-    browser->GetHost()->SendKeyEvent(event);
+    onBrowserThread([browser, event] { browser->GetHost()->SendKeyEvent(event); });
 }
 
 void Browser::setFocus(bool focused) {
@@ -575,7 +629,9 @@ void Browser::setFocus(bool focused) {
     }
 
     if (const CefRefPtr<CefBrowser> browser = state_->current(); browser != nullptr) {
-        browser->GetHost()->SetFocus(focused);
+        // Тем же потоком, что и нажатия: внимание и клавиатура — одно дело, и
+        // отданные из разных потоков, они разъезжаются.
+        onBrowserThread([browser, focused] { browser->GetHost()->SetFocus(focused); });
     }
 }
 

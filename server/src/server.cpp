@@ -268,6 +268,19 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         return;
     }
 
+    // Пароль сверяется раньше имени, и это не безразличный порядок: сервер под
+    // паролем не должен рассказывать постороннему даже того, занято ли имя.
+    //
+    // Слишком длинный отвергается, не доходя до сравнения: строка в пакете
+    // ограничена только его размером, а сравнивать мегабайт с восемью байтами
+    // незачем.
+    if (!config_.password.empty() && (hello.password.size() > shared::kMaxPasswordLength ||
+                                      hello.password != config_.password)) {
+        spdlog::info("соединение {} отклонено: пароль не сошёлся", peer);
+        reject(peer, shared::RejectReason::WrongPassword);
+        return;
+    }
+
     if (!nicknameLooksValid(hello.nickname)) {
         reject(peer, shared::RejectReason::InvalidNickname);
         return;

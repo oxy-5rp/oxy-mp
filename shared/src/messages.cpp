@@ -7,12 +7,14 @@ namespace oxymp::shared {
 void ClientHello::write(ByteWriter& writer) const {
     writer.writeU16(protocolVersion);
     writer.writeString(nickname);
+    writer.writeString(password);
 }
 
 ClientHello ClientHello::read(ByteReader& reader) {
     ClientHello message;
     message.protocolVersion = reader.readU16();
     message.nickname = reader.readString();
+    message.password = reader.readString();
     return message;
 }
 

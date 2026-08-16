@@ -220,6 +220,8 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
 
         if (key == "name") {
             config.name = value;
+        } else if (key == "password") {
+            config.password = value;
         } else if (key == "port") {
             understood = number(value, config.port);
         } else if (key == "maxplayers") {

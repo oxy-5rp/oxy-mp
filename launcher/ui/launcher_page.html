@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>oxyMP</title>
+<style>
+  /* Окно лаунчера, списанное с alt:V.
+
+     Там оно небольшое и вертикальное: картинка из skin.bin во весь размер, ход
+     запуска внизу, крестик в углу. Ни адреса сервера, ни имени игрока здесь
+     больше нет и быть не должно — сервер выбирается в меню внутри игры, как у
+     alt:V, а имя правится там же, в настройках.
+
+     Размер задаёт не страница, а окно: он равен размеру картинки. Поэтому здесь
+     нет ни одной величины в точках, кроме тех, что не зависят от размера, —
+     высоты полосы, отступов и кегля. */
+  /* Три величины подставляет лаунчер, когда показывает страницу: фон, цвет и
+     имя. Всё это лежит в skin.bin, то есть у художника, а не у нас, и вписывать
+     сюда что-либо своё значило бы спорить с ним. */
+  :root {
+    --accent: {{accent}};
+    --background: {{background}};
+    --text: #ffffff;
+    --dim: rgba(255, 255, 255, .62);
+    --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    background: #0a0c10;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+  }
+
+  /* Фон и есть всё оформление. Он тянется по окну целиком: картинка нарисована
+     ровно под этот размер, и обрезать её нечем. */
+  .window {
+    position: relative;
+    height: 100%;
+    background-color: #0a0c10;
+    background-image: var(--background);
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  /* Окно таскают за всю картинку: своей полосы заголовка нет — её нет и у
+     alt:V. Кнопки из этого исключены ниже. */
+  .drag {
+    position: absolute;
+    inset: 0;
+  }
+
+  .buttons {
+    position: absolute;
+    top: 0; right: 0;
+    display: flex;
+    z-index: 2;
+  }
+
+  .buttons button {
+    width: 34px; height: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .buttons button:hover { color: var(--text); background: rgba(255, 255, 255, .12); }
+  .buttons button.close:hover { background: #c4362f; color: #fff; }
+
+  /* Подвал с ходом запуска. Тёмная подложка нужна: под ней картинка, и белые
+     буквы на светлом её месте не читались бы. */
+  .status {
+    position: relative;
+    z-index: 1;
+    padding: 14px 16px 16px;
+    background: linear-gradient(to bottom, rgba(8, 9, 12, 0), rgba(8, 9, 12, .88) 38%);
+  }
+
+  .status__text {
+    font-size: 12.5px;
+    line-height: 1.35;
+    min-height: 34px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+  }
+
+  .status__text.bad { color: #ff8a7a; }
+  .status__text.ok { color: #8ee39b; }
+
+  /* Полоса хода. Определённого числа шагов у запуска нет — есть только то, что
+     он идёт, — поэтому полоса бегущая, а не наполняющаяся. Показывать долю там,
+     где её никто не считает, значило бы её выдумать. */
+  .bar {
+    margin-top: 10px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, .16);
+    overflow: hidden;
+  }
+
+  .bar__fill {
+    height: 100%;
+    width: 40%;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: run 1.15s ease-in-out infinite;
+  }
+
+  .bar.done .bar__fill { width: 100%; animation: none; }
+  .bar.failed .bar__fill { width: 100%; animation: none; background: #c4362f; }
+
+  @keyframes run {
+    0%   { margin-left: -40%; }
+    100% { margin-left: 100%; }
+  }
+
+  .footer {
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    letter-spacing: .04em;
+    color: var(--dim);
+  }
+</style>
+</head>
+<body>
+  <div class="window" id="window">
+    <div class="drag" id="drag"></div>
+
+    <div class="buttons">
+      <button id="minimize" title="Свернуть">&#8211;</button>
+      <button id="close" class="close" title="Закрыть">&#10005;</button>
+    </div>
+
+    <div class="status">
+      <div class="status__text" id="text">Запускаем игру…</div>
+      <div class="bar" id="bar"><div class="bar__fill"></div></div>
+      <div class="footer">
+        <span id="name">{{name}}</span>
+        <span id="version">{{version}}</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
+
+  function send(message) {
+    if (bridge) bridge.postMessage(message);
+  }
+
+  document.getElementById('close').addEventListener('click',
+    () => send({ action: 'window', command: 'close' }));
+  document.getElementById('minimize').addEventListener('click',
+    () => send({ action: 'window', command: 'minimize' }));
+
+  // Перетаскивание отдаётся окну: рамки Windows у нас нет, и тянуть больше не за
+  // что. Само перемещение делает окно — страница только сообщает о нажатии.
+  document.getElementById('drag').addEventListener('mousedown', event => {
+    if (event.button === 0) send({ action: 'drag' });
+  });
+
+  const text = document.getElementById('text');
+  const bar = document.getElementById('bar');
+
+  if (bridge) {
+    bridge.addEventListener('message', event => {
+      const message = event.data;
+      if (!message || message.action !== 'status') return;
+
+      text.textContent = message.text || '';
+      text.className = 'status__text' + (message.kind === 'bad' ? ' bad'
+                                       : message.kind === 'ok' ? ' ok' : '');
+
+      bar.className = 'bar' + (message.kind === 'bad' ? ' failed'
+                             : message.kind === 'ok' ? ' done' : '');
+    });
+  }
+</script>
+</body>
+</html>

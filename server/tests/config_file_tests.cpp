@@ -61,6 +61,27 @@ TEST_CASE("the config file reads what it is told", "[config]") {
     CHECK(config.admins[2] == 7);
 }
 
+TEST_CASE("an empty password key leaves the server open", "[config]") {
+    // Ключ без значения — то, что стоит в server.cfg по умолчанию, и он обязан
+    // означать «пароля нет», а не «пароль из пустой строки»: сервер сверяет
+    // пароль только у непустой настройки.
+    Config config;
+
+    const auto unknown = settle("password:\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.password.empty());
+}
+
+TEST_CASE("the password key is read as it is written", "[config]") {
+    Config config;
+
+    const auto unknown = settle("password: под ёлкой\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.password == "под ёлкой");
+}
+
 TEST_CASE("comments and blank lines are ignored", "[config]") {
     Config config;
 

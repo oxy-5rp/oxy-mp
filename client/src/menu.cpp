@@ -8,8 +8,11 @@
 
 #include <spdlog/spdlog.h>
 
+#include <functional>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -29,6 +32,54 @@ constexpr const char* kSkinFile = "skin.bin";
 /// Ветвь сборки. Страница показывает её рядом с версией.
 constexpr const char* kBranch = "release";
 
+/// Указатель мыши, который страница рисует себе сама.
+///
+/// Своего указателя у неё быть не может, а чужого не видно: страница рисуется в
+/// память, указатель — дело Windows, и в её кадр он не попадает. Игра же прячет
+/// системный указатель и делает это не однажды — переспорить её не вышло ни
+/// счётчиком показа, ни ответом на просьбу поставить указатель.
+///
+/// Поэтому он рисуется страницей: стрелка следует за мышью, о которой странице и
+/// так рассказывают. Так же поступает alt:V — в его меню указатель тоже нарисован,
+/// а не системный.
+///
+/// Вписывается в окружение страницы, а не в её исходники: страница взята у alt:V
+/// и правится дальше по своим правилам, и всякая наша строка в ней — это работа
+/// при каждом её обновлении.
+constexpr const char* kCursorScript = R"JS(
+(() => {
+  if (window.__oxyCursor) return;
+
+  const cursor = document.createElement('div');
+  cursor.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;' +
+    'pointer-events:none;will-change:transform;display:none';
+  cursor.innerHTML =
+    '<svg width="20" height="24" viewBox="0 0 20 24" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M2 1.5 L2 19 L6.4 15 L9.2 21.4 L12.1 20.1 L9.4 13.9 L15.4 13.6 Z"' +
+    ' fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+
+  document.body.appendChild(cursor);
+  window.__oxyCursor = cursor;
+
+  addEventListener('mousemove', (event) => {
+    if (!window.__oxyCursorShown) return;
+    cursor.style.display = 'block';
+    cursor.style.transform = 'translate(' + event.clientX + 'px,' + event.clientY + 'px)';
+  }, true);
+})();
+)JS";
+
+/// Показывает и прячет нарисованный указатель.
+///
+/// Прятать обязательно, и это выяснено на живой игре. Страница остаётся в кадре
+/// и с закрытым меню — она просто не рисует ничего, — а вот наша стрелка рисуется
+/// сама по себе и оставалась висеть поверх игры на том месте, где её застало
+/// закрытие. Мышь при этом уходит игре, и стрелка даже не двигалась.
+constexpr const char* kCursorShow = "window.__oxyCursorShown = true;";
+constexpr const char* kCursorHide =
+    "window.__oxyCursorShown = false;"
+    "if (window.__oxyCursor) window.__oxyCursor.style.display = 'none';";
+
 } // namespace
 
 struct Menu::State {
@@ -43,6 +94,12 @@ struct Menu::State {
 
     /// Открыто ли меню. Читает поток игры — отсюда и счётчик вместо блокировки.
     std::atomic<bool> opened{true};
+
+    /// События страницы, на которые нам нечем ответить.
+    ///
+    /// Хранятся, чтобы сказать о каждом ровно один раз: страница шлёт их по
+    /// нажатию, а нажимают подолгу.
+    std::set<std::string, std::less<>> unanswered;
 
     [[nodiscard]] std::filesystem::path settingsPath() const { return directory / kSettingsFile; }
 
@@ -60,6 +117,72 @@ struct Menu::State {
 
     void emit(std::string_view name) { browser->emit(name, "[]"); }
 
+    /// Список недавних серверов, каким его видит страница.
+    ///
+    /// Отдельно от sendInitialState, потому что спрашивают его дважды: при
+    /// загрузке страницы и по кнопке обновления на странице серверов.
+    [[nodiscard]] nlohmann::json recentServers() {
+        std::string lastAddress;
+        nlohmann::json recent = nlohmann::json::array();
+
+        {
+            const std::lock_guard guard{mutex};
+
+            lastAddress = settings.text("lastip");
+
+            // Первым в недавних — тот сервер, на котором игрок был в прошлый
+            // раз. Это и есть «недавний» в прямом смысле слова; у alt:V список
+            // ровно такой. Прежде здесь были только серверы из оформления —
+            // то есть чужой выбор, а не свой, — и вернуться туда, откуда вышел,
+            // можно было только набрав адрес заново.
+            if (!lastAddress.empty()) {
+                recent.push_back(nlohmann::json{
+                    {"name", lastAddress},
+                    {"id", ""},
+                    {"url", lastAddress},
+                });
+            }
+
+            if (skin.has_value()) {
+                for (const config::Skin::Server& server : skin->servers) {
+                    // Тот же адрес дважды в списке ни к чему.
+                    if (server.address == lastAddress) {
+                        continue;
+                    }
+
+                    recent.push_back(nlohmann::json{
+                        {"name", server.name},
+                        {"id", server.id},
+                        {"url", server.address},
+                    });
+                }
+            }
+        }
+
+        return recent;
+    }
+
+    /// Отдаёт странице оба её списка серверов: недавние и общий.
+    ///
+    /// Общий у нас пуст, и это не забытая работа: каталога серверов у oxyMP нет
+    /// и не предвидится — некому его вести. Но послать пустой список обязательно,
+    /// и это выяснено по исходникам страницы: пока `servers:update` не пришёл,
+    /// она держит список «загружающимся» и крутит бесконечное колесо. Пустой
+    /// список она показывает честной надписью «серверов нет».
+    void sendServers() {
+        emit("servers:recent:update", nlohmann::json::array({recentServers()}));
+        emit("servers:update", nlohmann::json::array({nlohmann::json::array()}));
+    }
+
+    /// Отдаёт странице перечень устройств записи.
+    ///
+    /// Он пуст, и будет пуст, пока у oxyMP нет голоса: перечислять нечего.
+    /// Промолчать всё же нельзя — не получив ответа, страница держит список
+    /// «загружающимся» и ждёт его до конца запуска.
+    void sendRecordingDevices() {
+        emit("settings:devices:update", nlohmann::json::array({nlohmann::json::object()}));
+    }
+
     /// Рассказывает странице всё, что она должна знать к первому кадру.
     ///
     /// Зовётся по её же слову — `loaded`, — а не сразу после загрузки. Разница
@@ -69,7 +192,6 @@ struct Menu::State {
         std::string settingsJson;
         std::string lastAddress;
         std::optional<std::string> manifest;
-        nlohmann::json recent = nlohmann::json::array();
 
         {
             const std::lock_guard guard{mutex};
@@ -79,14 +201,6 @@ struct Menu::State {
 
             if (skin.has_value()) {
                 manifest = skin->toManifestJson();
-
-                for (const config::Skin::Server& server : skin->servers) {
-                    recent.push_back(nlohmann::json{
-                        {"name", server.name},
-                        {"id", server.id},
-                        {"url", server.address},
-                    });
-                }
             }
         }
 
@@ -114,10 +228,8 @@ struct Menu::State {
             spdlog::error("настройки не легли в JSON — страница увидит свои умолчания");
         }
 
-        // Недавние — из оформления: своего списка серверов у нас нет и не будет,
-        // пока нет общего каталога. Пустой список страница показывает как «вы
-        // ещё никуда не заходили», и это правда.
-        emit("servers:recent:update", nlohmann::json::array({recent}));
+        sendServers();
+        sendRecordingDevices();
 
         // Готовность объявляется последней, и порядок здесь обязателен: по
         // `ui:ready` страница показывает себя и спрашивает имя, если его нет, —
@@ -139,13 +251,29 @@ struct Menu::State {
         }
 
         if (name == "loaded") {
+            // Указатель вписывается по слову страницы, а не по её загрузке: до
+            // этого мгновения тела у неё ещё нет, и вписывать его некуда.
+            browser->evaluate(kCursorScript);
+
             sendInitialState();
             return;
         }
 
         if (name == "ui:open") {
-            opened.store(arguments.size() > 0 && arguments[0].is_boolean() &&
-                         arguments[0].get<bool>());
+            const bool open = arguments.size() > 0 && arguments[0].is_boolean() &&
+                              arguments[0].get<bool>();
+
+            // Записывается каждое такое слово, и не зря: от него зависит всё
+            // остальное — кому достаётся клавиатура, рисуется ли под меню экран
+            // загрузки, слышит ли страница мышь. Пока эта строка не появилась в
+            // журнале, любая жалоба на ввод означает сразу несколько разных бед.
+            spdlog::info("меню сообщает о себе: {}", open ? "открыто" : "закрыто");
+
+            opened.store(open);
+
+            // Указатель живёт ровно столько, сколько открыто меню: он нарисован
+            // страницей, а страница остаётся в кадре и после закрытия.
+            browser->evaluate(open ? kCursorShow : kCursorHide);
             return;
         }
 
@@ -156,6 +284,18 @@ struct Menu::State {
 
         if (name == "connection:connect") {
             connect(arguments);
+            return;
+        }
+
+        if (name == "connection:reconnect") {
+            reconnect();
+            return;
+        }
+
+        if (name == "console:openLogFile") {
+            if (actions.openLog) {
+                actions.openLog();
+            }
             return;
         }
 
@@ -178,10 +318,26 @@ struct Menu::State {
             return;
         }
 
+        if (name == "servers:reload") {
+            sendServers();
+            return;
+        }
+
+        if (name == "settings:devices:reload") {
+            sendRecordingDevices();
+            return;
+        }
+
         // Прочее страница шлёт по своему устройству — обновить список серверов,
         // перечислить устройства записи, выполнить строку в консоли. Отвечать ей
         // пока нечем, и молчание здесь честнее выдуманного ответа.
-        spdlog::debug("меню просит {} — пока нечем ответить", name);
+        //
+        // Записывается один раз на имя события и в общий журнал, а не в
+        // отладочный: жалоба «кнопка не работает» иначе не проверяется ничем —
+        // по этой строке сразу видно, какая именно кнопка и чего она просила.
+        if (unanswered.insert(std::string{name}).second) {
+            spdlog::info("меню просит {} — отвечать пока нечем", name);
+        }
     }
 
     void changeSetting(const nlohmann::json& arguments) {
@@ -226,6 +382,30 @@ struct Menu::State {
 
         if (actions.connect) {
             actions.connect(address, password);
+        }
+    }
+
+    /// Повтор по последнему адресу.
+    ///
+    /// Довода страница не присылает вовсе — и не по забывчивости: адрес, к
+    /// которому шли, записан в настройках, и alt:V берёт его оттуда же. Взять
+    /// его из состояния страницы было бы нельзя: к мгновению, когда игрок жмёт
+    /// «повторить», она успела показать разрыв и забыть, куда шла.
+    void reconnect() {
+        std::string address;
+
+        {
+            const std::lock_guard guard{mutex};
+            address = settings.text("lastip");
+        }
+
+        if (address.empty()) {
+            spdlog::warn("меню просит повторить подключение, а последнего адреса нет");
+            return;
+        }
+
+        if (actions.connect) {
+            actions.connect(address, "");
         }
     }
 
@@ -306,15 +486,27 @@ void Menu::connecting(std::string_view address) {
     }
 }
 
+void Menu::loadingResources() {
+    if (state_ != nullptr) {
+        state_->emit("connection:startingResources");
+    }
+}
+
+void Menu::joining() {
+    if (state_ != nullptr) {
+        state_->emit("connection:joining");
+    }
+}
+
 void Menu::connected() {
     if (state_ != nullptr) {
         state_->emit("connection:connected");
     }
 }
 
-void Menu::disconnected() {
+void Menu::disconnected(std::string_view reason) {
     if (state_ != nullptr) {
-        state_->emit("connection:disconnected");
+        state_->emit("connection:disconnected", nlohmann::json::array({std::string{reason}}));
     }
 }
 

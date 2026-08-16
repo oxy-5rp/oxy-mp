@@ -1,4 +1,6 @@
-#include "connect_window.hpp"
+#include "launcher_window.hpp"
+
+#include "skin_assets.hpp"
 
 #include <oxymp/webui/browser.hpp>
 
@@ -12,20 +14,15 @@
 
 #include <windows.h>
 
-#include "connect.hpp"
+#include "launcher_page.hpp"
 
 namespace oxymp::launcher {
 namespace {
 
-constexpr const wchar_t* kWindowClass = L"oxyMPConnect";
-constexpr const wchar_t* kWindowTitle = L"oxyMP";
+constexpr const wchar_t* kWindowClass = L"oxyMPLauncher";
 
-/// Размер окна в точках при обычном масштабе. Подобран под содержимое страницы.
-/// Размер окна. Ровно тот, под который нарисована страница: у макета 1240×790,
-/// и всякое расхождение здесь превращается в полосу пустоты или в обрезанную
-/// вёрстку.
-constexpr int kWidth = 1240;
-constexpr int kHeight = 790;
+/// Имя окна, когда оформления нет.
+constexpr const wchar_t* kDefaultTitle = L"oxyMP";
 
 /// Сообщение «в рабочем потоке что-то произошло».
 ///
@@ -33,6 +30,15 @@ constexpr int kHeight = 790;
 /// не может ни трогать страницу, ни ждать её. Он лишь кладёт готовую строку в
 /// очередь окна, а разбирает её уже поток окна.
 constexpr UINT kProgressMessage = WM_APP + 1;
+
+/// Сообщение «игра поднялась и показала своё окно».
+///
+/// По нему лаунчер убирается с глаз: своё дело он сделал, а второе окно поверх
+/// игры мешало бы. Совсем закрывать его нельзя — он ещё дождётся конца игры.
+constexpr UINT kGameUpMessage = WM_APP + 2;
+
+/// Сообщение «игра закончилась». По нему окно закрывается само.
+constexpr UINT kGameGoneMessage = WM_APP + 3;
 
 /// Экранирует строку для вставки в JSON.
 ///
@@ -117,7 +123,40 @@ std::string_view describe(Progress progress) {
     return "idle";
 }
 
-/// Состояние окна. Одно на процесс: окон подключения не бывает двух.
+/// Подставляет в страницу то, что известно только на запуске.
+///
+/// Замена по месту, а не шаблонизатор: подстановок четыре, и каждая встречается
+/// однажды. Строки при этом наши целиком — фон приходит из skin.bin уже в
+/// base64, то есть без кавычек и угловых скобок по устройству.
+std::string fillPage(std::string page, std::string_view token, std::string_view value) {
+    const std::size_t at = page.find(token);
+    if (at == std::string::npos) {
+        return page;
+    }
+
+    page.replace(at, token.size(), value);
+    return page;
+}
+
+std::wstring widen(std::string_view text) {
+    if (text.empty()) {
+        return {};
+    }
+
+    const int size = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                                           nullptr, 0);
+    if (size <= 0) {
+        return {};
+    }
+
+    std::wstring wide(static_cast<std::size_t>(size), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(),
+                          size);
+
+    return wide;
+}
+
+/// Состояние окна. Одно на процесс: окон лаунчера не бывает двух.
 struct Window {
     HWND handle = nullptr;
     std::unique_ptr<webui::Browser> browser;
@@ -126,7 +165,6 @@ struct Window {
     Session::Settings settings;
 
     std::thread worker;
-    std::atomic<bool> busy{false};
 };
 
 Window* g_window = nullptr;
@@ -143,8 +181,13 @@ void report(Progress progress, std::string_view text) {
 }
 
 /// Кладёт строку состояния в очередь окна. Можно из любого потока.
-void postProgress(Progress progress, std::string_view text) {
-    if (g_window == nullptr) {
+///
+/// Окно берётся доводом, а не из g_window, и это не педантизм. Рабочий поток
+/// переживает окно: игрок вправе закрыть лаунчер, пока идёт запуск, — и тогда
+/// обращение к общей записи было бы обращением к тому, чего уже нет. Указатель
+/// на окно после закрытия просто перестаёт работать, и это ровно то, что нужно.
+void postProgress(HWND window, Progress progress, std::string_view text) {
+    if (window == nullptr) {
         return;
     }
 
@@ -152,47 +195,36 @@ void postProgress(Progress progress, std::string_view text) {
     // к моменту разбора сообщения уже уйдёт дальше.
     auto* const carried = new std::string{text};
 
-    ::PostMessageW(g_window->handle, kProgressMessage, static_cast<WPARAM>(progress),
-                   reinterpret_cast<LPARAM>(carried));
+    if (::PostMessageW(window, kProgressMessage, static_cast<WPARAM>(progress),
+                       reinterpret_cast<LPARAM>(carried)) == 0) {
+        // Окна больше нет: сообщение не встанет в очередь, и разбирать его
+        // некому. Освобождаем сами, иначе строка осталась бы висеть.
+        delete carried;
+    }
 }
 
-void startSession(std::string address, std::string nickname) {
-    if (g_window->busy.exchange(true)) {
-        return;
-    }
-
-    g_window->settings.server = std::move(address);
-    g_window->settings.nickname = std::move(nickname);
-
-    if (g_window->worker.joinable()) {
-        g_window->worker.join();
-    }
-
+void startSession(Window& window) {
     // Запуск идёт в своём потоке: он занимает минуты, а окно всё это время
     // обязано отвечать и показывать, что происходит.
-    g_window->worker = std::thread([settings = g_window->settings] {
-        auto game = Session::run(settings, [](Progress progress, std::string_view text) {
+    window.worker = std::thread([settings = window.settings, handle = window.handle] {
+        auto game = Session::run(settings, [handle](Progress progress, std::string_view text) {
             spdlog::info("{}", text);
-            postProgress(progress, text);
+            postProgress(handle, progress, text);
         });
 
         if (game == nullptr) {
-            g_window->busy.store(false);
+            // Окно остаётся на экране с последней строкой: она и объясняет, что
+            // пошло не так. Закрыть его игрок закроет сам.
             return;
         }
 
+        ::PostMessageW(handle, kGameUpMessage, 0, 0);
+
         game->waitForExit();
 
-        postProgress(Progress::Failed, "Игра завершилась.");
-        g_window->busy.store(false);
+        ::PostMessageW(handle, kGameGoneMessage, 0, 0);
     });
 }
-
-/// Высота титульной полосы страницы, в точках.
-///
-/// Совпадает с той, что задана в разметке. За неё окно и таскают: рамки Windows
-/// у нас нет, и тянуть больше не за что.
-constexpr int kTitleBarHeight = 56;
 
 void handlePageMessage(std::string_view json) {
     // Строкой, а не видом на неё: field отдаёт строку по значению, и вид на
@@ -200,11 +232,6 @@ void handlePageMessage(std::string_view json) {
     // запуск игры, перетаскивание окна и его кнопки — сравнивалась
     // освобождённая память, и не совпадало ничего.
     const std::string action = field(json, "action");
-
-    if (action == "connect") {
-        startSession(field(json, "address"), field(json, "nickname"));
-        return;
-    }
 
     // Кнопки окна нарисованы на странице, а делает по ним всё равно окно: у
     // страницы своего окна нет, она живёт внутри нашего.
@@ -219,19 +246,14 @@ void handlePageMessage(std::string_view json) {
             ::PostMessageW(g_window->handle, WM_CLOSE, 0, 0);
         } else if (command == "minimize") {
             ::ShowWindow(g_window->handle, SW_MINIMIZE);
-        } else if (command == "maximize") {
-            // Разворот переключает сам себя: одна кнопка на оба состояния — так
-            // устроено везде, и вторая кнопка рядом с ней выглядела бы лишней.
-            const bool spread = ::IsZoomed(g_window->handle) != FALSE;
-            ::ShowWindow(g_window->handle, spread ? SW_RESTORE : SW_MAXIMIZE);
         }
 
         return;
     }
 
     if (action == "drag") {
-        // Перетаскивание за титульную полосу. Окно само отпускает мышь и берёт
-        // ведение на себя — так же, как это делает обычный заголовок Windows.
+        // Перетаскивание за картинку. Окно само отпускает мышь и берёт ведение
+        // на себя — так же, как это делает обычный заголовок Windows.
         if (g_window != nullptr && g_window->handle != nullptr) {
             ::ReleaseCapture();
             ::SendMessageW(g_window->handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
@@ -246,6 +268,17 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
         report(static_cast<Progress>(wparam), *text);
         return 0;
     }
+
+    case kGameUpMessage:
+        // Игра поднялась — лаунчеру больше нечего показывать. Он не закрывается,
+        // а прячется: закрытое окно закрыло бы и очередь сообщений, а по ней
+        // придёт весть о конце игры.
+        ::ShowWindow(window, SW_HIDE);
+        return 0;
+
+    case kGameGoneMessage:
+        ::PostMessageW(window, WM_CLOSE, 0, 0);
+        return 0;
 
     case WM_SIZE:
         if (g_window != nullptr && g_window->browser) {
@@ -264,11 +297,17 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
 
 } // namespace
 
-int ConnectWindow::run(const Paths& paths, Session::Settings settings) {
+int LauncherWindow::run(const Paths& paths, Session::Settings settings) {
     Window window;
     window.paths = paths;
     window.settings = std::move(settings);
     g_window = &window;
+
+    // Оформление читается до окна: от него зависит и размер окна, и его имя, и
+    // значок — всё то, что задаётся при создании и меняется потом с трудом.
+    const SkinAssets skin = SkinAssets::load(paths.root / "skin.bin");
+
+    const std::wstring title = skin.name.empty() ? std::wstring{kDefaultTitle} : widen(skin.name);
 
     const HINSTANCE instance = ::GetModuleHandleW(nullptr);
 
@@ -287,46 +326,77 @@ int ConnectWindow::run(const Paths& paths, Session::Settings settings) {
 
     // Окно без рамки и без заголовка Windows.
     //
-    // Свои кнопки и своя титульная полоса нарисованы на странице, а рамка
-    // Windows дорисовала бы сверху вторую — с чужими цветами и вторым набором
-    // тех же кнопок. WS_POPUP убирает её целиком, и клиентская область
-    // становится равна окну: страница занимает его без остатка, и подгонять
-    // размер под невидимую рамку больше не нужно.
+    // Своя кнопка закрытия нарисована на странице, а рамка Windows дорисовала бы
+    // сверху вторую — с чужими цветами и вторым набором тех же кнопок. WS_POPUP
+    // убирает её целиком, и клиентская область становится равна окну: картинка
+    // занимает его без остатка.
     const DWORD style = WS_POPUP | WS_CLIPCHILDREN;
 
-    // По середине того экрана, где сейчас курсор: окно крупное, и появиться
-    // углом за краем ему нельзя.
+    // Размер задан оформлением и не меняется: картинка нарисована ровно под
+    // него. Растянутое окно показало бы её мыльной, а сжатое обрезало бы.
+    const int width = skin.width;
+    const int height = skin.height;
+
+    // По середине того экрана, где сейчас курсор.
     POINT cursor{};
     ::GetCursorPos(&cursor);
 
     MONITORINFO screen{sizeof(screen)};
     ::GetMonitorInfoW(::MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &screen);
 
-    const int left = screen.rcWork.left + ((screen.rcWork.right - screen.rcWork.left) - kWidth) / 2;
-    const int top = screen.rcWork.top + ((screen.rcWork.bottom - screen.rcWork.top) - kHeight) / 2;
+    const int left = screen.rcWork.left + ((screen.rcWork.right - screen.rcWork.left) - width) / 2;
+    const int top = screen.rcWork.top + ((screen.rcWork.bottom - screen.rcWork.top) - height) / 2;
 
-    window.handle = ::CreateWindowExW(0, kWindowClass, kWindowTitle, style, left, top, kWidth,
-                                      kHeight, nullptr, nullptr, instance, nullptr);
+    window.handle = ::CreateWindowExW(0, kWindowClass, title.c_str(), style, left, top, width,
+                                      height, nullptr, nullptr, instance, nullptr);
 
     if (window.handle == nullptr) {
         spdlog::error("не удалось создать окно");
         return 1;
     }
 
+    // Значок из оформления — тот же, что у alt:V: он виден на панели задач и в
+    // переключателе окон. Своего у окна нет вовсе: рамки нет, и рисовать его
+    // негде, — но панель задач берёт его отсюда.
+    if (skin.largeIcon != nullptr) {
+        ::SendMessageW(window.handle, WM_SETICON, ICON_BIG,
+                       reinterpret_cast<LPARAM>(skin.largeIcon));
+    }
+    if (skin.smallIcon != nullptr) {
+        ::SendMessageW(window.handle, WM_SETICON, ICON_SMALL,
+                       reinterpret_cast<LPARAM>(skin.smallIcon));
+    }
+
     std::string error;
-    window.browser = webui::Browser::create(window.handle, paths.browserCache().wstring(), false, error);
+    window.browser = webui::Browser::create(window.handle, paths.browserCache().wstring(), false,
+                                            error);
     if (window.browser == nullptr) {
         ::MessageBoxW(window.handle, L"Не удалось запустить движок интерфейса.\n"
                                      L"Установите Microsoft Edge WebView2 Runtime.",
-                      kWindowTitle, MB_ICONERROR | MB_OK);
+                      title.c_str(), MB_ICONERROR | MB_OK);
         spdlog::error("{}", error);
         return 1;
     }
 
+    std::string page{ui::launcherPage};
+
+    // Фона может не быть вовсе — тогда остаётся тёмная заливка страницы. `none`
+    // здесь обязателен: пустая строка в `background-image` — это не «ничего», а
+    // ошибка разбора, и вместе с ней пропало бы всё правило.
+    page = fillPage(std::move(page), "{{background}}",
+                    skin.background.empty() ? "none" : "url(\"" + skin.background + "\")");
+    page = fillPage(std::move(page), "{{accent}}", skin.accent.empty() ? "#4f8ef7" : skin.accent);
+    page = fillPage(std::move(page), "{{name}}", skin.name.empty() ? "oxyMP" : skin.name);
+    page = fillPage(std::move(page), "{{version}}", OXYMP_VERSION);
+
     window.browser->onMessage(&handlePageMessage);
-    window.browser->show(ui::connectPage);
+    window.browser->show(page);
 
     ::ShowWindow(window.handle, SW_SHOW);
+
+    // Запуск начинается сразу за показом окна: нажимать в нём нечего, и ждать
+    // нажатия было бы ожиданием неизвестно чего.
+    startSession(window);
 
     MSG message{};
     while (::GetMessageW(&message, nullptr, 0, 0) > 0) {

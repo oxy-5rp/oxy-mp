@@ -20,6 +20,7 @@
 #include "game/script_startup.hpp"
 #include "game/ui_layer.hpp"
 #include "game/window.hpp"
+#include "game/world_hold.hpp"
 #include "game_session.hpp"
 #include "session_status.hpp"
 
@@ -36,6 +37,8 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -43,6 +46,8 @@
 #include <vector>
 
 #include <windows.h>
+
+#include <shellapi.h>
 
 namespace oxymp::client {
 namespace {
@@ -92,15 +97,18 @@ std::string environmentValue(const wchar_t* name) {
 }
 
 /// Разбирает "адрес:порт". Порт необязателен.
-void applyServerAddress(std::string_view text, Connection::Settings& settings) {
+///
+/// Отвечает, был ли адрес назван вообще. Ответ важен: клиент без адреса никуда
+/// не идёт сам, а ждёт слова от меню — так же, как alt:V.
+bool applyServerAddress(std::string_view text, Connection::Settings& settings) {
     if (text.empty()) {
-        return;
+        return false;
     }
 
     const std::size_t colon = text.rfind(':');
     if (colon == std::string_view::npos) {
         settings.address = text;
-        return;
+        return true;
     }
 
     const std::string_view port = text.substr(colon + 1);
@@ -113,7 +121,69 @@ void applyServerAddress(std::string_view text, Connection::Settings& settings) {
     } else {
         settings.address = text;
     }
+
+    return true;
 }
+
+/// Настройки клиента и то, откуда взялся адрес.
+struct Startup {
+    Connection::Settings connection;
+
+    /// Назвал ли адрес тот, кто нас запустил.
+    ///
+    /// Различать обязательно, и это самая суть нового устройства запуска. Назвал
+    /// — идём по нему, как прежде: так работают проверки и бот. Не назвал —
+    /// висим в меню и ждём, пока сервер выберет игрок; мир при этом не грузится.
+    bool addressGiven = false;
+};
+
+/// Просьба подключиться, переданная из потока CEF в сетевой.
+///
+/// Меню живёт в потоке CEF, соединение — в сетевом, и другого пути между ними
+/// нет. Ждущих просьб не бывает двух: новая заменяет прежнюю — игрок, дважды
+/// щёлкнувший по разным серверам, имел в виду последний.
+class ConnectRequest {
+public:
+    struct Wanted {
+        std::string address;
+        std::string password;
+    };
+
+    void ask(std::string address, std::string password) {
+        const std::lock_guard guard{mutex_};
+
+        wanted_ = Wanted{std::move(address), std::move(password)};
+
+        // Просьба подключиться отменяет неисполненную просьбу отключиться:
+        // игрок, нажавший «отключиться» и тут же выбравший сервер, хочет второе.
+        disconnect_ = false;
+    }
+
+    void askDisconnect() {
+        const std::lock_guard guard{mutex_};
+
+        wanted_.reset();
+        disconnect_ = true;
+    }
+
+    [[nodiscard]] std::optional<Wanted> take() {
+        const std::lock_guard guard{mutex_};
+
+        std::optional<Wanted> taken;
+        taken.swap(wanted_);
+        return taken;
+    }
+
+    [[nodiscard]] bool takeDisconnect() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(disconnect_, false);
+    }
+
+private:
+    std::mutex mutex_;
+    std::optional<Wanted> wanted_;
+    bool disconnect_ = false;
+};
 
 /// Куда писать журнал клиента.
 ///
@@ -129,6 +199,13 @@ void applyServerAddress(std::string_view text, Connection::Settings& settings) {
 ///
 /// Запасной путь — профиль пользователя: каталог клиента может оказаться
 /// доступным только на чтение, а без журнала разбирать поломки нечем.
+/// Журнал этого запуска, уже открытый.
+///
+/// Заполняется при настройке журнала и дальше только читается. Вычислить путь
+/// второй раз нельзя: в имени стоит метка времени, и второе вычисление назовёт
+/// файл, которого нет.
+std::filesystem::path g_logFile;
+
 std::filesystem::path logFilePath() {
     const auto now = std::chrono::system_clock::now();
     const std::string stamp = std::format("{:%Y-%m-%d_%H-%M-%S}",
@@ -156,6 +233,7 @@ std::filesystem::path logFilePath() {
 void setUpLogging() {
     try {
         const std::filesystem::path path = logFilePath();
+        g_logFile = path;
 
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
@@ -194,7 +272,7 @@ void setUpLogging() {
 /// (режим --attach лаунчера): окружения такой процесс от лаунчера не получал,
 /// поэтому адрес сервера и имя берутся из файла, который лаунчер кладёт рядом
 /// с журналом.
-void applySessionFile(Connection::Settings& settings) {
+void applySessionFile(Startup& startup) {
     const std::string localAppData = environmentValue(L"LOCALAPPDATA");
     if (localAppData.empty()) {
         return;
@@ -220,27 +298,28 @@ void applySessionFile(Connection::Settings& settings) {
         const std::string value = line.substr(eq + 1);
 
         if (key == "server") {
-            applyServerAddress(value, settings);
+            startup.addressGiven |= applyServerAddress(value, startup.connection);
         } else if (key == "nickname" && !value.empty()) {
-            settings.nickname = value;
+            startup.connection.nickname = value;
         }
     }
 }
 
-Connection::Settings readSettings() {
-    Connection::Settings settings;
+Startup readSettings() {
+    Startup startup;
 
     // Файл читается первым, окружение — вторым и имеет приоритет: когда игру
     // запускает лаунчер, окружение свежее файла, оставшегося от прошлого раза.
-    applySessionFile(settings);
+    applySessionFile(startup);
 
-    applyServerAddress(environmentValue(L"OXYMP_SERVER"), settings);
+    startup.addressGiven |=
+        applyServerAddress(environmentValue(L"OXYMP_SERVER"), startup.connection);
 
     if (std::string nickname = environmentValue(L"OXYMP_NICKNAME"); !nickname.empty()) {
-        settings.nickname = std::move(nickname);
+        startup.connection.nickname = std::move(nickname);
     }
 
-    return settings;
+    return startup;
 }
 
 /// Сколько добиваться опознания движка.
@@ -584,6 +663,78 @@ std::vector<SessionVehicleView> describeSessionVehicles(const Connection& connec
     return vehicles;
 }
 
+/// Что меню услышало о соединении в последний раз.
+///
+/// Нужно потому, что говорить ему приходится о переменах, а не о состоянии: на
+/// каждое слово страница перестраивает себя целиком, и повторять одно и то же
+/// двадцать раз в секунду значило бы не дать ей нарисоваться вовсе.
+enum class MenuStage {
+    /// Ещё ничего не сказано либо сказано «подключаемся к серверу».
+    Connecting,
+
+    /// Сказано «идёт вход в игру»: сервер принял, мир грузится.
+    Joining,
+
+    Connected,
+    Failed,
+    Lost,
+};
+
+/// Рассказывает меню о ходе подключения.
+///
+/// Пока страница не услышит «подключились», она держит себя открытой поверх
+/// всего; так она устроена, и так же ведёт себя alt:V.
+///
+/// «Подключились» говорится не по состоянию сети, а по уходу экрана загрузки.
+/// Разница в минуты: сеть отвечает за доли секунды, а игрок в это время ещё едет
+/// по загрузке, и меню, убранное по сетевому признаку, открыло бы ему пустой мир
+/// без персонажа.
+void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed, MenuStage& stage) {
+    if (menu == nullptr) {
+        return;
+    }
+
+    if (connection.state() == ConnectionState::Rejected) {
+        if (stage != MenuStage::Failed) {
+            stage = MenuStage::Failed;
+
+            menu->failed(connection.rejectReason().has_value()
+                             ? describe(*connection.rejectReason())
+                             : std::string_view{"сервер отказал"});
+        }
+        return;
+    }
+
+    // Игрок был в сессии и остался без неё. Повторные попытки идут своим чередом,
+    // и удавшаяся скажет «подключились» заново.
+    if (stage == MenuStage::Connected &&
+        connection.disconnectReason() == DisconnectReason::Lost) {
+        stage = MenuStage::Lost;
+        menu->disconnected("связь с сервером потеряна");
+        return;
+    }
+
+    if (connection.state() != ConnectionState::Connected) {
+        return;
+    }
+
+    if (!feed.ready()) {
+        // Сервер принял, мир ещё грузится. Строка на странице меняется с
+        // «подключаемся к серверу» на «входим в игру» — и висит там минуты,
+        // ровно столько, сколько идёт загрузка.
+        if (stage == MenuStage::Connecting) {
+            stage = MenuStage::Joining;
+            menu->joining();
+        }
+        return;
+    }
+
+    if (stage != MenuStage::Connected) {
+        stage = MenuStage::Connected;
+        menu->connected();
+    }
+}
+
 /// Собирает игровую часть клиента.
 ///
 /// Отдельной функцией, а не внутри run: сюда стягиваются все причины, по
@@ -652,13 +803,20 @@ void run() {
     // следующей строки.
     game::reportEnvironment();
 
-    const Connection::Settings settings = readSettings();
+    const Startup startup = readSettings();
+    const Connection::Settings& settings = startup.connection;
 
     // Всё, что показывает игровой интерфейс. Он живёт внутри этого же процесса
     // и рисуется прямо в кадр игры, поэтому состояние доходит до него напрямую,
     // а не через разделяемую память, как до экрана загрузки.
     UiFeed feed;
-    feed.describeSession(std::format("{}:{}", settings.address, settings.port),
+
+    // Адрес называется только тогда, когда он есть. Без него экран загрузки
+    // рассказывал бы игроку про 127.0.0.1 — умолчание, к которому мы никуда не
+    // идём: сервер выбирается в меню, и до выбора говорить нечего.
+    feed.describeSession(startup.addressGiven
+                             ? std::format("{}:{}", settings.address, settings.port)
+                             : std::string{},
                          settings.nickname);
 
     // Ловушка падений ставится раньше всего остального: всё, что делает клиент
@@ -671,8 +829,12 @@ void run() {
     // ход запуска с самого начала, а не с середины.
     spdlog::default_logger()->sinks().push_back(std::make_shared<ConsoleSink>(feed));
 
-    spdlog::info("клиент запущен внутри игры: сервер {}:{}, имя \"{}\"", settings.address,
-                 settings.port, settings.nickname);
+    if (startup.addressGiven) {
+        spdlog::info("клиент запущен внутри игры: сервер {}:{}, имя \"{}\"", settings.address,
+                     settings.port, settings.nickname);
+    } else {
+        spdlog::info("клиент запущен внутри игры: сервер не назван, ждём выбора в меню");
+    }
 
     // Опознание движка идёт до сети и не мешает ей: даже если игра обновилась и
     // каталог устарел, соединение с сервером остаётся рабочим — просто в самой
@@ -685,6 +847,10 @@ void run() {
     // позже убирать будет нечего, она уже прошла.
     bool hooksReady = false;
 
+    // Удержание мира, если оно поставлено. Живёт до конца работы клиента: пока
+    // оно цело, поток игры вправе сидеть внутри него.
+    std::unique_ptr<game::WorldHold> worldHold;
+
     if (engine != nullptr) {
         feed.setStage(shared::LoadStage::Engine);
 
@@ -692,11 +858,31 @@ void run() {
 
         std::string error;
 
+        // Ролик Rockstar здесь больше не убирается, и это не забывчивость.
+        // Правка «показывать ролик» в ноль останавливала раскрутку игры намертво:
+        // состояние застревало на пятёрке — «ждём страницу выбора режима», — и
+        // мир не грузился вовсе. Двенадцать запусков подряд, ни одного входа в
+        // мир; сняли правку — вошли с первого. Подробности в docs/altv-parity.md.
+        if (!game::muteLoadingMusic(*engine, error)) {
+            spdlog::error("музыка загрузки останется: {}", error);
+        }
+
         // Страница выбора режима убирается здесь же и по той же причине: до неё
         // остаётся около минуты, а скриптовый тик, из которого работает всё
         // остальное, начинается уже после неё.
         if (!game::skipLandingPage(*engine, error)) {
             spdlog::error("страница выбора режима останется: {}", error);
+        }
+
+        // Мир держится только тогда, когда сервер ещё не выбран, — то есть при
+        // запуске из лаунчера, без адреса. Назвали адрес — держать нечего и
+        // некого: идти в меню незачем, и придержанная игра означала бы, что бот
+        // и проверки навсегда остались бы на чёрном экране.
+        if (!startup.addressGiven) {
+            worldHold = game::WorldHold::install(*engine, error);
+            if (worldHold == nullptr) {
+                spdlog::error("мир будет грузиться сразу: {}", error);
+            }
         }
 
         if (game::HookEngine::initialise(error)) {
@@ -720,33 +906,76 @@ void run() {
     // нужно: ни таблицы нативов, ни скриптового тика.
     std::unique_ptr<game::UiLayer> ui;
 
+    // Чего меню просит у сети. Объявлено раньше слоя интерфейса и переживает
+    // его: обработчики страницы держат ссылку на эту запись.
+    ConnectRequest request;
+
     if (hooksReady) {
         std::string uiError;
 
         Menu::Actions actions;
 
-        // Выход из игры — единственное, что меню умеет исполнить прямо сейчас.
-        // Закрытием окна, а не завершением процесса: игра успевает сохранить
-        // настройки и попрощаться с Social Club, а мы не оставляем после себя
-        // подвисший процесс.
+        // Выход из игры. Сперва по-хорошему — закрытием окна: игра успевает
+        // сохранить настройки и попрощаться с Social Club.
+        //
+        // По-хорошему выходит не всегда, и это выяснено на живой игре: пока мир
+        // придержан, до разбора WM_CLOSE игра просто не доходит — нажатие
+        // «выйти» не делало ничего. Поэтому следом идёт срок: не закрылась за
+        // две секунды — закрываем сами. Терять при этом нечего, мир ещё не
+        // загружен.
         actions.quit = [] {
             if (const HWND window = game::Window::findOwnWindow(); window != nullptr) {
                 ::PostMessageW(window, WM_CLOSE, 0, 0);
             }
+
+            spdlog::info("меню просит выйти из игры");
+
+            std::thread{[] {
+                std::this_thread::sleep_for(std::chrono::seconds{2});
+
+                spdlog::warn("игра не закрылась сама — выходим");
+                spdlog::default_logger()->flush();
+
+                ::TerminateProcess(::GetCurrentProcess(), 0);
+            }}.detach();
         };
 
-        // Подключение и отключение меню пока не исполняет: адрес сервера клиент
-        // получает от лаунчера ещё до своего запуска, и сменить его на ходу
-        // означало бы поднять сессию заново — работа, которой здесь ещё нет.
-        // Записано в docs/altv-parity.md.
-        actions.connect = [](const std::string& address, const std::string&) {
-            spdlog::info("меню просит подключиться к {} — пока не умеем", address);
+        // Подключение и отключение исполняются не здесь, а в сетевом цикле, и
+        // это не лишнее звено. Обработчик зовётся из потока CEF, и пока он не
+        // вернётся, страница не отвечает на мышь; поднимать в нём соединение
+        // значило бы подвесить меню на всё время попытки.
+        actions.connect = [&request](const std::string& address, const std::string& password) {
+            spdlog::info("меню просит подключиться к {}", address);
+            request.ask(address, password);
+        };
+
+        actions.disconnect = [&request] { request.askDisconnect(); };
+
+        // Журнал открывается тем, чем его открыл бы сам игрок, — блокнотом по
+        // выбору Windows. Своего окна для чтения журнала клиент не заводит:
+        // сотня строк текста в кадре игры хуже читается, чем в любом редакторе.
+        actions.openLog = [] {
+            if (g_logFile.empty()) {
+                return;
+            }
+
+            const std::wstring path = g_logFile.wstring();
+
+            ::ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         };
 
         ui = game::UiLayer::create(feed, std::move(actions), uiError);
         if (ui == nullptr) {
             spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
         }
+    }
+
+    // Меню не поднялось — держать мир нельзя ни мгновения дольше. Выбирать
+    // сервер игроку было бы нечем, а игра осталась бы стоять на чёрном экране
+    // навсегда: закрыть её он смог бы только диспетчером задач.
+    if (worldHold != nullptr && ui == nullptr) {
+        spdlog::warn("выбирать сервер не в чем — отпускаем мир сразу");
+        worldHold->release();
     }
 
     // Объявлены раньше сессии и потому переживают её: сессия пользуется ими из
@@ -787,15 +1016,26 @@ void run() {
                                    scriptStartup);
     }
 
-    // Соединение поднимается здесь, а не в начале, и это перемена по просьбе.
+    // Соединения нет, пока его не попросят, и это главная перемена устройства
+    // запуска: клиент приходит в игру без сервера, как alt:V.
     //
-    // Раньше клиент подключался сразу после внедрения — за минуту с лишним до
-    // того, как игрок вообще попадал в мир. Толку от этого не было никакого:
-    // отправлять было нечего, показывать некому, — а вреда два. Сервер целую
-    // минуту числил игрока в сессии, хотя тот ещё смотрел заставку Rockstar; и,
-    // главное, первая же неудачная попытка писала «сервер не отвечает» на экран
-    // загрузки, где игроку и без того было тревожно.
-    Connection connection{settings};
+    // Просьб две, и они разные. Первая — от лаунчера, адресом в окружении: ей
+    // клиент подчиняется сам, но не раньше, чем игрок появится в мире. Так было
+    // и прежде, и причина не изменилась: подключаться посреди загрузки незачем —
+    // отправлять нечего, а сервер тем временем числит игроком того, кто ещё
+    // смотрит заставку.
+    //
+    // Вторая — от меню, щелчком по серверу. Эта исполняется немедленно: игрок
+    // попросил сам и ждёт ответа. Отложить её до появления в мире значило бы
+    // молчать те самые минуты, что идёт загрузка, — а если сервера нет, сказать
+    // об этом надо сразу, а не в конце.
+    std::unique_ptr<Connection> connection;
+
+    // Адрес от лаунчера, пока он не исполнен. Пусто — значит его и не было.
+    std::optional<std::string> launcherAddress;
+    if (startup.addressGiven) {
+        launcherAddress = std::format("{}:{}", settings.address, settings.port);
+    }
 
     // Кеш ресурсов рядом с клиентом, а не в системных каталогах: игрок должен
     // видеть, чем занято место, и уметь очистить его, просто удалив папку.
@@ -817,84 +1057,165 @@ void run() {
     // о чём-то спросили.
     std::chrono::steady_clock::time_point connectionStartedAt{};
 
+    // Меню, если оно поднялось. Без него клиент работает по-прежнему — просто
+    // рассказывать о ходе подключения будет некому.
+    Menu* const menu = ui != nullptr ? ui->menu() : nullptr;
+
+    // Куда идём сейчас. Не то же самое, что settings: адрес мог прийти от меню,
+    // а имя — из настроек страницы.
+    Connection::Settings active = settings;
+
+    // Что меню уже знает о соединении.
+    MenuStage menuStage = MenuStage::Connecting;
+
     while (!g_stopRequested.load()) {
         // Заголовок окна выправляется на каждом обороте, а не только при живом
         // соединении: окно игра пересоздаёт на переходах, и до появления игрока
         // в мире это случается не раз.
         window.apply(kWindowTitle);
 
-        // К серверу идём не раньше, чем игрок появится в мире.
-        //
-        // Движок к этому времени не просто опознан, а работает: таблица нативов
-        // заполнена, скриптовый тик идёт, персонаж стоит на земле. Всё, что
-        // раньше, — это загрузка, и подключаться посреди неё незачем: отправлять
-        // нечего, а сервер тем временем числит игроком того, кто ещё смотрит
-        // заставку Rockstar.
-        //
-        // Экран загрузки при этом никуда не девается: подключение идёт на нём
-        // последней стадией, и уходит он, только когда с сервером всё решится.
-        // Так «сервер не отвечает» перестало быть неожиданной жалобой поверх
-        // загрузки и стало её последней строкой.
-        if (connectionStartedAt == std::chrono::steady_clock::time_point{}) {
-            if (!feed.playerInWorld()) {
+        // Просьба отключиться разбирается первой: она отменяет всё остальное.
+        if (request.takeDisconnect()) {
+            if (connection != nullptr) {
+                connection->disconnect();
+                connection.reset();
+
+                spdlog::info("меню просит отключиться — соединение закрыто");
+            }
+
+            // Мир при этом остаётся загруженным, и притворяться иначе нечем:
+            // разобрать загруженную GTA обратно клиент не умеет. Игрок
+            // возвращается в меню, но игра под ним та же.
+            if (menu != nullptr) {
+                menu->disconnected("вы отключились от сервера");
+            }
+
+            status.update(ConnectionState::Waiting, shared::kInvalidPlayerId);
+
+            menuStage = MenuStage::Lost;
+        }
+
+        if (connection == nullptr) {
+            std::optional<ConnectRequest::Wanted> start = request.take();
+
+            // Слово лаунчера исполняется только по появлении игрока в мире —
+            // причина в комментарии у объявления launcherAddress. Слово меню
+            // исполняется сразу, потому и разбирается первым.
+            if (!start && launcherAddress.has_value() && feed.playerInWorld()) {
+                start = ConnectRequest::Wanted{*launcherAddress, {}};
+                launcherAddress.reset();
+            }
+
+            if (!start) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{50});
                 continue;
             }
 
+            active = settings;
+            applyServerAddress(start->address, active);
+
+            // Имя берётся из настроек меню, а не из довода лаунчера: игрок
+            // правит его на странице, и правка обязана дойти до сервера с
+            // первым же представлением. Пустое имя означает, что страницы нет
+            // или он ничего не набрал, — тогда остаётся то, с чем нас запустили.
+            if (menu != nullptr) {
+                if (std::string name = menu->playerName(); !name.empty()) {
+                    active.nickname = std::move(name);
+                }
+            }
+
+            // Пароль идёт от страницы и никуда больше не сохраняется: ни в
+            // настройки, ни в журнал. Строка живёт ровно до конца попытки.
+            active.password = start->password;
+
+            feed.describeSession(std::format("{}:{}", active.address, active.port),
+                                 active.nickname);
+
+            if (menu != nullptr) {
+                menu->connecting(start->address);
+            }
+
+            spdlog::info("подключаемся к {}:{} именем \"{}\"", active.address, active.port,
+                         active.nickname);
+
+            // Сервер выбран — мир отпускается. Именно здесь, а не по успешному
+            // подключению: загрузка идёт минуты, и начинать её после ответа
+            // сервера значило бы сложить два ожидания в одно длинное. У alt:V
+            // так же — меню показывает ход подключения, а мир тем временем уже
+            // грузится.
+            if (worldHold != nullptr) {
+                worldHold->release();
+            }
+
+            connection = std::make_unique<Connection>(active);
+
             connectionStartedAt = std::chrono::steady_clock::now();
-            spdlog::info("игрок в мире — подключаемся к серверу");
+            menuStage = MenuStage::Connecting;
         }
 
-        connection.update(std::chrono::milliseconds{50});
+        connection->update(std::chrono::milliseconds{50});
 
-        const std::size_t players = connection.remotePlayers().size();
+        const std::size_t players = connection->remotePlayers().size();
 
-        status.update(connection.state(), connection.localPlayerId());
+        status.update(connection->state(), connection->localPlayerId());
 
-        if (const auto spawn = connection.spawnPosition()) {
+        if (const auto spawn = connection->spawnPosition()) {
             status.setSpawn(*spawn);
         }
 
         // Загрузка идёт здесь, в сетевом потоке, и это не выбор из удобства:
         // качать в потоке игры значило бы остановить кадр на время закачки.
-        if (const auto offered = connection.takeResources()) {
-            for (const ResourceCache::Ready& item : resources.sync(settings.address,
-                                                                   settings.port, *offered)) {
+        if (const auto offered = connection->takeResources()) {
+            // Меню на это время показывает «ресурсы»: закачка идёт в этом же
+            // потоке и занимает столько, сколько занимает, а молчащая страница
+            // выглядит как зависшая.
+            if (menu != nullptr) {
+                menu->loadingResources();
+            }
+
+            for (const ResourceCache::Ready& item : resources.sync(active.address, active.port,
+                                                                   *offered)) {
                 feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
             }
+
+            // Стадия сбрасывается назад: следующий оборот скажет странице «входим
+            // в игру» заново, и она сменит строку сама.
+            if (menuStage == MenuStage::Joining) {
+                menuStage = MenuStage::Connecting;
+            }
         }
-        roster.replace(describeRemotePlayers(connection), describeSessionVehicles(connection));
+        roster.replace(describeRemotePlayers(*connection), describeSessionVehicles(*connection));
 
         if (const auto own = localState.get()) {
-            connection.setLocalState(*own);
-            connection.setOwnedVehicles(localState.vehicles());
-            connection.setOwnedAppearances(localState.appearances());
+            connection->setLocalState(*own);
+            connection->setOwnedVehicles(localState.vehicles());
+            connection->setOwnedAppearances(localState.appearances());
         }
 
         // Игровой поток просил отправить — отправляем.
         for (std::string& text : mail.takeOutgoingChat()) {
-            connection.say(std::move(text));
+            connection->say(std::move(text));
         }
         for (const shared::DamageReport& report : mail.takeOutgoingDamage()) {
-            connection.reportDamage(report.victim, report.amount, report.weapon);
+            connection->reportDamage(report.victim, report.amount, report.weapon);
         }
         for (shared::ClientEvent& event : mail.takeOutgoingEvents()) {
-            connection.emit(std::move(event.name), std::move(event.payload));
+            connection->emit(std::move(event.name), std::move(event.payload));
         }
 
         // Пришедшее раскладывается по двум разным адресатам: попадания нужны
         // игре, а строки чата — только экрану, и гонять их через игровой поток
         // незачем.
-        mail.deliverDamage(connection.takeDamage());
-        mail.deliverTeleports(connection.takeTeleports());
-        mail.deliverServerEvents(connection.takeServerEvents());
-        mail.deliverVehicleAppearances(connection.takeVehicleAppearances());
-        mail.deliverWorld(connection.takeWorld());
-        mail.deliverLoadout(connection.takeLoadout());
-        mail.deliverHealth(connection.takeHealth());
-        mail.deliverObjects(connection.takeObjects(), connection.takeRemovedObjects());
+        mail.deliverDamage(connection->takeDamage());
+        mail.deliverTeleports(connection->takeTeleports());
+        mail.deliverServerEvents(connection->takeServerEvents());
+        mail.deliverVehicleAppearances(connection->takeVehicleAppearances());
+        mail.deliverWorld(connection->takeWorld());
+        mail.deliverLoadout(connection->takeLoadout());
+        mail.deliverHealth(connection->takeHealth());
+        mail.deliverObjects(connection->takeObjects(), connection->takeRemovedObjects());
 
-        for (const shared::ChatLine& line : connection.takeChatLines()) {
+        for (const shared::ChatLine& line : connection->takeChatLines()) {
             feed.pushChat(line.kind, line.kind == shared::ChatKind::Say
                                          ? std::format("{} [{}]: {}", line.nickname,
                                                        line.playerId, line.text)
@@ -902,35 +1223,39 @@ void run() {
         }
 
         const bool troubled =
-            connection.state() != ConnectionState::Connected &&
+            connection->state() != ConnectionState::Connected &&
             std::chrono::steady_clock::now() - connectionStartedAt >= kSilenceBeforeAlarm;
 
-        const DisconnectReason lost = connection.disconnectReason();
+        const DisconnectReason lost = connection->disconnectReason();
 
         feed.setConnection(UiFeed::Connection{
-            .state = static_cast<unsigned int>(connection.state()),
+            .state = static_cast<unsigned int>(connection->state()),
             .troubled = troubled,
             .disconnect = static_cast<unsigned int>(lost),
 
             // Объяснение прикладывается только к отказу: его сервер назвал
             // сам. У оборванной связи причины нет — есть только то, что её
             // больше нет, и придумывать здесь объяснение значило бы солгать.
-            .disconnectDetail = connection.rejectReason().has_value()
-                                    ? std::string{describe(*connection.rejectReason())}
+            .disconnectDetail = connection->rejectReason().has_value()
+                                    ? std::string{describe(*connection->rejectReason())}
                                     : std::string{},
         });
+
+        tellMenu(menu, *connection, feed, menuStage);
 
         // Игроков на сервере на одного больше, чем чужих: себя в списке чужих
         // нет, а в Discord показывается общее число.
         discord.update(Presence{
-            .server = std::format("{}:{}", settings.address, settings.port),
-            .playerId = connection.localPlayerId(),
+            .server = std::format("{}:{}", active.address, active.port),
+            .playerId = connection->localPlayerId(),
             .players = players + 1,
-            .connected = connection.state() == ConnectionState::Connected,
+            .connected = connection->state() == ConnectionState::Connected,
         });
     }
 
-    connection.disconnect();
+    if (connection != nullptr) {
+        connection->disconnect();
+    }
 
     // Порядок обязателен: интерфейс держит перехват показа кадра, и снимать его
     // нужно раньше, чем будет снят сам механизм перехвата.

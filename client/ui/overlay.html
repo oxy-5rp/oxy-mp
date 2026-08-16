@@ -4,26 +4,23 @@
 <meta charset="utf-8">
 <title>oxyMP</title>
 
-<!-- Сюда клиент подставляет картинку экрана загрузки.
-     Она лежит отдельным файлом — обычным jpg, который можно открыть и
-     посмотреть, — а в страницу попадает ссылкой с данными: у страницы нет ни
-     файла, ни соседей на диске, и загрузить картинку рядом с собой ей неоткуда.
-     Без подстановки страница работает как есть, только с пустым фоном. -->
-<!--art-->
-
 <style>
   /* Всё, что клиент рисует поверх игры, и ничего сверх этого.
      Страница рисуется CEF прямо в память и попадает в кадр игры текстурой.
      Окна у неё нет вовсе, а размер равен размеру кадра игры — поэтому разметка
      раскладывается по углам экрана, как в любой игре.
 
-     Здесь ровно четыре вещи: экран загрузки, чат, консоль и окно разрыва связи.
-     Своего уголка с состоянием сессии, деньгами и списком игроков здесь больше
-     нет, и это не упрощение ради упрощения. Всё это — правила игрового режима, а
-     они принадлежат серверу: захочет режим показать деньги — покажет своей
-     страницей. Клиент показывает только то, чего сервер показать не может:
-     загрузку до подключения, разрыв связи после него и чат, который сервер
-     разносит сам, ещё до всякого ресурса.
+     Здесь ровно две вещи: чат и консоль по F8 — то самое, что CLAUDE.md
+     называет единственным своим, что у клиента осталось.
+
+     Было больше: свой экран загрузки и своё окно разрыва связи. Оба убраны, и
+     оба по одной причине — про то же самое рассказывает меню alt:V, и делает
+     это своей страницей, поверх которой наши экраны просвечивали вторым слоем.
+     Ход подключения меню показывает строкой, разрыв — тоже. Двух объяснений
+     одного и того же на одном экране быть не должно.
+
+     Своего уголка с состоянием сессии, деньгами и списком игроков здесь тоже
+     нет: это правила игрового режима, а они принадлежат серверу.
 
      Фон прозрачный по-настоящему, четвёртым каналом: панели могут быть какими
      угодно тёмными и полупрозрачными, сквозь них будет видно игру. Прежнему
@@ -58,134 +55,6 @@
   }
 
   body:not(.console) .console-view { display: none; }
-
-  /* --- Экран загрузки ---------------------------------------------------- */
-
-  /* Живёт на той же странице, что и всё остальное, и уходит, когда игрок в мире
-     и с сервером всё решилось.
-
-     Раскладка взята у самой игры и у знакомых мультиплееров: картинка во весь
-     кадр, знак внизу слева, ход загрузки внизу справа. Так у экрана есть ровно
-     два места, куда смотрят, и оба по краям — середину занимает картинка. */
-  .loading {
-    position: fixed;
-    inset: 0;
-    background: #05070a;
-    transition: opacity .6s;
-  }
-
-  body.ready .loading { opacity: 0; pointer-events: none; }
-
-  /* Картинка и затемнение — разными слоями.
-     Затемнение нужно не ради красоты: подписи внизу лежат прямо на картинке, а
-     она в этих местах бывает какой угодно светлой. */
-  .loading .art {
-    position: absolute;
-    inset: 0;
-    background-image: var(--art, none);
-    background-size: cover;
-    background-position: center;
-
-    /* Медленное приближение: единственное движение на экране, который иначе
-       выглядел бы застывшим кадром. */
-    animation: breathe 40s ease-in-out infinite alternate;
-  }
-
-  @keyframes breathe {
-    from { transform: scale(1); }
-    to   { transform: scale(1.06); }
-  }
-
-  .loading .shade {
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(to top, rgba(3, 5, 8, .95) 0%, rgba(3, 5, 8, .55) 22%, rgba(3, 5, 8, 0) 55%),
-      linear-gradient(to right, rgba(3, 5, 8, .75) 0%, rgba(3, 5, 8, 0) 45%);
-  }
-
-  /* Знак внизу слева — там же, где у игры её собственный. */
-  .loading .mark {
-    position: absolute;
-    left: 54px;
-    bottom: 46px;
-    font-size: 44px;
-    font-weight: 200;
-    letter-spacing: 6px;
-    text-transform: uppercase;
-    line-height: 1;
-    text-shadow: 0 2px 24px rgba(0, 0, 0, .8);
-  }
-
-  .loading .mark b { color: var(--accent); font-weight: 600; }
-
-  .loading .mark span {
-    display: block;
-    margin-top: 10px;
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 3.4px;
-    color: var(--muted);
-  }
-
-  /* Ход загрузки внизу справа: подпись, а под ней полоса. */
-  .loading .progress {
-    position: absolute;
-    right: 54px;
-    bottom: 52px;
-    width: 34%;
-    min-width: 320px;
-    text-align: right;
-  }
-
-  .loading .stage {
-    font-size: 12px;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
-    color: #cfd8e6;
-    text-shadow: 0 1px 12px rgba(0, 0, 0, .9);
-  }
-
-  /* Беда с сервером — единственное, что этот экран говорит красным. */
-  .loading .stage.bad { color: var(--bad); }
-
-  .loading .bar {
-    position: relative;
-    margin-top: 10px;
-    height: 3px;
-    background: rgba(255, 255, 255, .14);
-    overflow: hidden;
-  }
-
-  .loading .bar i {
-    display: block;
-    height: 100%;
-    width: 0;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent);
-    transition: width .6s ease-out;
-  }
-
-  /* Молчащий сервер красит и полосу: полная синяя полоса под красной надписью
-     говорила бы, что всё удалось. */
-  body.silent .loading .bar i { background: var(--bad); box-shadow: 0 0 12px var(--bad); }
-
-  /* Пока идёт подключение, полоса дышит: ждать сервер приходится в тишине, и
-     застывшая полоса в эти секунды читается как «всё сломалось». */
-  body.connecting .loading .bar i { animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: .45; } }
-
-  .loading .meta {
-    position: absolute;
-    right: 54px;
-    bottom: 26px;
-    font-size: 11px;
-    letter-spacing: .3px;
-    color: #6d7788;
-    text-align: right;
-  }
-
-  .loading .meta b { color: #9aa6b8; font-weight: 500; }
 
   /* --- Чат --------------------------------------------------------------- */
 
@@ -299,98 +168,9 @@
   .log .err  { color: var(--bad); }
   .log .dbg  { color: #6d7688; }
 
-  /* --- Разрыв связи с сервером ------------------------------------------- */
-
-  /* Поверх всего и без исключений: игрок, оставшийся без сервера, продолжает
-     видеть живую игру — персонаж ходит, машина едет, — и ничто в кадре само по
-     себе не скажет ему, что происходящее больше никого не касается.
-
-     Прячется оно только вместе с экраном загрузки: пока тот держится, о ходе
-     подключения сказано там своей строкой. */
-  .broken {
-    position: fixed;
-    inset: 0;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    background: rgba(3, 5, 8, .82);
-
-    /* Размытие отделяет мёртвую картинку от окна лучше любой рамки: игра за ним
-       видна, но перестаёт читаться как то, во что играют. */
-    backdrop-filter: blur(7px);
-  }
-
-  body.broken .broken { display: flex; }
-
-  /* Пока держится экран загрузки, окна разрыва нет: о ходе подключения там уже
-     сказано своей строкой, и второе объяснение поверх первого только сбивало бы.
-     Своё слово окно скажет, когда экран уйдёт. */
-  body:not(.ready) .broken { display: none !important; }
-
-  .broken .box {
-    width: 460px;
-    padding: 28px 30px 24px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    text-align: center;
-    box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
-  }
-
-  .broken h2 {
-    margin: 0 0 10px;
-    font-size: 19px;
-    font-weight: 600;
-    color: var(--bad);
-  }
-
-  .broken .why {
-    margin: 0 0 18px;
-    font-size: 13px;
-    color: #c3ccda;
-  }
-
-  /* Отсчёт до следующей попытки не показывается, и это осознанно: попытки идут
-     с растущей задержкой, и точного числа у страницы нет. Обещать секунду и
-     промолчать полминуты хуже, чем не обещать ничего. */
-  .broken .retry {
-    font-size: 12px;
-    color: var(--muted);
-    border-top: 1px solid var(--line);
-    padding-top: 14px;
-  }
-
-  .broken .retry b { color: var(--accent); font-weight: 500; }
-
-  /* Окончательный отказ повторять нечего: причина сама не изменится. */
-  body.broken-final .broken .retry { display: none; }
-
-  .broken .final {
-    display: none;
-    font-size: 12px;
-    color: var(--muted);
-    border-top: 1px solid var(--line);
-    padding-top: 14px;
-  }
-
-  body.broken-final .broken .final { display: block; }
 </style>
 </head>
 <body>
-
-<div class="loading" id="loading">
-  <div class="art"></div>
-  <div class="shade"></div>
-
-  <div class="mark">oxy<b>mp</b><span id="loading-address">—</span></div>
-
-  <div class="progress">
-    <div class="stage" id="loading-stage">запуск игры</div>
-    <div class="bar"><i id="loading-bar"></i></div>
-  </div>
-
-  <div class="meta">игрок <b id="loading-nickname">—</b></div>
-</div>
 
 <div class="chat">
   <div class="lines" id="lines"></div>
@@ -405,38 +185,7 @@
   <div class="log" id="log"></div>
 </div>
 
-<div class="broken">
-  <div class="box">
-    <h2 id="broken-title">Соединение с сервером потеряно</h2>
-    <p class="why" id="broken-why"></p>
-    <div class="retry">пробуем подключиться заново — <b id="broken-address">—</b></div>
-    <div class="final">выйдите из игры и вернитесь, когда причина будет устранена</div>
-  </div>
-</div>
-
 <script>
-  /// Состояние соединения, при котором игрок уже в сессии.
-  const IN_SESSION = 3;
-
-  // Чем кончилась связь. Совпадает с DisconnectReason на стороне клиента.
-  const LOST = 1;
-  const REFUSED = 2;
-
-  // Порядок и число совпадают с LoadStage на стороне клиента.
-  const STAGES = [
-    'запуск игры',
-    'опознание движка',
-    'загрузка мира',
-    'выбор режима',
-    'подготовка персонажа',
-    'игрок в мире'
-  ];
-
-  // Последняя стадия загрузки — подключение к серверу, и её на стороне клиента
-  // нет: там она не стадия входа в мир, а состояние соединения. Полоса поэтому
-  // считает на один шаг больше, чем стадий.
-  const STEPS = STAGES.length + 1;
-
   const KIND = ['say', 'join', 'leave', 'system'];
 
   // Уровни spdlog: trace, debug, info, warn, err, critical, off.
@@ -464,78 +213,6 @@
     }
   }
 
-  // --- Состояние от клиента ------------------------------------------------
-
-  /// Что показывать на экране загрузки последним шагом — тем, на котором клиент
-  /// уже в мире и разговаривает с сервером.
-  function connectionStage(state) {
-    if (state.connection === IN_SESSION) {
-      return { text: 'сервер ответил', share: 1, waiting: false, bad: false };
-    }
-
-    // Красным — только когда молчание затянулось. Первые секунды после входа
-    // соединения ещё нет, и это не беда, а обычный ход дела.
-    if (state.troubled) {
-      return { text: 'сервер не отвечает', share: 1, waiting: false, bad: true };
-    }
-
-    return { text: 'подключение к серверу', share: 0.88, waiting: true, bad: false };
-  }
-
-  /// Показывает окно разрыва — или убирает его, когда игрок снова в сессии.
-  ///
-  /// Отказ и обрыв разведены не ради разных слов, а ради разного обещания.
-  /// Обрыв проходит сам: клиент повторяет попытки, и окно уйдёт без участия
-  /// игрока. Отказ сам не пройдёт — сервер назвал причину, и она не изменится
-  /// оттого, что мы постучимся ещё раз. Обещать в этом случае повтор значило бы
-  /// заставить человека ждать того, чего не будет.
-  function renderBroken(state) {
-    const reason = Number(state.disconnect) || 0;
-
-    document.body.classList.toggle('broken', reason !== 0);
-    document.body.classList.toggle('broken-final', reason === REFUSED);
-
-    if (reason === 0) {
-      return;
-    }
-
-    document.getElementById('broken-title').textContent =
-      reason === REFUSED ? 'Сервер отказал в подключении' : 'Соединение с сервером потеряно';
-
-    document.getElementById('broken-why').textContent =
-      state.disconnectDetail || (reason === LOST ? 'сервер перестал отвечать' : '');
-  }
-
-  function renderLoading(state) {
-    const stage = Number(state.stage) || 0;
-    const last = stage >= STAGES.length - 1;
-
-    const line = document.getElementById('loading-stage');
-    const bar = document.getElementById('loading-bar');
-
-    if (last) {
-      const connection = connectionStage(state);
-
-      line.textContent = connection.text;
-      line.className = 'stage' + (connection.bad ? ' bad' : '');
-      bar.style.width = Math.round(((STAGES.length + connection.share) / STEPS) * 100) + '%';
-
-      document.body.classList.toggle('connecting', connection.waiting);
-      document.body.classList.toggle('silent', connection.bad);
-      return;
-    }
-
-    document.body.classList.remove('connecting');
-    document.body.classList.remove('silent');
-
-    line.textContent = STAGES[stage] || STAGES[0];
-    line.className = 'stage';
-
-    // Полоса никогда не стоит на нуле: нулевая выглядит сломанной, а первая
-    // стадия длится дольше остальных вместе взятых.
-    bar.style.width = Math.round(((stage + 1) / STEPS) * 100) + '%';
-  }
-
   // Канал к клиенту. CEF доставляет состояние вызовом на самой странице: своего
   // «наружу → страница» у него нет, зато есть выполнение кода в её окружении.
   window.oxymp = {
@@ -547,15 +224,6 @@
 
       for (const line of s.console || []) {
         append(log, line.text, LEVEL[line.kind] || '', LOG_KEEP);
-      }
-
-      renderLoading(s);
-      renderBroken(s);
-
-      if (s.address !== undefined) {
-        document.getElementById('loading-address').textContent = s.address || '—';
-        document.getElementById('loading-nickname').textContent = s.nickname || '—';
-        document.getElementById('broken-address').textContent = s.address || '—';
       }
 
       document.body.classList.toggle('ready', !!s.ready);

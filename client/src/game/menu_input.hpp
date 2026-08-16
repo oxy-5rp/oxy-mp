@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <windows.h>
@@ -35,13 +36,18 @@ public:
     /// страница, и узнать об этом можно только у неё.
     ///
     /// browser обязан пережить перехват: в него уходят все сообщения.
-    /// toggle зовётся по Escape и означает «игрок просит открыть или закрыть
-    /// меню». Ту же клавишу игра тратит на своё меню паузы, и здесь она у неё
-    /// отбирается — ровно так же, как это делает alt:V.
+    /// toggle зовётся по F1 и означает «игрок просит открыть или закрыть меню».
+    /// Escape при этом остаётся игре и странице: страница закрывает им свои
+    /// разговоры, а игра — своё меню паузы.
+    ///
+    /// quit зовётся по Alt+F4 и означает «игрок просит выйти из игры». Отбирается
+    /// это сочетание у игры намеренно: у неё на него свой разговор с вопросом
+    /// «выйти?», а выход из oxyMP один и тот же — тот, которым выходит меню.
     [[nodiscard]] static std::unique_ptr<MenuInput> install(HWND window,
                                                             cefui::Browser& browser,
                                                             std::function<bool()> wanted,
                                                             std::function<void()> toggle,
+                                                            std::function<void()> quit,
                                                             std::string& error);
 
     ~MenuInput();
@@ -54,15 +60,69 @@ private:
 
     static LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 
-    /// Разбирает сообщение. true означает «съедено, игре не показывать».
-    [[nodiscard]] bool handle(UINT message, WPARAM wparam, LPARAM lparam);
+    /// Низкоуровневый перехват клавиатуры.
+    ///
+    /// Стоит отдельно от оконного и работает поверх всей системы: клавиатуру
+    /// игра читает мимо очереди сообщений, и через окно её не достать.
+    static LRESULT CALLBACK keyboardProc(int code, WPARAM wparam, LPARAM lparam);
+
+    /// Перехват очереди сообщений окна игры.
+    ///
+    /// Нужен ради одного сообщения — просьбы сменить раскладку. Игра забирает
+    /// его из очереди и теряет; здесь оно исполняется до того, как это случится.
+    static LRESULT CALLBACK messageProc(int code, WPARAM wparam, LPARAM lparam);
+
+    /// Разбирает нажатие. true означает «съедено, игре не показывать».
+    [[nodiscard]] bool handleKey(unsigned key, unsigned scan, bool down);
+
+    /// Разбирает нажатие, взятое из очереди сообщений игры.
+    ///
+    /// Запасной путь для случая, когда низкоуровневый перехват молчит. Перевод в
+    /// букву здесь делает сама Windows, а не мы: `TranslateMessage` кладёт в
+    /// очередь `WM_CHAR`, и он приходит сюда же следующим.
+    [[nodiscard]] bool handleQueuedKey(const MSG& message);
+
+    /// Переводит нажатие в букву по текущей раскладке и отдаёт её странице.
+    void sendCharacters(unsigned key, unsigned scan);
+
+    /// Разбирает сообщение.
+    ///
+    /// Пусто означает «не наше, отдать игре»; значение — «съедено, вот ответ
+    /// Windows». Ответ важен не для всех сообщений, но там, где важен, он
+    /// решает: WM_SETCURSOR, отвеченный нулём, означает «разбирайтесь сами», и
+    /// игра тут же ставит свой пустой указатель.
+    [[nodiscard]] std::optional<LRESULT> handle(UINT message, WPARAM wparam, LPARAM lparam);
 
     HWND window_ = nullptr;
     WNDPROC previous_ = nullptr;
 
+    /// Низкоуровневый перехват клавиатуры, пока он стоит.
+    HHOOK keyboard_ = nullptr;
+
+    /// Перехват очереди сообщений окна игры.
+    HHOOK messages_ = nullptr;
+
+    /// Доходили ли до перехвата нажатия и уходили ли буквы странице.
+    ///
+    /// По одной записи в журнал за запуск. Без них жалоба «клавиатура не
+    /// работает» означает сразу две разные беды, и различить их нечем.
+    bool calledBack_ = false;
+    bool sawKey_ = false;
+    bool sawQueuedKey_ = false;
+    bool sentCharacter_ = false;
+    bool loggedSilentKey_ = false;
+
+    /// Раскладка, по которой переводятся нажатия в буквы.
+    ///
+    /// Своя, а не системная: раскладку игрового потока Windows нам не меняет, и
+    /// круг раскладок приходится вести самим — по Alt+Shift и Ctrl+Shift, как
+    /// это делает она.
+    HKL layout_ = nullptr;
+
     cefui::Browser* browser_ = nullptr;
     std::function<bool()> wanted_;
     std::function<void()> toggle_;
+    std::function<void()> quit_;
 
     /// Было ли меню открыто в прошлое сообщение.
     ///
@@ -70,6 +130,12 @@ private:
     /// указатель: спрашивать об этом каждое сообщение значило бы дёргать Windows
     /// сотни раз в секунду.
     bool wasOpen_ = false;
+
+    /// На сколько мы подняли счётчик показа указателя.
+    ///
+    /// Ровно на столько же его придётся опустить: счётчик общий на весь процесс,
+    /// и оставленный поднятым, он показал бы указатель поверх игры навсегда.
+    int raised_ = 0;
 };
 
 } // namespace oxymp::client::game

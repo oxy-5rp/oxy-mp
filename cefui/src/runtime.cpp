@@ -19,7 +19,7 @@ std::atomic<bool> g_started{false};
 
 } // namespace
 
-bool startRuntime(const std::wstring& root, std::string& error) {
+bool startRuntime(const std::wstring& root, std::string page, std::string& error) {
     if (g_started.load()) {
         return true;
     }
@@ -92,7 +92,7 @@ bool startRuntime(const std::wstring& root, std::string& error) {
     // Каталог страницы — соседний с каталогом CEF, а не внутри него: чужое
     // хозяйство и наше лежат порознь, и обновление CEF не должно уносить с собой
     // меню.
-    registerUiScheme(directory.parent_path() / "ui");
+    registerUiScheme(std::move(page), directory.parent_path() / "ui");
 
     spdlog::debug("CEF поднят: {}", directory.string());
     return true;

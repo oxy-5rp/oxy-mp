@@ -9,10 +9,14 @@ namespace oxymp::shared {
 /// Увеличивается при любом изменении состава или порядка полей в сообщениях.
 /// Клиент присылает её первым же сообщением, и сервер отказывает при несовпадении:
 /// молча разошедшиеся клиент и сервер дают ошибки, которые невозможно понять.
-inline constexpr std::uint16_t kProtocolVersion = 11;
+inline constexpr std::uint16_t kProtocolVersion = 12;
 
 /// Порт сервера по умолчанию.
-inline constexpr std::uint16_t kDefaultServerPort = 22005;
+///
+/// Тот же, что у alt:V. Прежде здесь стоял 22005 — порт RAGE MP, — и это была
+/// единственная величина, по которой раскладка oxyMP расходилась с alt:V: игрок,
+/// набравший адрес без порта, попадал не туда.
+inline constexpr std::uint16_t kDefaultServerPort = 7788;
 
 /// Сколько раз в секунду сервер обрабатывает состояние мира.
 inline constexpr std::uint16_t kDefaultTickRate = 30;

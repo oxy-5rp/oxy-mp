@@ -34,8 +34,15 @@ public:
         commandLine->AppendSwitchWithValue("disable-features",
                                            "CalculateNativeWinOcclusion,HardwareMediaKeyHandling");
 
-        // Звук страницы не нужен: звуки в игре свои.
-        commandLine->AppendSwitch("mute-audio");
+        // Звук у страницы свой, и он нужен: меню alt:V отзывается на наведение и
+        // нажатие, и без этих звуков оно кажется неживым. Прежде здесь стояло
+        // `mute-audio` — с ним меню молчало целиком.
+        //
+        // Разрешение играть без нажатия обязательно: Chromium по умолчанию не
+        // даёт странице завести звук, пока по ней не щёлкнули, и жалуется в
+        // консоль — «The AudioContext was not allowed to start». Меню же звучит
+        // с первого наведения, ещё до всякого щелчка.
+        commandLine->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     }
 
 private:

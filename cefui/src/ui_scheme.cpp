@@ -18,11 +18,11 @@ namespace {
 /// Что отдавать, когда в ссылке не указано ничего.
 constexpr const char* kIndex = "index.html";
 
-/// Выдаёт файлы из одного каталога и только из него.
+/// Выдаёт страницу из памяти, а её соседей — из одного каталога и только из него.
 class UiSchemeFactory : public CefSchemeHandlerFactory {
 public:
-    explicit UiSchemeFactory(std::filesystem::path directory)
-        : directory_{std::move(directory)} {}
+    UiSchemeFactory(std::string page, std::filesystem::path directory)
+        : page_{std::move(page)}, directory_{std::move(directory)} {}
 
     CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                                          const CefString&,
@@ -32,11 +32,25 @@ public:
             return nullptr;
         }
 
+        // Сама страница отдаётся из памяти: она лежит ресурсом внутри модуля, а
+        // не файлом рядом с ним. Копия на каждый показ здесь не страшна —
+        // показов ровно один за запуск.
+        if (!page_.empty() && file.filename() == kIndex) {
+            const CefRefPtr<CefStreamReader> reader = CefStreamReader::CreateForData(
+                const_cast<char*>(page_.data()), page_.size());
+
+            return new CefStreamResourceHandler{CefString{"text/html"}, reader};
+        }
+
         const CefRefPtr<CefStreamReader> reader =
             CefStreamReader::CreateForFile(file.string());
 
         if (reader == nullptr) {
-            spdlog::warn("страница просит {}, а его нет", file.string());
+            // Отладочным уровнем, а не предупреждением: браузер сам просит
+            // favicon.ico у всякой страницы, и своего у нас нет. Предупреждение
+            // об этом повторялось на каждый переход и забивало журнал ровно там,
+            // где в него смотрят.
+            spdlog::debug("страница просит {}, а его нет", file.string());
             return nullptr;
         }
 
@@ -107,6 +121,9 @@ private:
         return known.empty() ? CefString{"application/octet-stream"} : CefString{known};
     }
 
+    /// Сама страница. Пусто — значит её не встроили, и берётся она с диска.
+    std::string page_;
+
     std::filesystem::path directory_;
 
     IMPLEMENT_REFCOUNTING(UiSchemeFactory);
@@ -114,17 +131,24 @@ private:
 
 } // namespace
 
-void registerUiScheme(const std::filesystem::path& directory) {
+void registerUiScheme(std::string page, const std::filesystem::path& directory) {
+    const std::size_t size = page.size();
+
     // `http` с именем узла `ui`, а не своя схема, и это важнее, чем кажется.
     // Своей схеме браузер не даёт ни локального хранилища, ни разбора
     // происхождения: страница считалась бы пришедшей ниоткуда, и половина её
     // настроек не сохранилась бы между запусками.
-    if (!CefRegisterSchemeHandlerFactory("http", "ui", new UiSchemeFactory{directory})) {
+    if (!CefRegisterSchemeHandlerFactory("http", "ui",
+                                         new UiSchemeFactory{std::move(page), directory})) {
         spdlog::error("не удалось завести схему http://ui — меню не откроется");
         return;
     }
 
-    spdlog::debug("http://ui отдаётся из {}", directory.string());
+    if (size != 0) {
+        spdlog::info("страница меню взята из модуля: {} КБ", size / 1024);
+    } else {
+        spdlog::warn("страницы меню в модуле нет — берём из {}", directory.string());
+    }
 }
 
 } // namespace oxymp::cefui

@@ -3,7 +3,7 @@
 #include "environment.hpp"
 #include "menu_input.hpp"
 #include "overlay_renderer.hpp"
-#include "page_source.hpp"
+#include "overlay.hpp"
 #include "present_hook.hpp"
 #include "window.hpp"
 
@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <string_view>
 #include <thread>
@@ -46,6 +47,15 @@ constexpr int kInitialHeight = 720;
 /// ни список игроков, ни ход загрузки не меняются быстрее.
 constexpr auto kStateInterval = std::chrono::milliseconds{50};
 
+/// Как часто поток разбирает свою очередь сообщений.
+///
+/// Пять миллисекунд — заметно меньше того предела, после которого Windows
+/// считает перехват клавиатуры неотвечающим и снимает его.
+constexpr auto kPumpInterval = std::chrono::milliseconds{5};
+
+/// Сколько таких долей укладывается в один оборот состояния.
+constexpr int kPumpsPerUpdate = 10;
+
 /// Каталог с хозяйством CEF.
 ///
 /// Лежит рядом с самим модулем, а не рядом с исполняемым файлом: исполняемый
@@ -53,6 +63,53 @@ constexpr auto kStateInterval = std::chrono::milliseconds{50};
 std::filesystem::path cefDirectory() {
     const std::filesystem::path directory = clientDirectory();
     return directory.empty() ? std::filesystem::path{} : directory / "cef";
+}
+
+/// Номер ресурса, под которым в модуль встроена страница меню.
+///
+/// Единица — то же число, что стоит в menu_page.rc.in. Их два, и разъехаться им
+/// нельзя: ресурс, которого нет, ищется молча и находится пустым.
+constexpr int kMenuPageResource = 1;
+
+/// Достаёт страницу меню из своего же модуля.
+///
+/// Страница лежит ресурсом, а не файлом рядом с клиентом: файл рядом можно
+/// потерять при переносе, подменить или забыть положить, и тогда меню окажется
+/// пустым — а понять почему, глядя на пустой экран, нельзя.
+///
+/// Копия делается сразу: ресурс живёт, пока загружен модуль, но отдавать наружу
+/// вид на чужую память ради экономии четырёх мегабайт один раз за запуск —
+/// плохой размен.
+std::string menuPage() {
+    HMODULE self = nullptr;
+
+    if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             reinterpret_cast<LPCWSTR>(&menuPage), &self) == 0) {
+        return {};
+    }
+
+    // RT_RCDATA — число, обёрнутое макросом для однобайтовых строк; широкому
+    // поиску нужно то же число, но своим макросом.
+    const HRSRC found = ::FindResourceW(self, MAKEINTRESOURCEW(kMenuPageResource),
+                                        MAKEINTRESOURCEW(10)); // RT_RCDATA
+    if (found == nullptr) {
+        return {};
+    }
+
+    const DWORD size = ::SizeofResource(self, found);
+    const HGLOBAL loaded = ::LoadResource(self, found);
+
+    if (size == 0 || loaded == nullptr) {
+        return {};
+    }
+
+    const void* const bytes = ::LockResource(loaded);
+    if (bytes == nullptr) {
+        return {};
+    }
+
+    return std::string{static_cast<const char*>(bytes), size};
 }
 
 } // namespace
@@ -139,16 +196,16 @@ struct UiLayer::State {
 
     std::unique_ptr<Menu> menu;
 
+    /// Выход из игры. Копия того же, что ушло меню: по Alt+F4 выходят тем же
+    /// путём, что и по кнопке в меню, а перехват ввода про меню не знает.
+    std::function<void()> quit;
+
     /// Перехват ввода для меню.
     ///
     /// Ставится не сразу: окна игры в мгновение, когда поднимается слой, ещё
     /// нет — до него остаются секунды. Поэтому его дожидается поток, ведущий
     /// страницы, и ставит перехват первым же кадром, когда окно нашлось.
     std::unique_ptr<MenuInput> input;
-
-    /// Сказали ли уже меню, что игрок в игре. Один раз за запуск: второе такое
-    /// слово ничего не меняет, а слать его двадцать раз в секунду незачем.
-    bool toldConnected = false;
 
     /// Размер, под который подогнаны страницы.
     int width = kInitialWidth;
@@ -208,7 +265,7 @@ struct UiLayer::State {
 
         input = MenuInput::install(
             game, *menuSurface.browser, [this] { return menu->opened(); },
-            [this] { menu->toggle(); }, error);
+            [this] { menu->toggle(); }, quit, error);
 
         if (input == nullptr) {
             spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);
@@ -225,32 +282,27 @@ struct UiLayer::State {
         }
     }
 
-    /// Говорит меню, что игрок в игре, — и оно убирается с экрана.
-    ///
-    /// Пока страница считает себя неподключённой, она держит себя открытой
-    /// поверх всего, и никакое переключение её не свернёт: так она устроена, и
-    /// так же ведёт себя alt:V. Слово «подключились» для неё — единственный
-    /// способ уйти.
-    ///
-    /// Мгновение выбрано то же, по которому уходит экран загрузки: игрок в мире,
-    /// и с сервером всё решилось.
-    void tellConnected() {
-        if (menu == nullptr || toldConnected || !feed->ready()) {
-            return;
-        }
-
-        menu->connected();
-        toldConnected = true;
-    }
-
     void keep() {
         while (!stopped.load()) {
             fitToWindow();
             catchInput();
-            tellConnected();
             overlay.browser->post(feed->takeUpdate());
 
-            std::this_thread::sleep_for(kStateInterval);
+            // Ожидание разбито на короткие доли, и между ними разбирается
+            // очередь сообщений. Это не украшение: низкоуровневый перехват
+            // клавиатуры Windows зовёт в том потоке, который его поставил, и
+            // зовёт через его очередь. Поток, спящий пятьдесят миллисекунд
+            // подряд, отвечал бы на нажатия с той же задержкой, а не ответивший
+            // вовремя перехват Windows снимает вовсе.
+            for (int i = 0; i < kPumpsPerUpdate && !stopped.load(); ++i) {
+                MSG message{};
+                while (::PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0) {
+                    ::TranslateMessage(&message);
+                    ::DispatchMessageW(&message);
+                }
+
+                std::this_thread::sleep_for(kPumpInterval);
+            }
         }
     }
 };
@@ -262,7 +314,7 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
         return nullptr;
     }
 
-    if (!oxymp::cefui::startRuntime(directory.wstring(), error)) {
+    if (!oxymp::cefui::startRuntime(directory.wstring(), menuPage(), error)) {
         return nullptr;
     }
 
@@ -283,7 +335,7 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
         return nullptr;
     }
 
-    state.overlay.browser->show(composePage());
+    state.overlay.browser->show(std::string{ui::overlayPage});
 
     // Меню — вторая страница, и её отсутствие не отменяет первую: экран загрузки
     // и чат должны работать даже тогда, когда меню не завелось.
@@ -296,6 +348,10 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
         },
         menuError);
 
+    // Выход берётся себе до того, как остальное уедет в меню: по Alt+F4 выходить
+    // нужно тем же путём, что и по кнопке, а перехват ввода к меню не обращается.
+    state.quit = actions.quit;
+
     if (state.menuSurface.browser != nullptr) {
         state.menu = Menu::create(*state.menuSurface.browser, directory.parent_path(),
                                   std::move(actions));
@@ -305,10 +361,21 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
 
     state.hook = PresentHook::install(
         [&state](IDXGISwapChain* swapchain) {
-            state.overlay.draw(swapchain);
+            const bool menuOpen = state.menu != nullptr && state.menu->opened();
+
+            // Пока открыто меню, свой экран загрузки не рисуется вовсе.
+            //
+            // Он рисовался и просвечивал сквозь меню — два разных экрана
+            // загрузки друг под другом. Показывать их вместе незачем и нечем:
+            // ход подключения меню рассказывает само, своей строкой, — «идёт
+            // подключение», «ресурсы», «входим в игру». Наш экран остаётся для
+            // того времени, когда меню закрыто: чат, консоль и разрыв связи.
+            if (!menuOpen) {
+                state.overlay.draw(swapchain);
+            }
 
             // Меню рисуется вторым, то есть поверх: открытое, оно закрывает
-            // собой всё, включая экран загрузки.
+            // собой всё.
             if (state.menuSurface.browser != nullptr) {
                 state.menuSurface.draw(swapchain);
             }

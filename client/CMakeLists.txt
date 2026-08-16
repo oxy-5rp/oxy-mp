@@ -52,7 +52,6 @@ if(WIN32)
         src/game/nameplates.cpp
         src/game/online_map.cpp
         src/game/overlay_renderer.cpp
-        src/game/page_source.cpp
         src/game/present_hook.cpp
         src/game/ped_activity.cpp
         src/game/ped_animation.cpp
@@ -71,6 +70,7 @@ if(WIN32)
         src/game/vehicles.cpp
         src/game/window.cpp
         src/game/world.cpp
+        src/game/world_hold.cpp
         oxymp-client.rc
     )
 
@@ -84,12 +84,28 @@ if(WIN32)
     # из того же ядра, про игру не знает вовсе.
     oxymp_embed_text(oxymp_client ui/overlay.html overlayPage oxymp::client::game::ui)
 
-    # Картинка экрана загрузки встраивается тем же способом, что и разметка, и по
-    # той же причине: страница доходит до CEF ссылкой с данными, у которой нет
-    # ни файла на диске, ни соседей рядом с ним. Класть её рядом с клиентом
-    # значило бы завести файл, который можно потерять, — а без него экран
-    # загрузки остался бы пустым.
-    oxymp_embed_text(oxymp_client ui/loading_art.jpg loadingArt oxymp::client::game::ui)
+    # Страница меню — внутрь модуля, ресурсом.
+    #
+    # Прежде она лежала файлом рядом с клиентом, в каталоге ui, и это было
+    # уступкой размеру: четыре с половиной мегабайта байтовым массивом
+    # компилятор собирал бы минутами. Ресурс снимает эту цену целиком — его
+    # содержимое просто складывается в файл, компилятору его не видно, — а
+    # раздача перестаёт зависеть от каталога, который можно потерять или
+    # подменить.
+    if(EXISTS "${OXYMP_MENU_PAGE}")
+        # Обратные косые в пути ресурса удваиваются: rc читает их как знак
+        # escape, и один путь с C:\ превратился бы в путь с забоем.
+        string(REPLACE "\\" "\\\\" OXYMP_MENU_PAGE_RC "${OXYMP_MENU_PAGE}")
+
+        configure_file(menu_page.rc.in "${CMAKE_CURRENT_BINARY_DIR}/menu_page.rc" @ONLY)
+        target_sources(oxymp_client PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/menu_page.rc")
+
+        # Страницу собирает vite, и собрать её нужно раньше, чем ресурс возьмёт
+        # её содержимое.
+        add_dependencies(oxymp_client oxymp_menu)
+    else()
+        message(WARNING "нет собранного меню: интерфейс у игрока будет пустым")
+    endif()
 
     # d3d11 и d3dcompiler — интерфейс рисуется прямо в кадр игры, а не окном
     # поверх неё. cefui — сама страница, отдающая готовые точки.

@@ -28,12 +28,28 @@ TEST_CASE("ClientHello survives a round trip", "[messages]") {
     ClientHello sent;
     sent.protocolVersion = 7;
     sent.nickname = "oxy";
+    sent.password = "открой";
 
     const auto received = roundTrip(sent);
 
     REQUIRE(received.has_value());
     CHECK(received->protocolVersion == 7);
     CHECK(received->nickname == "oxy");
+    CHECK(received->password == "открой");
+}
+
+TEST_CASE("ClientHello without a password survives a round trip", "[messages]") {
+    // Сервер без пароля — обычное дело, и пустая строка обязана пережить дорогу
+    // так же, как непустая: разбор, споткнувшийся на ней, закрыл бы вход в
+    // подавляющее большинство сессий.
+    ClientHello sent;
+    sent.nickname = "oxy";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->nickname == "oxy");
+    CHECK(received->password.empty());
 }
 
 TEST_CASE("ServerWelcome survives a round trip", "[messages]") {
@@ -58,6 +74,20 @@ TEST_CASE("ServerReject survives a round trip", "[messages]") {
 
     REQUIRE(received.has_value());
     CHECK(received->reason == RejectReason::ServerFull);
+}
+
+TEST_CASE("ServerReject carries the wrong password reason", "[messages]") {
+    // Отдельным случаем, а не строкой в предыдущем: номер причины закреплён за
+    // ней навсегда, и проверка нужна именно за номером — разъехавшись, клиент и
+    // сервер назвали бы игроку не ту беду.
+    ServerReject sent;
+    sent.reason = RejectReason::WrongPassword;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->reason == RejectReason::WrongPassword);
+    CHECK(static_cast<std::uint8_t>(received->reason) == 5);
 }
 
 TEST_CASE("Ping and Pong survive a round trip", "[messages]") {

@@ -1,12 +1,12 @@
 include(embed_text)
 
 add_executable(oxymp_launcher
-    src/connect_window.cpp
     src/game_locator.cpp
     src/game_mirror.cpp
     src/game_settings.cpp
     src/game_process.cpp
     src/launcher_patch.cpp
+    src/launcher_window.cpp
     src/main.cpp
     src/paths.cpp
     src/process_inject.cpp
@@ -14,6 +14,7 @@ add_executable(oxymp_launcher
     src/registry.cpp
     src/rockstar_launcher.cpp
     src/session.cpp
+    src/skin_assets.cpp
 
     # Значок: лаунчер — это то, что игрок видит в проводнике и на панели задач.
     oxymp.rc
@@ -33,16 +34,22 @@ set_target_properties(oxymp_launcher PROPERTIES OUTPUT_NAME oxymp)
 set_target_properties(oxymp_launcher PROPERTIES WIN32_EXECUTABLE TRUE)
 target_link_options(oxymp_launcher PRIVATE /ENTRY:mainCRTStartup)
 
-# Страница окна подключения лежит рядом с кодом обычным html и встраивается в
+# Страница окна лаунчера лежит рядом с кодом обычным html и встраивается в
 # бинарник при сборке: рядом с исполняемым файлом ей делать нечего — потеряется
-# или будет заменена.
-oxymp_embed_text(oxymp_launcher ui/connect.html connectPage oxymp::launcher::ui)
+# или будет заменена. Оформление при этом приходит не отсюда, а из skin.bin:
+# страница знает только, куда его подставить.
+oxymp_embed_text(oxymp_launcher ui/launcher_page.html launcherPage oxymp::launcher::ui)
 
 target_link_libraries(oxymp_launcher PRIVATE
     oxymp::shared
     oxymp::options
     oxymp::webui
     spdlog::spdlog
+
+    # Оформление окна: имя, значок, фон и его размер лежат в skin.bin, и читает
+    # его тот же модуль, которым его читает клиент. Два разбора одного файла
+    # разошлись бы на первой же правке.
+    oxymp::config
 
     # Ради одной величины — версии игры, под которую выверены сигнатуры.
     # Держать её вторым списком в лаунчере значило бы завести место, где она

@@ -89,6 +89,8 @@ std::string_view describe(shared::RejectReason reason) noexcept {
         return "имя недопустимо";
     case shared::RejectReason::NicknameTaken:
         return "имя занято";
+    case shared::RejectReason::WrongPassword:
+        return "пароль сервера неверен";
     }
     return "причина не указана";
 }
@@ -704,6 +706,7 @@ void Connection::sendHello() {
     shared::ClientHello hello;
     hello.protocolVersion = shared::kProtocolVersion;
     hello.nickname = settings_.nickname;
+    hello.password = settings_.password;
 
     const auto packet = shared::encode(hello);
     host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});

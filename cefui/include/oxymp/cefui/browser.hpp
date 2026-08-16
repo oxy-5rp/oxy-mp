@@ -18,7 +18,12 @@ namespace oxymp::cefui {
 /// подпроцессом. Указывать его приходится явно: клиент внедряется в чужой
 /// процесс, и «рядом с исполняемым файлом» для него означает папку игры, куда
 /// oxyMP не кладёт ничего.
-[[nodiscard]] bool startRuntime(const std::wstring& root, std::string& error);
+///
+/// page — сама страница меню. Она лежит ресурсом внутри модуля клиента, поэтому
+/// приходит доводом: cefui не знает, из какого модуля его собрали, и доставать
+/// её сам не может. Пустая означает «страницы в модуле нет» — тогда она берётся
+/// файлом из каталога ui, как было раньше.
+[[nodiscard]] bool startRuntime(const std::wstring& root, std::string page, std::string& error);
 
 /// Останавливает Chromium. Вызывать один раз, перед выгрузкой модуля.
 void stopRuntime();
@@ -141,7 +146,14 @@ public:
     /// code — виртуальный код клавиши Windows для Down и Up, знак UTF-16 для
     /// Char. modifiers — те же биты, что и в сообщениях Windows: Shift, Ctrl,
     /// Alt.
-    void sendKey(KeyAction action, unsigned code, bool shift, bool control, bool alt);
+    /// Отдаёт странице нажатие.
+    ///
+    /// scan — аппаратный код клавиши. Chromium собирает из него то, что на
+    /// Windows лежит в старшем слове параметра сообщения о нажатии, и без него
+    /// разбирает событие не полностью. Ноль допустим: у знака, пришедшего не от
+    /// клавиши, аппаратного кода нет.
+    void sendKey(KeyAction action, unsigned code, unsigned scan, bool shift, bool control,
+                 bool alt);
 
     /// Забирает или отдаёт странице ввод с клавиатуры.
     ///

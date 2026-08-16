@@ -154,6 +154,9 @@ public:
         std::string address = "127.0.0.1";
         std::uint16_t port = shared::kDefaultServerPort;
         std::string nickname = "player";
+
+        /// Пароль сервера, если игрок его назвал. Пусто — обычное дело.
+        std::string password;
     };
 
     explicit Connection(Settings settings);
