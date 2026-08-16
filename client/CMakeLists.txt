@@ -36,6 +36,7 @@ if(WIN32)
         src/game/crash_log.cpp
         src/game/engine_addresses.cpp
         src/game/environment.cpp
+        src/game/file_system.cpp
         src/game/frontend.cpp
         src/game/hook.cpp
         src/game/hud.cpp

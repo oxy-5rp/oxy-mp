@@ -7,8 +7,9 @@
 #include "ui_feed.hpp"
 
 #include "game/crash_log.hpp"
-#include "game/environment.hpp"
 #include "game/engine_addresses.hpp"
+#include "game/environment.hpp"
+#include "game/file_system.hpp"
 #include "game/hook.hpp"
 #include "game/intro.hpp"
 #include "game/landing_page.hpp"
@@ -396,6 +397,34 @@ void dumpNativeHashes(const game::NativeTable& table) {
 /// Проверяются сразу две вещи: что функция поиска вызвана по правильному
 /// соглашению и что хеши записаны верно. Обе ошибки иначе всплыли бы много
 /// позже и выглядели бы как беспричинный вылет.
+/// Проверяет, что файловая система игры нам доступна, и говорит об этом.
+///
+/// Спрашивается настоящий файл, а не выдуманный: `settings.meta` лежит внутри
+/// архива с зашифрованным оглавлением, и удавшееся чтение означает, что игра
+/// расшифровала его за нас. Именно этим и снимается тупик со своими машинами —
+/// подбирать схему шифрования не нужно, читает и пишет её сама игра.
+///
+/// Ничего не меняет: только читает и записывает в журнал.
+void reportFileSystem(const game::EngineAddresses& addresses) {
+    const game::FileSystem files{addresses};
+
+    if (!files.ready()) {
+        spdlog::warn("файловая система игры недоступна: подмена файлов работать не будет");
+        return;
+    }
+
+    // Тот же файл, о котором рапортует alt:V своим «Replaced …settings.meta».
+    constexpr const char* kProbe = "common:/data/control/settings.meta";
+
+    const std::int64_t size = files.sizeOf(kProbe);
+    if (size < 0) {
+        spdlog::warn("файловая система игры отвечает, но {} в ней не нашлось", kProbe);
+        return;
+    }
+
+    spdlog::info("файловая система игры доступна: {} — {} байт", kProbe, size);
+}
+
 bool probeNatives(const game::EngineAddresses& addresses) {
     const game::NativeTable table{addresses};
     if (!table.valid()) {
@@ -741,6 +770,15 @@ void run() {
     std::unique_ptr<GameSession> session;
 
     if (engine != nullptr && hooksReady && probeNatives(*engine)) {
+        // Файловая система игры к этому мгновению точно поднята: скриптовый
+        // движок работает, а он сам читает через неё. Раньше спрашивать нельзя —
+        // устройства навешиваются на пути не сразу.
+        //
+        // Пока только проверка доступа. Она нужна не сама по себе: подмена
+        // файлов игры, ради которой всё и заводится, начинается с того, что мы
+        // умеем спросить у игры файл её же средствами.
+        reportFileSystem(*engine);
+
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
         // происходящее в игре покадрово, а мы отсюда уже нет.
         feed.setStage(shared::LoadStage::Scripts);
