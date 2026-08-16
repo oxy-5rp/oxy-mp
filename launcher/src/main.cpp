@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    spdlog::info("журнал клиента: %LOCALAPPDATA%\\oxyMP\\logs\\client.log");
+    spdlog::info("журнал клиента: logs\\client_<дата>.log рядом с этим файлом");
 
     game->waitForExit();
     spdlog::info("игра завершилась");

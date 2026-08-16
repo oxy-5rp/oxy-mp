@@ -1,5 +1,6 @@
 #include "ui_layer.hpp"
 
+#include "environment.hpp"
 #include "menu_input.hpp"
 #include "overlay_renderer.hpp"
 #include "page_source.hpp"
@@ -47,27 +48,11 @@ constexpr auto kStateInterval = std::chrono::milliseconds{50};
 
 /// Каталог с хозяйством CEF.
 ///
-/// Ищется рядом с самим модулем, а не рядом с исполняемым файлом: исполняемый
-/// файл здесь — GTA5.exe, и её папки oxyMP не касается вовсе. Свой же модуль
-/// лежит в каталоге клиента, где рядом лежит и cef.
+/// Лежит рядом с самим модулем, а не рядом с исполняемым файлом: исполняемый
+/// файл здесь — GTA5.exe, и её папки oxyMP не касается вовсе.
 std::filesystem::path cefDirectory() {
-    HMODULE module = nullptr;
-
-    if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             reinterpret_cast<LPCWSTR>(&cefDirectory), &module) == 0) {
-        return {};
-    }
-
-    std::wstring path(MAX_PATH, L'\0');
-    const DWORD written =
-        ::GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-    if (written == 0 || written >= path.size()) {
-        return {};
-    }
-    path.resize(written);
-
-    return std::filesystem::path{path}.parent_path() / "cef";
+    const std::filesystem::path directory = clientDirectory();
+    return directory.empty() ? std::filesystem::path{} : directory / "cef";
 }
 
 } // namespace

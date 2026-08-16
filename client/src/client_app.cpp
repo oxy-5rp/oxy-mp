@@ -7,6 +7,7 @@
 #include "ui_feed.hpp"
 
 #include "game/crash_log.hpp"
+#include "game/environment.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/hook.hpp"
 #include "game/intro.hpp"
@@ -113,13 +114,38 @@ void applyServerAddress(std::string_view text, Connection::Settings& settings) {
     }
 }
 
+/// Куда писать журнал клиента.
+///
+/// Рядом с самим клиентом, в `logs`, — там же, где журналы лаунчера, патчера и
+/// Chromium. Так же у alt:V, и причина не в подражании: человек, у которого
+/// что-то не работает, присылает журналы, и просить его лезть за одним из них в
+/// скрытую папку профиля — верный способ получить три из четырёх.
+///
+/// Имя с меткой времени, а не одно на всех. Прежде журнал начинался с чистого
+/// листа при каждом запуске, и разобрать «а что было в прошлый раз» было уже
+/// нельзя: чтобы прочесть его, игру приходилось запускать снова — и тем самым
+/// стирать искомое.
+///
+/// Запасной путь — профиль пользователя: каталог клиента может оказаться
+/// доступным только на чтение, а без журнала разбирать поломки нечем.
 std::filesystem::path logFilePath() {
-    const std::string localAppData = environmentValue(L"LOCALAPPDATA");
-    if (localAppData.empty()) {
-        return "oxymp-client.log";
+    const auto now = std::chrono::system_clock::now();
+    const std::string stamp = std::format("{:%Y-%m-%d_%H-%M-%S}",
+                                          std::chrono::floor<std::chrono::seconds>(
+                                              std::chrono::current_zone()->to_local(now)));
+
+    const std::string name = std::format("client_{}.log", stamp);
+
+    if (const std::filesystem::path directory = game::clientDirectory(); !directory.empty()) {
+        return directory / "logs" / name;
     }
 
-    return std::filesystem::path{localAppData} / "oxyMP" / "logs" / "client.log";
+    const std::string localAppData = environmentValue(L"LOCALAPPDATA");
+    if (localAppData.empty()) {
+        return name;
+    }
+
+    return std::filesystem::path{localAppData} / "oxyMP" / "logs" / name;
 }
 
 /// Направляет журнал в файл.
@@ -591,6 +617,11 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
 
 void run() {
     setUpLogging();
+
+    // Сразу за журналом и раньше всего прочего: сведения об окружении нужны
+    // именно тогда, когда дальше что-то пошло не так, — а «дальше» начинается со
+    // следующей строки.
+    game::reportEnvironment();
 
     const Connection::Settings settings = readSettings();
 

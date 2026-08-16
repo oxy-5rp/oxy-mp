@@ -35,6 +35,7 @@ if(WIN32)
         src/game/controls.cpp
         src/game/crash_log.cpp
         src/game/engine_addresses.cpp
+        src/game/environment.cpp
         src/game/frontend.cpp
         src/game/hook.cpp
         src/game/hud.cpp
@@ -103,6 +104,11 @@ if(WIN32)
         d3d11
         dxgi
         d3dcompiler
+
+        # Версия исполняемого файла игры и перечень загруженных модулей —
+        # см. src/game/environment.cpp.
+        version
+        psapi
 
         # Загрузка ресурсов с мини-сайта сервера. Библиотека отложенная — см.
         # список DELAYLOAD, — и подгружается только когда сервер что-то раздаёт.
