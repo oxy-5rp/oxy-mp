@@ -35,10 +35,6 @@ constexpr std::wstring_view kDiscordHelper = L"RockstarDiscordHelper.dll";
 /// Наш ли это вызов. Потоковый: показ живёт в своём потоке, игра — в своих.
 thread_local bool t_ours = false;
 
-/// Сравнивает начало имени без учёта регистра.
-///
-/// Регистр важен: имя канала собирает не Windows, а тот, кто его открывает, и
-/// писать его он вправе как угодно.
 /// Кончается ли путь названным именем файла, без учёта регистра.
 [[nodiscard]] bool named(LPCWSTR path, std::wstring_view name) {
     if (path == nullptr) {

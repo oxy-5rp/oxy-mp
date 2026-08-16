@@ -105,6 +105,9 @@ struct Menu::State {
     /// Открыто ли меню. Читает поток игры — отсюда и счётчик вместо блокировки.
     std::atomic<bool> opened{true};
 
+    /// Сказала ли страница, что готова принимать события.
+    std::atomic<bool> ready{false};
+
     /// Открыта ли консоль страницы. Читается оттуда же и по той же причине.
     ///
     /// Ведётся у нас, а не спрашивается у страницы: открываем её мы, по F8, и
@@ -324,6 +327,8 @@ struct Menu::State {
         }
 
         if (name == "loaded") {
+            ready.store(true);
+
             // Указатель вписывается по слову страницы, а не по её загрузке: до
             // этого мгновения тела у неё ещё нет, и вписывать его некуда.
             browser->evaluate(kCursorScript);
@@ -645,6 +650,10 @@ Menu::~Menu() {
 
 bool Menu::opened() const noexcept {
     return state_ != nullptr && state_->opened.load();
+}
+
+bool Menu::pageReady() const noexcept {
+    return state_ != nullptr && state_->ready.load();
 }
 
 bool Menu::consoleOpen() const noexcept {
