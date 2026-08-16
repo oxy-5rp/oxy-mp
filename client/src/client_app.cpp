@@ -663,7 +663,27 @@ void run() {
     if (hooksReady) {
         std::string uiError;
 
-        ui = game::UiLayer::create(feed, uiError);
+        Menu::Actions actions;
+
+        // Выход из игры — единственное, что меню умеет исполнить прямо сейчас.
+        // Закрытием окна, а не завершением процесса: игра успевает сохранить
+        // настройки и попрощаться с Social Club, а мы не оставляем после себя
+        // подвисший процесс.
+        actions.quit = [] {
+            if (const HWND window = game::Window::findOwnWindow(); window != nullptr) {
+                ::PostMessageW(window, WM_CLOSE, 0, 0);
+            }
+        };
+
+        // Подключение и отключение меню пока не исполняет: адрес сервера клиент
+        // получает от лаунчера ещё до своего запуска, и сменить его на ходу
+        // означало бы поднять сессию заново — работа, которой здесь ещё нет.
+        // Записано в docs/altv-parity.md.
+        actions.connect = [](const std::string& address, const std::string&) {
+            spdlog::info("меню просит подключиться к {} — пока не умеем", address);
+        };
+
+        ui = game::UiLayer::create(feed, std::move(actions), uiError);
         if (ui == nullptr) {
             spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
         }

@@ -28,6 +28,7 @@ if(WIN32)
         src/dllmain.cpp
         src/discord_presence.cpp
         src/game_session.cpp
+        src/menu.cpp
         src/resource_cache.cpp
         src/ui_feed.cpp
         src/game/appearance.cpp
@@ -40,6 +41,7 @@ if(WIN32)
         src/game/intro.cpp
         src/game/landing_page.cpp
         src/game/loaded_image.cpp
+        src/game/menu_input.cpp
         src/game/native_table.cpp
         src/game/net_session.cpp
         src/game/network_bail.cpp
@@ -92,9 +94,11 @@ if(WIN32)
     target_link_libraries(oxymp_client PRIVATE
         minhook::minhook
         oxymp::clientcore
+        oxymp::config
         oxymp::gamesig
         oxymp::options
         oxymp::cefui
+        nlohmann_json::nlohmann_json
         spdlog::spdlog
         d3d11
         dxgi

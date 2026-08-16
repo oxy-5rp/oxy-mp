@@ -1,6 +1,7 @@
 #include <oxymp/cefui/browser.hpp>
 
 #include "app.hpp"
+#include "ui_scheme.hpp"
 
 #include <include/cef_app.h>
 
@@ -84,6 +85,14 @@ bool startRuntime(const std::wstring& root, std::string& error) {
     }
 
     g_started.store(true);
+
+    // Схема заводится только после того, как CEF поднят: до этого регистрировать
+    // её негде.
+    //
+    // Каталог страницы — соседний с каталогом CEF, а не внутри него: чужое
+    // хозяйство и наше лежат порознь, и обновление CEF не должно уносить с собой
+    // меню.
+    registerUiScheme(directory.parent_path() / "ui");
 
     spdlog::debug("CEF поднят: {}", directory.string());
     return true;

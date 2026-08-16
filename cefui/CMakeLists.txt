@@ -57,6 +57,7 @@ target_link_options(oxymp_cef INTERFACE /DELAYLOAD:libcef.dll)
 add_library(oxymp_cefui STATIC
     src/browser.cpp
     src/runtime.cpp
+    src/ui_scheme.cpp
 )
 add_library(oxymp::cefui ALIAS oxymp_cefui)
 

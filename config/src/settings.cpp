@@ -1,0 +1,274 @@
+#include <oxymp/config/settings.hpp>
+
+#include <toml++/toml.hpp>
+
+#include <spdlog/spdlog.h>
+
+#include <array>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <utility>
+
+namespace oxymp::config {
+namespace {
+
+/// Умолчания — они же перечень того, какие настройки вообще бывают.
+///
+/// Имена и значения взяты у alt:V из `altv.toml` до последнего поля. Часть из них
+/// нам сейчас не нужна вовсе — `linuxCompatibility`, `enableOverwolfOverlay`, —
+/// и всё же они здесь: файл настроек переносят с одного мультиплеера на другой
+/// руками, и настройка, которую мы молча выбросили, потерялась бы при первом же
+/// сохранении.
+toml::table defaults() {
+    return toml::table{
+        {"audioFrameLimit", false},
+        {"autoBackup", true},
+        {"autoFindMic", false},
+        {"branch", "release"},
+        {"cachePath", ""},
+        {"cefAlwaysFullCopy", false},
+        {"cefUseHardwareAcceleration", true},
+        {"consoleHeight", 0.4},
+        {"consoleWidth", 0.45},
+        {"crashOnFatalError", false},
+        {"crashReporterEnabled", true},
+        {"debug", false},
+        {"disableForcedRawInput", false},
+        {"disableRtl", false},
+        {"discordRichPresence", true},
+        {"displaySystemUpdateMessagesInLog", false},
+        {"expandedConsole", true},
+        {"externalConsoleX", 0},
+        {"externalConsoleY", 0},
+        {"gtaPlatform", "rgl"},
+        {"gtapath", ""},
+        {"heapSize", 1024},
+        {"lang", "en"},
+        {"lastip", ""},
+        {"launcherSkin", ""},
+        {"launcherSkinsDisabled", toml::array{}},
+        {"logTimeFormat", "%H:%M:%S"},
+        {"maxDownloadSpeed", 0},
+        {"name", "Player"},
+        {"netgraph", false},
+        {"permissionsSet", false},
+        {"promotedOnTop", true},
+        {"region", "global"},
+        {"streamerMode", false},
+        {"textureBudgetPatch", true},
+        {"uiVolume", 100},
+        {"useExternalConsole", false},
+        {"useSharedTextures", true},
+        {"voiceActivationEnabled", false},
+        {"voiceActivationKey", 78},
+        {"voiceAutoInputVolume", true},
+        {"voiceEnabled", true},
+        {"voiceInputDevice", ""},
+        {"voiceInputNormalization", true},
+        {"voiceInputSensitivity", 20},
+        {"voiceInputVolume", 100},
+        {"voiceNoiseSuppression", true},
+        {"voiceVolume", 200},
+    };
+}
+
+/// Настройки, которые в файле и на странице называются по-разному.
+///
+/// Расхождение не наше: страница взята у alt:V, файл — тоже, и у них самих эти
+/// имена разные. Свести их к одному нельзя, не поправив либо страницу, либо
+/// переносимость файла; выбран перевод в одном месте.
+constexpr std::array<std::pair<const char*, const char*>, 5> kRenamed{{
+    {"lang", "language"},
+    {"netgraph", "netgraphEnabled"},
+    {"maxDownloadSpeed", "downloadSpeedLimit"},
+    {"voiceActivationEnabled", "voiceActivation"},
+    {"voiceInputNormalization", "voiceNormalization"},
+}};
+
+[[nodiscard]] std::string_view pageName(std::string_view fileName) {
+    for (const auto& [file, page] : kRenamed) {
+        if (fileName == file) {
+            return page;
+        }
+    }
+
+    return fileName;
+}
+
+[[nodiscard]] std::string_view fileName(std::string_view pageName) {
+    for (const auto& [file, page] : kRenamed) {
+        if (pageName == page) {
+            return file;
+        }
+    }
+
+    return pageName;
+}
+
+} // namespace
+
+struct Settings::State {
+    toml::table table = defaults();
+};
+
+Settings::Settings() : state_{std::make_unique<State>()} {}
+Settings::~Settings() = default;
+
+Settings::Settings(Settings&&) noexcept = default;
+Settings& Settings::operator=(Settings&&) noexcept = default;
+
+Settings Settings::load(const std::filesystem::path& file) {
+    Settings settings;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec)) {
+        return settings;
+    }
+
+    toml::parse_result parsed = toml::parse_file(file.string());
+    if (!parsed) {
+        spdlog::warn("настройки не разобрались ({}): взяты умолчания",
+                     std::string{parsed.error().description()});
+        return settings;
+    }
+
+    // Поверх умолчаний, а не вместо них: в файле игрока может не быть настройки,
+    // которая появилась у нас позже, и оставить её пустой значило бы получить
+    // нулевую громкость там, где должна быть сотня.
+    for (auto&& [key, value] : parsed.table()) {
+        const std::string name{key.str()};
+
+        if (!settings.state_->table.contains(name)) {
+            spdlog::debug("настройка {} неизвестна — пропущена", name);
+            continue;
+        }
+
+        settings.state_->table.insert_or_assign(name, value);
+    }
+
+    return settings;
+}
+
+bool Settings::save(const std::filesystem::path& file) const {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+
+    std::ofstream out{file, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        spdlog::warn("настройки не записались: {}", file.string());
+        return false;
+    }
+
+    out << state_->table << '\n';
+    return out.good();
+}
+
+bool Settings::flag(std::string_view key) const {
+    return state_->table[fileName(key)].value_or(false);
+}
+
+std::int64_t Settings::number(std::string_view key) const {
+    return state_->table[fileName(key)].value_or<std::int64_t>(0);
+}
+
+double Settings::fraction(std::string_view key) const {
+    return state_->table[fileName(key)].value_or(0.0);
+}
+
+std::string Settings::text(std::string_view key) const {
+    return state_->table[fileName(key)].value_or<std::string>("");
+}
+
+std::vector<std::string> Settings::list(std::string_view key) const {
+    std::vector<std::string> items;
+
+    if (const toml::array* array = state_->table[fileName(key)].as_array(); array != nullptr) {
+        for (const toml::node& item : *array) {
+            if (const auto text = item.value<std::string>(); text.has_value()) {
+                items.push_back(*text);
+            }
+        }
+    }
+
+    return items;
+}
+
+void Settings::set(std::string_view key, bool value) {
+    state_->table.insert_or_assign(fileName(key), value);
+}
+
+void Settings::set(std::string_view key, std::int64_t value) {
+    state_->table.insert_or_assign(fileName(key), value);
+}
+
+void Settings::set(std::string_view key, double value) {
+    state_->table.insert_or_assign(fileName(key), value);
+}
+
+void Settings::set(std::string_view key, std::string_view value) {
+    state_->table.insert_or_assign(fileName(key), std::string{value});
+}
+
+std::string Settings::toJson() const {
+    // Имена переводятся в те, которых ждёт страница, поэтому таблица собирается
+    // заново, а не отдаётся как есть.
+    toml::table forPage;
+
+    for (auto&& [key, value] : state_->table) {
+        forPage.insert_or_assign(pageName(key.str()), value);
+    }
+
+    std::ostringstream out;
+    out << toml::json_formatter{forPage};
+
+    return out.str();
+}
+
+bool Settings::applyJson(std::string_view key, std::string_view value) {
+    const std::string name{fileName(key)};
+
+    const toml::node* existing = state_->table.get(name);
+    if (existing == nullptr) {
+        spdlog::debug("страница правит неизвестную настройку {} — отказано", key);
+        return false;
+    }
+
+    // Запись значения в JSON почти всегда является записью значения в TOML:
+    // `true`, `142`, `"Игрок"`, `["a","b"]` читаются обоими одинаково. Этим и
+    // пользуемся вместо своего разбора JSON — свой разошёлся бы с настоящим на
+    // первой же строке с необычным знаком.
+    const std::string document = "value = " + std::string{value};
+
+    toml::parse_result parsed = toml::parse(document);
+    if (!parsed) {
+        spdlog::debug("значение настройки {} не разобралось: {}", key, value);
+        return false;
+    }
+
+    toml::node* incoming = parsed.table().get("value");
+    if (incoming == nullptr) {
+        return false;
+    }
+
+    // Вид сохраняется прежним. В JavaScript целых и дробных чисел не бывает
+    // порознь: страница шлёт `1` и для `consoleHeight`, и для `uiVolume`. Приняв
+    // единицу как целое, мы записали бы `consoleHeight = 1` вместо `1.0` — и
+    // получили бы файл, в котором доля экрана вдруг стала целым числом.
+    if (existing->is_floating_point() && incoming->is_integer()) {
+        state_->table.insert_or_assign(
+            name, static_cast<double>(incoming->as_integer()->get()));
+        return true;
+    }
+
+    if (existing->is_integer() && incoming->is_floating_point()) {
+        state_->table.insert_or_assign(
+            name, static_cast<std::int64_t>(incoming->as_floating_point()->get()));
+        return true;
+    }
+
+    state_->table.insert_or_assign(name, *incoming);
+    return true;
+}
+
+} // namespace oxymp::config

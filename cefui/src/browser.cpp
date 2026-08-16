@@ -8,6 +8,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
+#include <format>
 #include <mutex>
 
 namespace oxymp::cefui {
@@ -66,9 +68,11 @@ std::uint32_t buttonFlag(Browser::MouseButton button) {
 struct Browser::State : public CefClient,
                         public CefRenderHandler,
                         public CefLifeSpanHandler,
+                        public CefDisplayHandler,
                         public CefLoadHandler {
     PaintHandler onPaint;
     MessageHandler onMessage;
+    EventHandler onEvent;
 
     std::mutex mutex;
     CefRefPtr<CefBrowser> browser;
@@ -81,6 +85,10 @@ struct Browser::State : public CefClient,
     /// Страницу просят показать раньше, чем он готов: поднимается он своим
     /// чередом, и ждать этого — значит держать кадр пустым.
     std::string pending;
+
+    /// Ссылка вместо разметки, если показать просили её. Хранится отдельно, а не
+    /// в pending, чтобы не гадать потом, что за строка там лежит.
+    std::string pendingUrl;
 
     /// Какие кнопки мыши сейчас держат нажатыми.
     std::uint32_t held = 0;
@@ -110,15 +118,27 @@ struct Browser::State : public CefClient,
 
     CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                                   CefProcessId, CefRefPtr<CefProcessMessage> message) override {
+        const CefRefPtr<CefListValue> arguments = message->GetArgumentList();
+
+        if (message->GetName() == kAltEvent) {
+            // Событие разбирается, даже когда слушать его некому: вернуть false
+            // значило бы сказать CEF, что сообщение не наше, а оно наше.
+            if (onEvent && arguments->GetSize() >= 2) {
+                onEvent(arguments->GetString(0).ToString(), arguments->GetString(1).ToString());
+            }
+
+            return true;
+        }
+
         if (message->GetName() != kMessageFromPage || !onMessage) {
             return false;
         }
 
-        const CefRefPtr<CefListValue> arguments = message->GetArgumentList();
         if (arguments->GetSize() > 0) {
             onMessage(arguments->GetString(0).ToString());
         }
@@ -156,14 +176,18 @@ struct Browser::State : public CefClient,
 
     void OnAfterCreated(CefRefPtr<CefBrowser> created) override {
         std::string html;
+        std::string url;
 
         {
             const std::lock_guard guard{mutex};
             browser = created;
             html = std::exchange(pending, {});
+            url = std::exchange(pendingUrl, {});
         }
 
-        if (!html.empty()) {
+        if (!url.empty()) {
+            loadUrl(url);
+        } else if (!html.empty()) {
             load(html);
         }
     }
@@ -171,6 +195,43 @@ struct Browser::State : public CefClient,
     void OnBeforeClose(CefRefPtr<CefBrowser>) override {
         const std::lock_guard guard{mutex};
         browser = nullptr;
+    }
+
+    // --- CefDisplayHandler -------------------------------------------------
+
+    /// Пересылает в наш журнал то, что страница пишет себе в консоль.
+    ///
+    /// Без этого страница жалуется в пустоту. Своих средств разработчика у неё
+    /// нет — окна нет вовсе, — и ошибка в разметке выглядит снаружи как «просто
+    /// не так нарисовалось», без единой подсказки о причине. У alt:V ровно то
+    /// же: строки `[WEB, View ...]` в их журнале — это консоль их страницы.
+    bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t level,
+                          const CefString& message, const CefString& source,
+                          int line) override {
+        const std::string where =
+            source.empty() ? std::string{"страница"}
+                           : std::format("{}:{}", std::filesystem::path{source.ToString()}
+                                                      .filename()
+                                                      .string(),
+                                         line);
+
+        switch (level) {
+        case LOGSEVERITY_ERROR:
+        case LOGSEVERITY_FATAL:
+            spdlog::error("[страница] {} — {}", message.ToString(), where);
+            break;
+        case LOGSEVERITY_WARNING:
+            spdlog::warn("[страница] {} — {}", message.ToString(), where);
+            break;
+        default:
+            spdlog::info("[страница] {} — {}", message.ToString(), where);
+            break;
+        }
+
+        // false: пусть Chromium запишет её и у себя. Своя запись у него уходит в
+        // logs/cef.log, и терять её незачем — там же лежит всё, о чём он говорит
+        // помимо страницы.
+        return false;
     }
 
     // --- CefLoadHandler ----------------------------------------------------
@@ -183,6 +244,10 @@ struct Browser::State : public CefClient,
 
     /// Открывает разметку как ссылку с данными.
     void load(const std::string& html) {
+        loadUrl(kDataPrefix + CefBase64Encode(html.data(), html.size()).ToString());
+    }
+
+    void loadUrl(const std::string& url) {
         CefRefPtr<CefBrowser> target;
 
         {
@@ -190,12 +255,9 @@ struct Browser::State : public CefClient,
             target = browser;
         }
 
-        if (target == nullptr) {
-            return;
+        if (target != nullptr) {
+            target->GetMainFrame()->LoadURL(url);
         }
-
-        target->GetMainFrame()->LoadURL(
-            kDataPrefix + CefBase64Encode(html.data(), html.size()).ToString());
     }
 
     IMPLEMENT_REFCOUNTING(State);
@@ -218,6 +280,7 @@ Browser::~Browser() {
         // разрушаемый объект.
         state_->onPaint = nullptr;
         state_->onMessage = nullptr;
+        state_->onEvent = nullptr;
 
         browser = state_->browser;
     }
@@ -284,6 +347,54 @@ void Browser::show(std::string_view html) {
     }
 }
 
+void Browser::open(std::string_view url) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    bool ready = false;
+
+    {
+        const std::lock_guard guard{state_->mutex};
+
+        ready = state_->browser != nullptr;
+        if (!ready) {
+            state_->pendingUrl.assign(url);
+
+            // Разметка, если её успели попросить, больше не нужна: показать
+            // можно что-то одно, и последнее слово за тем, кто сказал позже.
+            state_->pending.clear();
+        }
+    }
+
+    if (ready) {
+        state_->loadUrl(std::string{url});
+    }
+}
+
+void Browser::emit(std::string_view name, std::string_view arguments) {
+    if (state_ == nullptr || name.empty()) {
+        return;
+    }
+
+    CefRefPtr<CefBrowser> browser;
+
+    {
+        const std::lock_guard guard{state_->mutex};
+        browser = state_->browser;
+    }
+
+    if (browser == nullptr) {
+        return;
+    }
+
+    const CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kAltEvent);
+    message->GetArgumentList()->SetString(0, std::string{name});
+    message->GetArgumentList()->SetString(1, arguments.empty() ? "[]" : std::string{arguments});
+
+    browser->GetMainFrame()->SendProcessMessage(PID_RENDERER, message);
+}
+
 void Browser::post(std::string_view json) {
     if (state_ == nullptr) {
         return;
@@ -308,6 +419,20 @@ void Browser::post(std::string_view json) {
     call.append(");");
 
     browser->GetMainFrame()->ExecuteJavaScript(call, browser->GetMainFrame()->GetURL(), 0);
+}
+
+void Browser::evaluate(std::string_view script) {
+    if (state_ == nullptr || script.empty()) {
+        return;
+    }
+
+    const CefRefPtr<CefBrowser> browser = state_->current();
+    if (browser == nullptr) {
+        return;
+    }
+
+    browser->GetMainFrame()->ExecuteJavaScript(std::string{script},
+                                               browser->GetMainFrame()->GetURL(), 0);
 }
 
 void Browser::resize(int width, int height) {
@@ -404,9 +529,65 @@ void Browser::releaseMouse() {
     browser->GetHost()->SendMouseMoveEvent(state_->mouseAt(-1, -1), true);
 }
 
+void Browser::sendKey(KeyAction action, unsigned code, bool shift, bool control, bool alt) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const CefRefPtr<CefBrowser> browser = state_->current();
+    if (browser == nullptr) {
+        return;
+    }
+
+    CefKeyEvent event;
+
+    switch (action) {
+    case KeyAction::Down:
+        // RAWKEYDOWN, а не KEYDOWN: KEYDOWN Chromium порождает себе сам вместе
+        // со знаком, разбирая сырое нажатие. Пошли мы его сами — набранное
+        // удвоилось бы.
+        event.type = KEYEVENT_RAWKEYDOWN;
+        break;
+    case KeyAction::Up:
+        event.type = KEYEVENT_KEYUP;
+        break;
+    case KeyAction::Char:
+        event.type = KEYEVENT_CHAR;
+        break;
+    }
+
+    event.windows_key_code = static_cast<int>(code);
+
+    if (action == KeyAction::Char) {
+        event.character = static_cast<char16_t>(code);
+        event.unmodified_character = event.character;
+    }
+
+    event.modifiers = (shift ? EVENTFLAG_SHIFT_DOWN : 0u) |
+                      (control ? EVENTFLAG_CONTROL_DOWN : 0u) | (alt ? EVENTFLAG_ALT_DOWN : 0u);
+
+    browser->GetHost()->SendKeyEvent(event);
+}
+
+void Browser::setFocus(bool focused) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    if (const CefRefPtr<CefBrowser> browser = state_->current(); browser != nullptr) {
+        browser->GetHost()->SetFocus(focused);
+    }
+}
+
 void Browser::onMessage(MessageHandler handler) {
     if (state_ != nullptr) {
         state_->onMessage = std::move(handler);
+    }
+}
+
+void Browser::onEvent(EventHandler handler) {
+    if (state_ != nullptr) {
+        state_->onEvent = std::move(handler);
     }
 }
 

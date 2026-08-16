@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../menu.hpp"
+
 #include <memory>
 #include <string>
 
@@ -49,12 +51,23 @@ public:
     /// нажатия нужны по делу.
     ///
     /// feed обязан пережить слой: читает его собственный поток слоя.
-    [[nodiscard]] static std::unique_ptr<UiLayer> create(UiFeed& feed, std::string& error);
+    ///
+    /// actions — то, что меню вправе попросить сделать: подключиться,
+    /// отключиться, выйти. Больше меню не просит ничего, и это не урезание:
+    /// правила игры принадлежат серверу, а не странице.
+    [[nodiscard]] static std::unique_ptr<UiLayer> create(UiFeed& feed, Menu::Actions actions,
+                                                         std::string& error);
 
     ~UiLayer();
 
     UiLayer(const UiLayer&) = delete;
     UiLayer& operator=(const UiLayer&) = delete;
+
+    /// Меню, если оно поднялось.
+    ///
+    /// Может не подняться, и это не смертельно: экран загрузки, чат и худ живут
+    /// на другой странице и работают без него.
+    [[nodiscard]] Menu* menu() const noexcept;
 
     /// Хозяйство слоя.
     ///

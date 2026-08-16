@@ -1,0 +1,94 @@
+#pragma once
+
+#include <atomic>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <string_view>
+
+namespace oxymp::cefui {
+class Browser;
+}
+
+namespace oxymp::client {
+
+/// Меню внутри игры и весь разговор с ним.
+///
+/// Страница — altv-ui, взятая у alt:V как есть. Говорит она на своём языке:
+/// `alt.emit(имя, ...доводы)` наружу, `alt.on(имя, обработчик)` внутрь. Здесь
+/// живёт вторая половина этого разговора — та, что знает, что значит каждое имя.
+///
+/// Своих правил игры меню не заводит и не может: всё, о чём оно просит, —
+/// подключиться, отключиться и выйти. Настройки оно правит в файле, который и
+/// без него правится блокнотом.
+///
+/// Страница живёт в потоке CEF, и оттуда же приходят её события. Всё, что этот
+/// класс отдаёт наружу, — либо неизменяемое, либо счётчики: разбирать блокировки
+/// в потоке отрисовки игры незачем.
+class Menu {
+public:
+    /// То, что меню просит сделать у того, кто им владеет.
+    ///
+    /// Обработчики зовутся из потока CEF. Делать в них долгую работу нельзя:
+    /// пока они не вернутся, страница не отвечает на мышь.
+    struct Actions {
+        /// Подключиться. address — `узел:порт`, как его набрал игрок.
+        std::function<void(const std::string& address, const std::string& password)> connect;
+
+        /// Отключиться от сервера или бросить попытку подключения.
+        std::function<void()> disconnect;
+
+        /// Выйти из игры.
+        std::function<void()> quit;
+    };
+
+    /// Заводит меню на уже созданной странице.
+    ///
+    /// directory — каталог клиента: рядом с ним лежат `oxymp.toml` и `skin.bin`.
+    /// Страница при этом ещё не загружена; загружает её сам Menu, потому что
+    /// подписаться на её события нужно раньше, чем она успеет что-либо послать.
+    [[nodiscard]] static std::unique_ptr<Menu> create(cefui::Browser& browser,
+                                                      std::filesystem::path directory,
+                                                      Actions actions);
+
+    ~Menu();
+
+    Menu(const Menu&) = delete;
+    Menu& operator=(const Menu&) = delete;
+
+    /// Открыто ли меню.
+    ///
+    /// Пока открыто, мышь и клавиатура принадлежат ему, а не игре. Решает это
+    /// сама страница и сообщает событием `ui:open`: она одна знает, открыт ли
+    /// поверх неё ещё и разговор о разрешениях.
+    [[nodiscard]] bool opened() const noexcept;
+
+    /// Имя, которым назвался игрок. Берётся из настроек.
+    [[nodiscard]] std::string playerName() const;
+
+    /// Открывает меню, если оно закрыто, и наоборот.
+    ///
+    /// Просьбой странице, а не своим счётчиком: открыто ли меню, решает она — у
+    /// неё поверх может быть разговор о разрешениях или ввод имени, и закрывать
+    /// его чужой волей нельзя. Она же ответит обратно событием `ui:open`.
+    void toggle();
+
+    /// Показывает странице ход подключения.
+    ///
+    /// Имена состояний — те же, что у alt:V: `connection:connecting`,
+    /// `connection:connected`, `connection:failed`. Страница знает их наизусть,
+    /// и переименовать их нельзя, не поправив её.
+    void connecting(std::string_view address);
+    void connected();
+    void disconnected();
+    void failed(std::string_view reason);
+
+private:
+    Menu() = default;
+
+    struct State;
+    std::unique_ptr<State> state_;
+};
+
+} // namespace oxymp::client

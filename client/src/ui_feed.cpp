@@ -79,6 +79,11 @@ void UiFeed::setReady() {
     ready_ = true;
 }
 
+bool UiFeed::ready() const {
+    const std::lock_guard guard{mutex_};
+    return ready_;
+}
+
 bool UiFeed::playerInWorld() const {
     const std::lock_guard guard{mutex_};
     return worldReady_;

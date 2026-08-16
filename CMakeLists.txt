@@ -46,6 +46,13 @@ add_library(oxymp::options ALIAS oxymp_options)
 
 target_compile_features(oxymp_options INTERFACE cxx_std_20)
 
+# Версия — одной строкой и из одного места.
+#
+# Она уже есть в project(...) и оттуда попадает в сведения о файле. Коду её
+# приходится объявлять отдельно: второй список версий — это место, где однажды
+# окажется не то, что показывает проводник.
+target_compile_definitions(oxymp_options INTERFACE OXYMP_VERSION="${PROJECT_VERSION}")
+
 if(MSVC)
     target_compile_options(oxymp_options INTERFACE
         /W4             # предупреждения: всё осмысленное
@@ -82,6 +89,10 @@ include(cmake/sign.cmake)
 # причине, что и подпись.
 include(cmake/version_info.cmake)
 
+# Меню. Собирается своим средством и в свой срок — см. cmake/menu.cmake.
+include(cmake/menu.cmake)
+
+add_subdirectory(config)
 add_subdirectory(memscan)
 add_subdirectory(gamesig)
 add_subdirectory(shared)
@@ -108,6 +119,7 @@ add_subdirectory(tools/sigcheck)
 
 if(OXYMP_BUILD_TESTS)
     enable_testing()
+    add_subdirectory(config/tests)
     add_subdirectory(memscan/tests)
     add_subdirectory(shared/tests)
     add_subdirectory(client/tests)
@@ -134,8 +146,10 @@ if(WIN32)
                 -DDIST_CONFIG=$<CONFIG>
                 -DDIST_BIN=$<TARGET_FILE_DIR:oxymp_launcher>
                 -DDIST_ROOT=${CMAKE_SOURCE_DIR}/release
+                -DDIST_MENU_PAGE=${OXYMP_MENU_PAGE}
                 -P "${CMAKE_CURRENT_LIST_DIR}/cmake/dist_script.cmake"
         DEPENDS oxymp_launcher oxymp_client oxymp_rglpatch oxymp_server oxymp_cef_runtime
+                oxymp_menu
         COMMENT "Раскладка по каталогам client и server"
         VERBATIM
     )

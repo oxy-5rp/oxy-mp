@@ -1,10 +1,12 @@
 #include "ui_layer.hpp"
 
+#include "menu_input.hpp"
 #include "overlay_renderer.hpp"
 #include "page_source.hpp"
 #include "present_hook.hpp"
 #include "window.hpp"
 
+#include "../menu.hpp"
 #include "../ui_feed.hpp"
 
 #include <oxymp/cefui/browser.hpp>
@@ -70,15 +72,14 @@ std::filesystem::path cefDirectory() {
 
 } // namespace
 
-/// Всё хозяйство слоя.
+/// Одна страница в кадре игры: её точки и то, чем они рисуются.
 ///
-/// Вынесено из заголовка целиком: иначе всякий, кто подключит ui_layer.hpp,
-/// получил бы следом Direct3D и половину Chromium.
-struct UiLayer::State {
-    UiFeed* feed = nullptr;
-
+/// Заведено потому, что страниц стало две. Первая — слой загрузки, чата и худа;
+/// вторая — меню. Общего кадра у них быть не может: каждая рисует своё и
+/// обновляется в свой срок, а сложить их в один буфер значило бы складывать
+/// прозрачности вручную там, где это умеет видеокарта.
+struct Surface {
     std::unique_ptr<oxymp::cefui::Browser> browser;
-    std::unique_ptr<PresentHook> hook;
     OverlayRenderer renderer;
 
     /// Последний кадр страницы.
@@ -97,7 +98,74 @@ struct UiLayer::State {
     int shownWidth = 0;
     int shownHeight = 0;
 
-    /// Размер, под который подогнана страница.
+    /// Принимает кадр от CEF. Зовётся из его потока.
+    void accept(const std::uint8_t* pixels, int width, int height) {
+        const std::size_t bytes =
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
+
+        const std::lock_guard guard{mutex};
+
+        incoming.resize(bytes);
+        std::memcpy(incoming.data(), pixels, bytes);
+
+        incomingWidth = width;
+        incomingHeight = height;
+        fresh = true;
+    }
+
+    /// Выводит последний кадр поверх кадра игры. Только из потока отрисовки.
+    void draw(IDXGISwapChain* swapchain) {
+        bool changed = false;
+
+        {
+            const std::lock_guard guard{mutex};
+
+            if (fresh) {
+                // Обмен, а не копия: буфер занимает до восьми мегабайт, и
+                // копировать их в потоке отрисовки игры значило бы отнимать у
+                // кадра миллисекунду на ровном месте.
+                shown.swap(incoming);
+                shownWidth = incomingWidth;
+                shownHeight = incomingHeight;
+
+                fresh = false;
+                changed = true;
+            }
+        }
+
+        renderer.draw(swapchain, shown.data(), shownWidth, shownHeight, changed);
+    }
+};
+
+/// Всё хозяйство слоя.
+///
+/// Вынесено из заголовка целиком: иначе всякий, кто подключит ui_layer.hpp,
+/// получил бы следом Direct3D и половину Chromium.
+struct UiLayer::State {
+    UiFeed* feed = nullptr;
+
+    std::unique_ptr<PresentHook> hook;
+
+    /// Слой загрузки, чата и худа — тот, что был здесь всегда.
+    Surface overlay;
+
+    /// Меню. Рисуется поверх первого: пока оно открыто, оно закрывает собой всё.
+    Surface menuSurface;
+
+    std::unique_ptr<Menu> menu;
+
+    /// Перехват ввода для меню.
+    ///
+    /// Ставится не сразу: окна игры в мгновение, когда поднимается слой, ещё
+    /// нет — до него остаются секунды. Поэтому его дожидается поток, ведущий
+    /// страницы, и ставит перехват первым же кадром, когда окно нашлось.
+    std::unique_ptr<MenuInput> input;
+
+    /// Сказали ли уже меню, что игрок в игре. Один раз за запуск: второе такое
+    /// слово ничего не меняет, а слать его двадцать раз в секунду незачем.
+    bool toldConnected = false;
+
+    /// Размер, под который подогнаны страницы.
     int width = kInitialWidth;
     int height = kInitialHeight;
 
@@ -131,21 +199,78 @@ struct UiLayer::State {
         width = wanted;
         height = high;
 
-        browser->resize(wanted, high);
+        overlay.browser->resize(wanted, high);
+
+        if (menuSurface.browser != nullptr) {
+            menuSurface.browser->resize(wanted, high);
+        }
+
         spdlog::debug("страница интерфейса подогнана: {}x{}", wanted, high);
+    }
+
+    /// Ставит перехват ввода, как только окно игры появилось.
+    void catchInput() {
+        if (input != nullptr || menu == nullptr || menuSurface.browser == nullptr) {
+            return;
+        }
+
+        const HWND game = Window::findOwnWindow();
+        if (game == nullptr) {
+            return;
+        }
+
+        std::string error;
+
+        input = MenuInput::install(
+            game, *menuSurface.browser, [this] { return menu->opened(); },
+            [this] { menu->toggle(); }, error);
+
+        if (input == nullptr) {
+            spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);
+
+            // Меню убирается целиком, а не остаётся показанным. Второе было бы
+            // хуже отсутствия: страница закрывает собой весь кадр, и не имея
+            // ввода, игрок не смог бы её ни закрыть, ни обойти.
+            //
+            // Второй попытки не будет и по другой причине: окно мы уже нашли,
+            // значит отказ не в нём, и повторять его двадцать раз в секунду
+            // значило бы завалить журнал одной строкой.
+            menu.reset();
+            menuSurface.browser.reset();
+        }
+    }
+
+    /// Говорит меню, что игрок в игре, — и оно убирается с экрана.
+    ///
+    /// Пока страница считает себя неподключённой, она держит себя открытой
+    /// поверх всего, и никакое переключение её не свернёт: так она устроена, и
+    /// так же ведёт себя alt:V. Слово «подключились» для неё — единственный
+    /// способ уйти.
+    ///
+    /// Мгновение выбрано то же, по которому уходит экран загрузки: игрок в мире,
+    /// и с сервером всё решилось.
+    void tellConnected() {
+        if (menu == nullptr || toldConnected || !feed->ready()) {
+            return;
+        }
+
+        menu->connected();
+        toldConnected = true;
     }
 
     void keep() {
         while (!stopped.load()) {
             fitToWindow();
-            browser->post(feed->takeUpdate());
+            catchInput();
+            tellConnected();
+            overlay.browser->post(feed->takeUpdate());
 
             std::this_thread::sleep_for(kStateInterval);
         }
     }
 };
 
-std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, std::string& error) {
+std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, std::string& error) {
     const std::filesystem::path directory = cefDirectory();
     if (directory.empty()) {
         error = "не удалось найти каталог с хозяйством CEF";
@@ -162,53 +287,52 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, std::string& error) {
     State& state = *layer->state_;
     state.feed = &feed;
 
-    state.browser = oxymp::cefui::Browser::create(
+    state.overlay.browser = oxymp::cefui::Browser::create(
         kInitialWidth, kInitialHeight,
         [&state](const std::uint8_t* pixels, int width, int height) {
-            const std::size_t bytes =
-                static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
-
-            const std::lock_guard guard{state.mutex};
-
-            state.incoming.resize(bytes);
-            std::memcpy(state.incoming.data(), pixels, bytes);
-
-            state.incomingWidth = width;
-            state.incomingHeight = height;
-            state.fresh = true;
+            state.overlay.accept(pixels, width, height);
         },
         error);
 
-    if (state.browser == nullptr) {
+    if (state.overlay.browser == nullptr) {
         return nullptr;
     }
 
-    state.browser->show(composePage());
+    state.overlay.browser->show(composePage());
+
+    // Меню — вторая страница, и её отсутствие не отменяет первую: экран загрузки
+    // и чат должны работать даже тогда, когда меню не завелось.
+    std::string menuError;
+
+    state.menuSurface.browser = oxymp::cefui::Browser::create(
+        kInitialWidth, kInitialHeight,
+        [&state](const std::uint8_t* pixels, int width, int height) {
+            state.menuSurface.accept(pixels, width, height);
+        },
+        menuError);
+
+    if (state.menuSurface.browser != nullptr) {
+        state.menu = Menu::create(*state.menuSurface.browser, directory.parent_path(),
+                                  std::move(actions));
+    } else {
+        spdlog::error("меню не поднялось: {}", menuError);
+    }
 
     state.hook = PresentHook::install(
         [&state](IDXGISwapChain* swapchain) {
-            bool changed = false;
+            state.overlay.draw(swapchain);
 
-            {
-                const std::lock_guard guard{state.mutex};
-
-                if (state.fresh) {
-                    // Обмен, а не копия: буфер занимает до восьми мегабайт, и
-                    // копировать их в потоке отрисовки игры значило бы отнимать
-                    // у кадра миллисекунду на ровном месте.
-                    state.shown.swap(state.incoming);
-                    state.shownWidth = state.incomingWidth;
-                    state.shownHeight = state.incomingHeight;
-
-                    state.fresh = false;
-                    changed = true;
-                }
+            // Меню рисуется вторым, то есть поверх: открытое, оно закрывает
+            // собой всё, включая экран загрузки.
+            if (state.menuSurface.browser != nullptr) {
+                state.menuSurface.draw(swapchain);
             }
-
-            state.renderer.draw(swapchain, state.shown.data(), state.shownWidth,
-                                state.shownHeight, changed);
         },
-        [&state] { state.renderer.releaseFrameResources(); }, error);
+        [&state] {
+            state.overlay.renderer.releaseFrameResources();
+            state.menuSurface.renderer.releaseFrameResources();
+        },
+        error);
 
     if (state.hook == nullptr) {
         return nullptr;
@@ -219,6 +343,10 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, std::string& error) {
 
     spdlog::info("игровой интерфейс поднят внутри кадра");
     return layer;
+}
+
+Menu* UiLayer::menu() const noexcept {
+    return state_ == nullptr ? nullptr : state_->menu.get();
 }
 
 UiLayer::~UiLayer() {
@@ -236,10 +364,20 @@ UiLayer::~UiLayer() {
     }
 
     // Дальше порядок обратный сборке и обязателен: сперва перестаём рисовать,
-    // потом закрываем страницу. Наоборот — значит на один кадр остаться с
+    // потом закрываем страницы. Наоборот — значит на один кадр остаться с
     // текстурой, собранной из освобождённой памяти.
     state_->hook.reset();
-    state_->browser.reset();
+
+    // Перехват ввода снимается раньше всего остального: он ссылается и на
+    // страницу меню, и на само меню, и работает в потоке окна игры — то есть в
+    // чужом, который о нашем разрушении не знает.
+    state_->input.reset();
+
+    // Меню уходит раньше своей страницы: оно на неё ссылается.
+    state_->menu.reset();
+
+    state_->menuSurface.browser.reset();
+    state_->overlay.browser.reset();
 
     // Chromium при этом не останавливается: остановленный, он не поднимается
     // заново, а модуль вправе пережить не одну сессию. Уйдёт он вместе с
