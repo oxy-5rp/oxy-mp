@@ -16,6 +16,17 @@ namespace {
 /// Сколько ждать рукопожатия от подключившегося соединения.
 constexpr auto kHelloTimeout = std::chrono::seconds{10};
 
+/// Где кончается ближний круг и начинается дальний, в квадратах метров.
+///
+/// Числа взяты из того, как игра показывает людей: до полусотни метров чужой
+/// игрок виден в подробностях, до полутора сотен — фигурой, дальше — точкой.
+/// Столько же ему и снимков: каждый, каждый второй, каждый четвёртый.
+constexpr float kNearRing = 50.0F * 50.0F;
+constexpr float kFarRing = 150.0F * 150.0F;
+
+constexpr unsigned int kMidEvery = 2;
+constexpr unsigned int kFarEvery = 4;
+
 /// Как часто снимок стоящего игрока уходит всё равно.
 ///
 /// Стоящий не шлёт ничего нового, и пересылать его каждый такт незачем. Но
@@ -37,11 +48,12 @@ constexpr auto kTrafficInterval = std::chrono::seconds{10};
 /// одного такта сервер не разбирает их ни при какой нагрузке.
 constexpr auto kTickInterval = std::chrono::milliseconds{1000 / shared::kDefaultTickRate};
 
-/// Сколько ждать одного события.
+/// Сколько ждать одного события за раз.
 ///
-/// Меньше такта, и намеренно: ожидание длиной в такт означало бы, что пустой
-/// сервер просыпается ровно вовремя, а занятый — с опозданием на целое ожидание,
-/// уже потратив свой срок на сон.
+/// Меньше такта, и намеренно: ожидание длиной в такт означало бы, что срок
+/// разбора истекает ровно тогда, когда сервер только проснулся. Двумя
+/// миллисекундами он просыпается достаточно часто, чтобы уложиться в срок с
+/// точностью, которой хватает и снимкам, и скриптам.
 constexpr auto kPollSlice = std::chrono::milliseconds{2};
 
 std::string_view describe(shared::RejectReason reason) {
@@ -127,7 +139,19 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         // ни разу.
         const auto deadline = std::chrono::steady_clock::now() + kTickInterval;
 
-        while (auto event = host_->poll(kPollSlice)) {
+        // Разбор идёт до срока — и ровно до срока, ни раньше, ни позже.
+        //
+        // Ждать тишины нельзя: под нагрузкой её не бывает, и сервер не выходил
+        // из разбора вовсе — ни пересдачи машин, ни раздачи, ни тика скриптов.
+        // Выходить же по первой тишине тоже нельзя: на пустом сервере такт
+        // прокручивался бы пятьсот раз в секунду вместо тридцати, а рассылка
+        // снимков вместе с ним — то есть неровно.
+        while (std::chrono::steady_clock::now() < deadline) {
+            auto event = host_->poll(kPollSlice);
+            if (!event) {
+                continue;
+            }
+
             switch (event->type) {
             case net::Event::Type::Connected:
                 handleConnected(event->peer);
@@ -137,10 +161,6 @@ void Server::run(const std::atomic<bool>& stopRequested) {
                 break;
             case net::Event::Type::Message:
                 handleMessage(event->peer, event->payload);
-                break;
-            }
-
-            if (std::chrono::steady_clock::now() >= deadline) {
                 break;
             }
         }
@@ -578,6 +598,8 @@ void Server::broadcastStates() {
     // считать его пришлось бы на каждую пару игроков в каждом такте.
     const float reach = config_.streamDistance * config_.streamDistance;
 
+    ++tick_;
+
     for (const auto& [peer, listener] : players_) {
         shared::PlayerStates bundle;
 
@@ -597,7 +619,27 @@ void Server::broadcastStates() {
             // Только тем, кто рядом. Игроку незачем знать, как бежит человек за
             // полкилометра: он его всё равно не увидит, а снимков это половина
             // всего, что ходит по сети.
-            if (shared::distanceSquared(listener.position, other.state.position) > reach) {
+            const float distance = shared::distanceSquared(listener.position, other.state.position);
+            if (distance > reach) {
+                continue;
+            }
+
+            // Дальние обновляются реже ближних, и это не мелочь, а то, чем
+            // держится наплыв. Человек в двух шагах должен двигаться плавно,
+            // человек за триста метров — просто быть там, где он есть: на таком
+            // расстоянии он размером с пиксель, и разницы между двадцатью
+            // снимками в секунду и пятью не видно никому.
+            //
+            // Кого пропустить, решает не счётчик на каждую пару — их было бы
+            // столько же, сколько игроков в квадрате, — а остаток от деления с
+            // добавкой номера игрока. Добавка нужна, чтобы дальние обновлялись
+            // вразнобой: без неё все они пришли бы одним тактом, и сеть шла бы
+            // рывками.
+            const unsigned int every = distance > kFarRing  ? kFarEvery
+                                       : distance > kNearRing ? kMidEvery
+                                                              : 1U;
+
+            if (every > 1 && (tick_ + other.id) % every != 0) {
                 continue;
             }
 

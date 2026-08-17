@@ -32,7 +32,7 @@ namespace {
 /// Лос-Сантоса. Иначе бота не увидеть: клиент показывает чужих игроков
 /// настоящими персонажами, а персонаж за километр от нас существует только в
 /// числах.
-constexpr oxymp::shared::Vec3 kCircleCentre{-1037.7F, -2738.0F, 20.2F};
+oxymp::shared::Vec3 g_circleCentre{-1037.7F, -2738.0F, 20.2F};
 constexpr float kCircleRadius = 12.0F;
 
 /// Угловая скорость в радианах в секунду: полный круг примерно за 12 секунд.
@@ -47,7 +47,11 @@ extern "C" void onInterrupt(int) {
 void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp-botclient [--address <адрес>] [--port <номер>] [--nickname <имя>]\n"
-                 "                  [--seconds <сколько работать>]\n";
+                 "                  [--seconds <сколько работать>] [--offset <метров>]\n\n"
+                 "  --offset  на сколько метров к востоку отнести круг, по которому ходит\n"
+                 "            бот. Нужно, чтобы разводить ботов по карте: сбившиеся в одну\n"
+                 "            точку, они не покажут, во что обходится сессия, где люди\n"
+                 "            разошлись.\n";
 }
 
 template<typename T>
@@ -138,6 +142,14 @@ int main(int argc, char** argv) {
             }
         } else if (argument == "--nickname" && hasValue) {
             settings.nickname = args[++i];
+        } else if (argument == "--offset" && hasValue) {
+            unsigned int offset = 0;
+            if (!parseNumber(args[++i], offset)) {
+                std::cerr << "смещение должно быть числом\n";
+                return 2;
+            }
+
+            g_circleCentre.x += static_cast<float>(offset);
         } else if (argument == "--seconds" && hasValue) {
             if (!parseNumber(args[++i], seconds)) {
                 printUsage();
@@ -204,9 +216,9 @@ int main(int argc, char** argv) {
 
             oxymp::shared::PlayerState state;
             state.position =
-                oxymp::shared::Vec3{kCircleCentre.x + kCircleRadius * std::cos(angle),
-                                    kCircleCentre.y + kCircleRadius * std::sin(angle),
-                                    kCircleCentre.z};
+                oxymp::shared::Vec3{g_circleCentre.x + kCircleRadius * std::cos(angle),
+                                    g_circleCentre.y + kCircleRadius * std::sin(angle),
+                                    g_circleCentre.z};
             state.velocity = oxymp::shared::Vec3{-kCircleRadius * kAngularSpeed * std::sin(angle),
                                                  kCircleRadius * kAngularSpeed * std::cos(angle),
                                                  0.0F};
