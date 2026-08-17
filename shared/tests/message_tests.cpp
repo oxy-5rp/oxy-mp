@@ -1,6 +1,7 @@
 // Имена тестов латиницей: ctest передаёт их обратно в исполняемый файл как
 // фильтр, и не-ASCII имена ломаются о кодировку консоли Windows.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <oxymp/shared/math/joaat.hpp>
@@ -12,6 +13,7 @@
 #include <vector>
 
 using namespace oxymp::shared;
+using Catch::Approx;
 
 namespace {
 
@@ -255,8 +257,14 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     REQUIRE(received.has_value());
     CHECK(received->playerId == 17);
     CHECK(received->position == sent.position);
-    CHECK(received->heading == 91.5F);
-    CHECK(received->velocity == sent.velocity);
+
+    // Угол и скорость едут квантованными, и сравнивать их точно нельзя.
+    // Допуск взят по шагу квантования: круг разложен на 65536 делений, скорость
+    // — на шестьдесят четыре деления на метр в секунду.
+    CHECK(received->heading == Approx(91.5F).margin(0.01F));
+    CHECK(received->velocity.x == Approx(sent.velocity.x).margin(0.02F));
+    CHECK(received->velocity.y == Approx(sent.velocity.y).margin(0.02F));
+    CHECK(received->velocity.z == Approx(sent.velocity.z).margin(0.02F));
     CHECK(received->health == 175);
     CHECK(received->armour == 50);
     CHECK(has(received->flags, PlayerFlag::Aiming));
@@ -380,13 +388,105 @@ TEST_CASE("VehicleAuthority carries an absent owner", "[messages]") {
 TEST_CASE("PlayerState keeps the driver seat negative", "[messages]") {
     // Место водителя — минус единица, а по сети едет одним беззнаковым байтом.
     // Приведи его обратно неверно — и водитель станет пассажиром на месте 255.
+    //
+    // Машина здесь обязательна: место без машины в снимок не пишется вовсе —
+    // сидеть не в чем, и байт на это тратить незачем.
     PlayerState sent;
+    sent.vehicleId = 4;
     sent.seat = kDriverSeat;
 
     const auto received = roundTrip(sent);
 
     REQUIRE(received.has_value());
     CHECK(received->seat == kDriverSeat);
+}
+
+TEST_CASE("a snapshot of a walking man carries nothing extra", "[messages]") {
+    // Идущий безоружный человек — самый частый случай в сессии, и снимков таких
+    // приходит столько, сколько игроков, умноженное на самих себя. Всё, чего у
+    // него нет, не должно занимать в снимке ни байта.
+    PlayerState walking;
+    walking.playerId = 1;
+    walking.position = Vec3{1.0F, 2.0F, 3.0F};
+
+    PlayerState armed = walking;
+    armed.weapon = 0x1B06D571;
+    armed.ammo = 30;
+
+    PlayerState aiming = walking;
+    aiming.flags = static_cast<std::uint32_t>(PlayerFlag::Aiming);
+    aiming.aimAt = Vec3{4.0F, 5.0F, 6.0F};
+
+    PlayerState driving = walking;
+    driving.vehicleId = 9;
+    driving.seat = kDriverSeat;
+
+    const std::size_t plain = encode(walking).size();
+
+    CHECK(encode(armed).size() == plain + 6);
+    CHECK(encode(aiming).size() == plain + 12);
+    CHECK(encode(driving).size() == plain + 5);
+
+    // И само число: снимок идущего обязан оставаться коротким. Проверка не
+    // ради числа как такового — ради того, чтобы прибавка к нему не прошла
+    // незамеченной.
+    CHECK(plain == 38);
+}
+
+TEST_CASE("optional fields survive a round trip when present", "[messages]") {
+    PlayerState sent;
+    sent.playerId = 2;
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::Shooting);
+    sent.weapon = 0xDEADBEEF;
+    sent.ammo = 250;
+    sent.aimAt = Vec3{-7.5F, 8.25F, 9.0F};
+    sent.vehicleId = 77;
+    sent.seat = 2;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->weapon == 0xDEADBEEF);
+    CHECK(received->ammo == 250);
+    CHECK(received->aimAt == sent.aimAt);
+    CHECK(received->vehicleId == 77);
+    CHECK(received->seat == 2);
+}
+
+TEST_CASE("an angle survives the round trip through the whole circle", "[messages]") {
+    // Углы приходят от игры и отрицательными, и больше трёхсот шестидесяти:
+    // приведение к кругу делает запись, и делать его обязана именно она.
+    for (const float degrees : {0.0F, 0.5F, 90.0F, 179.9F, 270.25F, 359.9F}) {
+        PlayerState sent;
+        sent.heading = degrees;
+
+        const auto received = roundTrip(sent);
+
+        REQUIRE(received.has_value());
+        CHECK(received->heading == Approx(degrees).margin(0.01F));
+    }
+
+    PlayerState negative;
+    negative.heading = -90.0F;
+
+    const auto received = roundTrip(negative);
+
+    REQUIRE(received.has_value());
+    CHECK(received->heading == Approx(270.0F).margin(0.01F));
+}
+
+TEST_CASE("a very fast body does not wrap around in the snapshot", "[messages]") {
+    // Предел скорости в снимке — пятьсот метров в секунду с небольшим. Выход за
+    // него обязан упереться в предел, а не перевернуться знаком: перевернувшись,
+    // падающий самолёт полетел бы у соседа вверх.
+    PlayerState sent;
+    sent.velocity = Vec3{5000.0F, -5000.0F, 0.0F};
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->velocity.x > 500.0F);
+    CHECK(received->velocity.y < -500.0F);
 }
 
 TEST_CASE("VehicleState survives a round trip", "[messages]") {

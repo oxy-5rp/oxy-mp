@@ -172,16 +172,50 @@ void PlayerState::write(ByteWriter& writer) const {
     writer.writeU32(sentAt);
     writer.writeU32(playerId);
     writer.writeVec3(position);
-    writer.writeFloat(heading);
-    writer.writeVec3(velocity);
-    writer.writeU16(health);
-    writer.writeU16(armour);
+
+    // Угол и скорость — квантованными: шесть тысячных градуса и полтора
+    // сантиметра в секунду там, где раньше стояла полная точность плавающего
+    // числа. Разглядеть разницу нельзя, а восемь байт со снимка снимается.
+    writer.writeAngle(heading);
+    writer.writeVelocity(velocity);
+
+    // Здоровье и броня — по байту: в нумерации игры их двести и сто, и больше
+    // не бывает.
+    writer.writeU8(static_cast<std::uint8_t>(health > kMaxHealth ? kMaxHealth : health));
+    writer.writeU8(static_cast<std::uint8_t>(armour > kMaxArmour ? kMaxArmour : armour));
+
     writer.writeU32(flags);
-    writer.writeU32(weapon);
-    writer.writeU16(ammo);
-    writer.writeVec3(aimAt);
-    writer.writeU32(vehicleId);
-    writer.writeU8(static_cast<std::uint8_t>(seat));
+
+    // Дальше — то, чего у большинства нет. Идущий безоружный человек — самый
+    // частый случай в сессии, и платить за оружие, точку прицеливания и машину
+    // должен тот, у кого они есть.
+    std::uint8_t present = 0;
+    if (weapon != 0) {
+        present |= kHasWeapon;
+    }
+    if (has(flags, PlayerFlag::Aiming) || has(flags, PlayerFlag::Shooting)) {
+        present |= kHasAim;
+    }
+    if (vehicleId != kInvalidVehicleId) {
+        present |= kHasVehicle;
+    }
+
+    writer.writeU8(present);
+
+    if ((present & kHasWeapon) != 0) {
+        writer.writeU32(weapon);
+        writer.writeU16(ammo);
+    }
+
+    if ((present & kHasAim) != 0) {
+        writer.writeVec3(aimAt);
+    }
+
+    if ((present & kHasVehicle) != 0) {
+        writer.writeU32(vehicleId);
+        writer.writeU8(static_cast<std::uint8_t>(seat));
+    }
+
     writer.writeU8(static_cast<std::uint8_t>(action));
     writer.writeU8(actionSequence);
 }
@@ -191,16 +225,28 @@ PlayerState PlayerState::read(ByteReader& reader) {
     message.sentAt = reader.readU32();
     message.playerId = reader.readU32();
     message.position = reader.readVec3();
-    message.heading = reader.readFloat();
-    message.velocity = reader.readVec3();
-    message.health = reader.readU16();
-    message.armour = reader.readU16();
+    message.heading = reader.readAngle();
+    message.velocity = reader.readVelocity();
+    message.health = reader.readU8();
+    message.armour = reader.readU8();
     message.flags = reader.readU32();
-    message.weapon = reader.readU32();
-    message.ammo = reader.readU16();
-    message.aimAt = reader.readVec3();
-    message.vehicleId = reader.readU32();
-    message.seat = static_cast<std::int8_t>(reader.readU8());
+
+    const std::uint8_t present = reader.readU8();
+
+    if ((present & kHasWeapon) != 0) {
+        message.weapon = reader.readU32();
+        message.ammo = reader.readU16();
+    }
+
+    if ((present & kHasAim) != 0) {
+        message.aimAt = reader.readVec3();
+    }
+
+    if ((present & kHasVehicle) != 0) {
+        message.vehicleId = reader.readU32();
+        message.seat = static_cast<std::int8_t>(reader.readU8());
+    }
+
     message.action = static_cast<PedAction>(reader.readU8());
     message.actionSequence = reader.readU8();
     return message;

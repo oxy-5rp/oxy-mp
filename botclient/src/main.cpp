@@ -16,9 +16,12 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+
+#include <shellapi.h>
 #endif
 
 namespace {
@@ -55,6 +58,58 @@ bool parseNumber(std::string_view text, T& value) {
     return result.ec == std::errc{} && result.ptr == end;
 }
 
+/// Доводы командной строки в UTF-8.
+///
+/// Обычный argv на Windows приходит в кодовой странице консоли, а не в UTF-8:
+/// имя игрока кириллицей превращалось в вопросительные знаки ещё до отправки, и
+/// сервер получал их как есть. Проверено на живой игре — над головой персонажа
+/// стояло «?????».
+///
+/// Поэтому строка запуска берётся широкой и переводится сама. На остальных
+/// платформах argv уже в UTF-8, и переводить нечего.
+[[nodiscard]] std::vector<std::string> arguments(int argc, char** argv) {
+    std::vector<std::string> collected;
+
+#ifdef _WIN32
+    (void)argc;
+    (void)argv;
+
+    int count = 0;
+    wchar_t** wide = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+
+    if (wide == nullptr) {
+        return collected;
+    }
+
+    collected.reserve(static_cast<std::size_t>(count));
+
+    for (int i = 0; i < count; ++i) {
+        const int size = ::WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, nullptr, 0, nullptr,
+                                               nullptr);
+        if (size <= 1) {
+            collected.emplace_back();
+            continue;
+        }
+
+        // Минус один: размер посчитан вместе с завершающим нулём, а строке он не
+        // нужен — она знает свою длину сама.
+        std::string value(static_cast<std::size_t>(size - 1), '\0');
+        ::WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, value.data(), size, nullptr, nullptr);
+
+        collected.push_back(std::move(value));
+    }
+
+    ::LocalFree(wide);
+#else
+    collected.reserve(static_cast<std::size_t>(argc));
+    for (int i = 0; i < argc; ++i) {
+        collected.emplace_back(argv[i]);
+    }
+#endif
+
+    return collected;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -68,21 +123,23 @@ int main(int argc, char** argv) {
     // Ноль означает «работать, пока не остановят».
     unsigned int seconds = 0;
 
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view argument = argv[i];
-        const bool hasValue = i + 1 < argc;
+    const std::vector<std::string> args = arguments(argc, argv);
+
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        const std::string_view argument = args[i];
+        const bool hasValue = i + 1 < args.size();
 
         if (argument == "--address" && hasValue) {
-            settings.address = argv[++i];
+            settings.address = args[++i];
         } else if (argument == "--port" && hasValue) {
-            if (!parseNumber(argv[++i], settings.port)) {
+            if (!parseNumber(args[++i], settings.port)) {
                 printUsage();
                 return 2;
             }
         } else if (argument == "--nickname" && hasValue) {
-            settings.nickname = argv[++i];
+            settings.nickname = args[++i];
         } else if (argument == "--seconds" && hasValue) {
-            if (!parseNumber(argv[++i], seconds)) {
+            if (!parseNumber(args[++i], seconds)) {
                 printUsage();
                 return 2;
             }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 
 namespace oxymp::shared {
@@ -155,6 +156,72 @@ std::string ByteReader::readText() {
     }
 
     return std::string{reinterpret_cast<const char*>(data_.data() + start), length};
+}
+
+namespace {
+
+/// Сколько делений в полном круге при записи угла двумя байтами.
+constexpr float kAngleSteps = 65536.0F;
+constexpr float kFullCircle = 360.0F;
+
+/// Во сколько раз скорость увеличивается перед округлением до целого.
+///
+/// Шестьдесят четыре деления на метр в секунду: шаг в полтора сантиметра в
+/// секунду при пределе чуть больше пятисот метров в секунду.
+constexpr float kVelocityScale = 64.0F;
+constexpr float kVelocityLimit = 32767.0F;
+
+[[nodiscard]] std::int16_t quantise(float value) noexcept {
+    const float scaled = value * kVelocityScale;
+
+    // Обрезка обязательна: выход за предел при приведении к целому — это не
+    // «очень быстро», а неопределённое поведение.
+    if (scaled >= kVelocityLimit) {
+        return static_cast<std::int16_t>(kVelocityLimit);
+    }
+    if (scaled <= -kVelocityLimit) {
+        return static_cast<std::int16_t>(-kVelocityLimit);
+    }
+
+    return static_cast<std::int16_t>(scaled >= 0.0F ? scaled + 0.5F : scaled - 0.5F);
+}
+
+} // namespace
+
+void ByteWriter::writeAngle(float degrees) {
+    // Приведение к кругу до записи: игра отдаёт угол и отрицательным, и больше
+    // трёхсот шестидесяти, а деление круга этого не переживает.
+    float wrapped = std::fmod(degrees, kFullCircle);
+    if (wrapped < 0.0F) {
+        wrapped += kFullCircle;
+    }
+
+    const float steps = wrapped / kFullCircle * kAngleSteps;
+    writeU16(static_cast<std::uint16_t>(steps) & 0xFFFFU);
+}
+
+float ByteReader::readAngle() noexcept {
+    return static_cast<float>(readU16()) / kAngleSteps * kFullCircle;
+}
+
+void ByteWriter::writeVelocity(const Vec3& value) {
+    writeU16(static_cast<std::uint16_t>(quantise(value.x)));
+    writeU16(static_cast<std::uint16_t>(quantise(value.y)));
+    writeU16(static_cast<std::uint16_t>(quantise(value.z)));
+}
+
+Vec3 ByteReader::readVelocity() noexcept {
+    const auto axis = [this] {
+        return static_cast<float>(static_cast<std::int16_t>(readU16())) / kVelocityScale;
+    };
+
+    // Порядок вычисления доводов не задан, поэтому оси читаются по одной: иначе
+    // они разъехались бы местами на другом компиляторе.
+    const float x = axis();
+    const float y = axis();
+    const float z = axis();
+
+    return Vec3{x, y, z};
 }
 
 } // namespace oxymp::shared
