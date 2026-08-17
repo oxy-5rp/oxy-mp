@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace oxymp::shared {
 
@@ -480,6 +481,27 @@ struct PlayerState {
 
     void write(ByteWriter& writer) const;
     [[nodiscard]] static PlayerState read(ByteReader& reader);
+};
+
+/// Сколько снимков влезает в одну связку.
+///
+/// Предел не от жадности: длина пишется одним байтом, и больше в неё просто не
+/// поместится. Двести пятьдесят пять человек вокруг одного — цифра, до которой
+/// не доходит ни один игровой режим, а если дойдёт, лишние уедут следующим
+/// тактом.
+inline constexpr std::size_t kMaxStatesInBundle = 255;
+
+/// Снимки всех, кто рядом, одной посылкой.
+///
+/// Только от сервера к клиенту. Обратно клиент шлёт свой единственный снимок как
+/// прежде: складывать ему нечего.
+struct PlayerStates {
+    static constexpr MessageId kId = MessageId::PlayerStates;
+
+    std::vector<PlayerState> players;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerStates read(ByteReader& reader);
 };
 
 /// Что у машины включено и выключено.

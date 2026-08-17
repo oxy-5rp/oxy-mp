@@ -57,6 +57,12 @@ private:
 
     /// Принимает объявленную игроком внешность и пересказывает её остальным.
     void handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance);
+
+    /// Рассылает накопленные снимки: по одной посылке на игрока за такт.
+    void broadcastStates();
+
+    /// Пишет в отладочный журнал, во что обходится сессия.
+    void reportTraffic();
     void handlePing(net::PeerId peer, const shared::Ping& ping);
     void handlePlayerState(net::PeerId peer, shared::PlayerState state);
     void handleVehicleState(net::PeerId peer, shared::VehicleState state);
@@ -262,6 +268,9 @@ private:
     /// ровным чередом.
     std::chrono::steady_clock::time_point reassignedAt_{};
     std::chrono::steady_clock::time_point streamedAt_{};
+
+    /// Когда в последний раз писали в журнал, во что обходится сессия.
+    std::chrono::steady_clock::time_point trafficAt_{};
 };
 
 } // namespace oxymp::server

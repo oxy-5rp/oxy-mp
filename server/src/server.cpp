@@ -16,9 +16,33 @@ namespace {
 /// Сколько ждать рукопожатия от подключившегося соединения.
 constexpr auto kHelloTimeout = std::chrono::seconds{10};
 
-/// Шаг цикла обслуживания. Заодно это максимальное ожидание события,
-/// поэтому сервер не «спит» дольше одного такта.
+/// Как часто снимок стоящего игрока уходит всё равно.
+///
+/// Стоящий не шлёт ничего нового, и пересылать его каждый такт незачем. Но
+/// подошедший рядом с ним иначе не увидел бы его вовсе: снимков нет, а из чего
+/// ещё взяться персонажу, получателю неоткуда узнать. Секунда — та задержка,
+/// которую не заметит вошедший, но заметит сервер: она снимает с него почти всю
+/// пересылку неподвижной толпы.
+constexpr auto kStateKeepalive = std::chrono::seconds{1};
+
+/// Как часто сервер пишет в журнал, во что ему обходится сессия.
+///
+/// В отладочный журнал и нечасто: числа эти нужны не хозяину сервера, а тому,
+/// кто разбирается, выдержит ли сессия наплыв. Считаются они не транспортом, а
+/// нами — заголовки UDP и ENet сюда не входят, и важно здесь отношение до и
+/// после, а не абсолютный байт.
+constexpr auto kTrafficInterval = std::chrono::seconds{10};
+
+/// Шаг цикла обслуживания. Он же — срок, отведённый разбору событий: дольше
+/// одного такта сервер не разбирает их ни при какой нагрузке.
 constexpr auto kTickInterval = std::chrono::milliseconds{1000 / shared::kDefaultTickRate};
+
+/// Сколько ждать одного события.
+///
+/// Меньше такта, и намеренно: ожидание длиной в такт означало бы, что пустой
+/// сервер просыпается ровно вовремя, а занятый — с опозданием на целое ожидание,
+/// уже потратив свой срок на сон.
+constexpr auto kPollSlice = std::chrono::milliseconds{2};
 
 std::string_view describe(shared::RejectReason reason) {
     switch (reason) {
@@ -92,7 +116,18 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
 
 void Server::run(const std::atomic<bool>& stopRequested) {
     while (!stopRequested.load()) {
-        while (auto event = host_->poll(kTickInterval)) {
+        // Разбор событий ограничен сроком такта, а не «пока приходят».
+        //
+        // Прежде здесь стоял цикл без срока, и выходил он только на промежутке
+        // молчания длиной в целый такт. Под нагрузкой такого промежутка не
+        // бывает: два десятка игроков шлют по двадцать снимков в секунду, и
+        // события идут сплошь. Сервер оставался внутри этого цикла и не доходил
+        // до всего остального — ни пересдачи машин, ни раздачи, ни тика
+        // скриптов. Замечено на нагрузке: за семьдесят секунд такт не отработал
+        // ни разу.
+        const auto deadline = std::chrono::steady_clock::now() + kTickInterval;
+
+        while (auto event = host_->poll(kPollSlice)) {
             switch (event->type) {
             case net::Event::Type::Connected:
                 handleConnected(event->peer);
@@ -104,14 +139,21 @@ void Server::run(const std::atomic<bool>& stopRequested) {
                 handleMessage(event->peer, event->payload);
                 break;
             }
+
+            if (std::chrono::steady_clock::now() >= deadline) {
+                break;
+            }
         }
 
         dropSilentPeers();
+        broadcastStates();
         reassignVehicles();
         streamVehicles();
         streamObjects();
         broadcastWorld();
         reviveDead();
+
+        reportTraffic();
 
         // Скрипты — последними в такте, когда сессия уже приведена в порядок.
         // Обработчик увидит мир таким, каким его увидят клиенты, а не застанет
@@ -489,10 +531,100 @@ void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
         reassignedAt_ = {};
     }
 
-    // Только тем, кто рядом. Игроку незачем знать, как бежит человек за
-    // полкилометра от него: он его всё равно не увидит, а снимков это половина
-    // всего, что ходит по сети.
-    broadcastNear(state.position, shared::Channel::State, state, peer);
+    // Снимок не рассылается сразу, а откладывается до конца такта: там он
+    // уйдёт вместе с остальными одной посылкой. Причина — заголовки: отдельным
+    // пакетом каждый снимок платит за них по разу на получателя, и при сотне
+    // игроков заголовки весят больше самих снимков.
+    player->state = state;
+    player->stateFresh = true;
+}
+
+void Server::reportTraffic() {
+    const auto now = std::chrono::steady_clock::now();
+
+    if (trafficAt_ == std::chrono::steady_clock::time_point{}) {
+        trafficAt_ = now;
+        (void)host_->takeTraffic();
+        return;
+    }
+
+    const auto elapsed = now - trafficAt_;
+    if (elapsed < kTrafficInterval) {
+        return;
+    }
+
+    trafficAt_ = now;
+
+    const net::Host::Traffic traffic = host_->takeTraffic();
+
+    // Молчащий сервер не пишет ничего: пустая сессия и так видна по числу
+    // игроков, а строка раз в десять секунд в пустом журнале — это шум.
+    if (traffic.packets == 0) {
+        return;
+    }
+
+    const double seconds =
+        std::chrono::duration_cast<std::chrono::duration<double>>(elapsed).count();
+
+    spdlog::debug("отдано транспорту: {:.0f} посылок/с, {:.1f} КБ/с при {} игроках",
+                  static_cast<double>(traffic.packets) / seconds,
+                  static_cast<double>(traffic.bytes) / seconds / 1024.0, players_.size());
+}
+
+void Server::broadcastStates() {
+    const auto now = std::chrono::steady_clock::now();
+
+    // Расстояние сравнивается в квадратах: корень здесь считать незачем, а
+    // считать его пришлось бы на каждую пару игроков в каждом такте.
+    const float reach = config_.streamDistance * config_.streamDistance;
+
+    for (const auto& [peer, listener] : players_) {
+        shared::PlayerStates bundle;
+
+        for (const auto& [otherPeer, other] : players_) {
+            if (otherPeer == peer) {
+                continue;
+            }
+
+            // Молчащего пересылать незачем: получатель держит его на месте сам.
+            // Раз в секунду — всё же пересылаем: подошедший рядом со стоящим
+            // иначе не увидел бы его вовсе.
+            const bool stale = now - other.stateSentAt >= kStateKeepalive;
+            if (!other.stateFresh && !stale) {
+                continue;
+            }
+
+            // Только тем, кто рядом. Игроку незачем знать, как бежит человек за
+            // полкилометра: он его всё равно не увидит, а снимков это половина
+            // всего, что ходит по сети.
+            if (shared::distanceSquared(listener.position, other.state.position) > reach) {
+                continue;
+            }
+
+            if (bundle.players.size() >= shared::kMaxStatesInBundle) {
+                break;
+            }
+
+            bundle.players.push_back(other.state);
+        }
+
+        if (!bundle.players.empty()) {
+            // Ненадёжным каналом, как и прежде: потерянная связка дешевле
+            // заменяется следующей, чем переотправляется устаревшей.
+            const auto packet = shared::encode(bundle);
+            host_->send(peer, shared::Channel::State, shared::ByteView{packet});
+        }
+    }
+
+    // Отметки снимаются после всех связок, а не по ходу: снимок одного игрока
+    // попадает к нескольким получателям, и сняв признак на первом из них, мы
+    // лишили бы остальных.
+    for (auto& [peer, player] : players_) {
+        if (player.stateFresh || now - player.stateSentAt >= kStateKeepalive) {
+            player.stateFresh = false;
+            player.stateSentAt = now;
+        }
+    }
 }
 
 void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {

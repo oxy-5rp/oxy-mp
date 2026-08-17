@@ -206,6 +206,38 @@ PlayerState PlayerState::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerStates::write(ByteWriter& writer) const {
+    // Длина — одним байтом, и она обязана быть написана: связка переменной
+    // длины, и без числа получателю не отличить конца списка от продолжения.
+    const auto count =
+        static_cast<std::uint8_t>(std::min(players.size(), kMaxStatesInBundle));
+
+    writer.writeU8(count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        players[i].write(writer);
+    }
+}
+
+PlayerStates PlayerStates::read(ByteReader& reader) {
+    PlayerStates message;
+
+    const std::uint8_t count = reader.readU8();
+    message.players.reserve(count);
+
+    for (std::uint8_t i = 0; i < count; ++i) {
+        // Чтение прекращается на первой же нехватке байт: испорченная связка не
+        // должна превратиться в сотню снимков из мусора.
+        if (!reader.ok()) {
+            break;
+        }
+
+        message.players.push_back(PlayerState::read(reader));
+    }
+
+    return message;
+}
+
 void VehicleState::write(ByteWriter& writer) const {
     writer.writeU32(id);
     writer.writeU32(sentAt);
@@ -638,6 +670,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::ClientEvent:
     case MessageId::ServerEvent:
     case MessageId::PlayerAppearance:
+    case MessageId::PlayerStates:
         return static_cast<MessageId>(packet.front());
     }
 

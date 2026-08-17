@@ -142,6 +142,40 @@ TEST_CASE("an untouched PlayerAppearance means nothing is worn", "[messages]") {
     }
 }
 
+TEST_CASE("a bundle of player states survives a round trip", "[messages]") {
+    PlayerStates sent;
+
+    for (std::uint32_t i = 0; i < 3; ++i) {
+        PlayerState state;
+        state.playerId = i;
+        state.sentAt = 1000 + i;
+        state.position = Vec3{static_cast<float>(i), 2.0F, 3.0F};
+        state.health = static_cast<std::uint16_t>(100 + i);
+        sent.players.push_back(state);
+    }
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    REQUIRE(received->players.size() == 3);
+
+    for (std::uint32_t i = 0; i < 3; ++i) {
+        CHECK(received->players[i].playerId == i);
+        CHECK(received->players[i].sentAt == 1000 + i);
+        CHECK(received->players[i].position.x == static_cast<float>(i));
+        CHECK(received->players[i].health == 100 + i);
+    }
+}
+
+TEST_CASE("an empty bundle of player states survives a round trip", "[messages]") {
+    // Пустая связка не отправляется, но разобраться обязана: испорченный пакет
+    // не должен превращаться в отказ разбирать всё остальное.
+    const auto received = roundTrip(PlayerStates{});
+
+    REQUIRE(received.has_value());
+    CHECK(received->players.empty());
+}
+
 TEST_CASE("ServerReject survives a round trip", "[messages]") {
     ServerReject sent;
     sent.reason = RejectReason::ServerFull;

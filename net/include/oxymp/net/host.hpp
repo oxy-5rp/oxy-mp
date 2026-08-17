@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -68,8 +69,27 @@ public:
 
     [[nodiscard]] std::size_t peerCount() const noexcept { return peers_.size(); }
 
+    /// Сколько посылок и байт ушло с прошлого раза, считая с обнулением.
+    ///
+    /// Считает не транспорт, а мы сами, и считает именно то, что отдали ему:
+    /// заголовки UDP и ENet сюда не входят. Для того, ради чего счёт нужен —
+    /// понять, во что обходится сессия и что даёт складывание снимков в один
+    /// пакет, — важен не абсолютный байт, а отношение до и после.
+    struct Traffic {
+        std::uint64_t packets = 0;
+        std::uint64_t bytes = 0;
+    };
+
+    [[nodiscard]] Traffic takeTraffic() noexcept {
+        return {std::exchange(sentPackets_, 0), std::exchange(sentBytes_, 0)};
+    }
+
 private:
     Host() = default;
+
+    /// Сколько посылок и байт отдано транспорту с прошлого замера.
+    std::uint64_t sentPackets_ = 0;
+    std::uint64_t sentBytes_ = 0;
 
     [[nodiscard]] PeerId registerPeer(_ENetPeer* peer);
     void forgetPeer(_ENetPeer* peer);

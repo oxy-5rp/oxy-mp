@@ -208,7 +208,11 @@ void Host::send(PeerId peer, shared::Channel channel, shared::ByteView payload) 
         // Транспорт не принял пакет и владения не забрал — освобождаем сами,
         // иначе это утечка на каждой неудачной отправке.
         ::enet_packet_destroy(packet);
+        return;
     }
+
+    ++sentPackets_;
+    sentBytes_ += payload.size();
 }
 
 void Host::broadcast(shared::Channel channel, shared::ByteView payload, PeerId except) {

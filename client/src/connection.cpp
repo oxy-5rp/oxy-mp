@@ -349,6 +349,16 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerStates:
+        if (const auto states = shared::decode<shared::PlayerStates>(packet)) {
+            // Связка разбирается снимок за снимком тем же путём, что и
+            // одиночный: разница между ними — только в том, как они доехали.
+            for (const shared::PlayerState& state : states->players) {
+                handleRemoteState(state);
+            }
+        }
+        return;
+
     case shared::MessageId::VehicleState:
         if (const auto state = shared::decode<shared::VehicleState>(packet)) {
             handleRemoteVehicle(*state);
