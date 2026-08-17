@@ -131,9 +131,27 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
     const std::vector<std::string> arguments{"oxymp-server", main.string()};
     const std::vector<std::string> execArguments{};
 
+    // Инспектор отключается, и без этого второй ресурс роняет сервер.
+    //
+    // Отладчик Node заводит на процесс один поток ввода-вывода и проверяет это
+    // утверждением: второе окружение попадает в
+    // `Assertion failed: (start_io_thread_async_initialized.exchange(true)) ==
+    // (false)` внутри inspector_agent.cc и завершает процесс целиком. Не
+    // исключение, которое можно поймать, — падение с разбором стека.
+    //
+    // Проявлялось это так, что сервер с двумя ресурсами на JS поднимал первый и
+    // молча умирал на втором: в журнале оставалась строка про первый и больше
+    // ничего. Одному ресурсу — а до сих пор их и был один — не мешало ничто.
+    //
+    // Отладчик при этом не теряется совсем: один ресурс мог бы его получить,
+    // если однажды понадобится. Но тогда это должен быть осознанный выбор
+    // одного из них, а не то, кому повезло подняться первым.
+    constexpr auto kEnvironmentFlags = static_cast<node::EnvironmentFlags::Flags>(
+        node::EnvironmentFlags::kDefaultFlags | node::EnvironmentFlags::kNoCreateInspector);
+
     std::vector<std::string> complaints;
     setup_ = node::CommonEnvironmentSetup::Create(platform_, &complaints, arguments,
-                                                  execArguments);
+                                                  execArguments, kEnvironmentFlags);
 
     if (setup_ == nullptr) {
         error = complaints.empty() ? "окружение Node не создалось" : complaints.front();
