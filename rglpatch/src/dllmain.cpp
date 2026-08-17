@@ -127,6 +127,7 @@ DWORD WINAPI worker(LPVOID) {
             // читается, и второй запуск его уже не застанет.
             order.substitute = g_handoff->armed.exchange(0) != 0;
             order.straightIntoFreemode = g_handoff->straightIntoFreemode.load() != 0;
+            order.language = g_handoff->gameLanguage;
 
             return order;
         },

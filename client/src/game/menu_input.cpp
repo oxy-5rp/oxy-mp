@@ -1,5 +1,7 @@
 #include "menu_input.hpp"
 
+#include "keyboard_layout.hpp"
+
 #include <oxymp/cefui/browser.hpp>
 
 #include <spdlog/spdlog.h>
@@ -106,11 +108,16 @@ void showCursor(bool visible, int& raised) {
     return ::GetKeyboardLayout(::GetWindowThreadProcessId(window, nullptr));
 }
 
-/// Просят ли этой клавишей сменить раскладку.
+/// Просят ли этой клавишей сменить язык ввода.
 ///
 /// Три сочетания, потому что привычных сочетаний три: Alt+Shift и Ctrl+Shift —
 /// давние, Win+Пробел — нынешнее умолчание Windows. Какое из них у игрока,
 /// заранее не известно, а спрашивать негде.
+///
+/// Замечать их приходится самим: игра просит Windows не разбирать системные
+/// сочетания — эту просьбу у неё отбирают (см. raw_input.hpp), — но и без неё
+/// служба текстового ввода языка игре не меняет. Проверено на живой игре:
+/// сочетание нажато, язык тот же.
 [[nodiscard]] bool isLayoutSwitch(unsigned key) {
     const auto down = [](int code) { return (::GetAsyncKeyState(code) & 0x8000) != 0; };
 
@@ -125,43 +132,10 @@ void showCursor(bool visible, int& raised) {
     return false;
 }
 
-/// Сколько раскладок разрешено держать в виду.
-///
-/// Больше десятка их не бывает даже у переводчиков, а предел нужен: список
-/// спрашивается в готовый массив.
-constexpr int kMaxLayouts = 16;
-
-/// Следующая раскладка по кругу.
-///
-/// Своя очередь, а не системная, и это вынужденно. Раскладку в игре Windows нам
-/// не меняет: просьбу о смене игра теряет, и даже перехваченная, она меняет
-/// раскладку игрового потока, а не того, в котором работает перехват. Значит
-/// выбирать раскладку для перевода букв приходится самим — по тому же кругу, по
-/// которому её меняет Windows.
-[[nodiscard]] HKL nextLayout(HKL current) {
-    std::array<HKL, kMaxLayouts> layouts{};
-
-    const int count = ::GetKeyboardLayoutList(kMaxLayouts, layouts.data());
-    if (count <= 1) {
-        return current;
-    }
-
-    for (int i = 0; i < count; ++i) {
-        if (layouts[static_cast<std::size_t>(i)] == current) {
-            return layouts[static_cast<std::size_t>((i + 1) % count)];
-        }
-    }
-
-    return layouts[0];
-}
-
 } // namespace
 
 std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& browser,
-                                              std::function<bool()> wanted,
-                                              std::function<void()> toggle,
-                                              std::function<void()> console,
-                                              std::function<void()> quit, std::string& error) {
+                                              Actions actions, std::string& error) {
     if (window == nullptr) {
         error = "окна игры нет: ввод для меню не перехватить";
         return nullptr;
@@ -176,10 +150,7 @@ std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& brows
 
     input->window_ = window;
     input->browser_ = &browser;
-    input->wanted_ = std::move(wanted);
-    input->toggle_ = std::move(toggle);
-    input->console_ = std::move(console);
-    input->quit_ = std::move(quit);
+    input->actions_ = std::move(actions);
 
     // Указатель ставится раньше подмены: подменённый обработчик вправе получить
     // сообщение в тот же миг, и застать он должен уже готовое.
@@ -274,6 +245,22 @@ LRESULT CALLBACK MenuInput::messageProc(int code, WPARAM wparam, LPARAM lparam) 
 
     auto* const message = reinterpret_cast<MSG*>(lparam);
 
+    // Просьба переключить язык исполняется здесь: из трёх перехватов этот
+    // единственный зовётся потоком игры, а язык ввода в Windows свой у каждого
+    // потока.
+    if (input->switchWanted_.exchange(false, std::memory_order_relaxed)) {
+        switchInputLanguage();
+    }
+
+    // Просьбу сменить раскладку записываем всегда: по ней видно, разбирает ли
+    // Windows сочетание вообще. Не разбирает — беда снаружи игры, а не в ней.
+    if (message->message == WM_INPUTLANGCHANGEREQUEST && !input->sawLanguageRequest_) {
+        input->sawLanguageRequest_ = true;
+
+        spdlog::info("Windows просит сменить раскладку на {:#x}",
+                     static_cast<std::uintptr_t>(message->lParam));
+    }
+
     // Клавиши здесь — запасной путь, и он нужен: низкоуровневый перехват в игре
     // может не сработать вовсе (окно игры выше по правам, а такому окну Windows
     // не отдаёт чужих перехватов). Очередь же игра разбирает сама, и в этот миг
@@ -351,6 +338,11 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
         spdlog::info("нажатия доходят очередью сообщений");
     }
 
+    if (down && message.message != WM_CHAR &&
+        isLayoutSwitch(static_cast<unsigned>(message.wParam))) {
+        switchWanted_.store(true, std::memory_order_relaxed);
+    }
+
     const auto key = static_cast<unsigned>(message.wParam);
     const auto scan = static_cast<unsigned>((message.lParam >> 16) & 0xFF);
 
@@ -360,29 +352,29 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
     // нужен» и уходили, не дойдя до клавиши, которой его как раз и просят.
     if (message.message != WM_CHAR) {
         if (key == VK_F1) {
-            if (down && toggle_) {
-                toggle_();
+            if (down && actions_.toggle) {
+                actions_.toggle();
             }
             return true;
         }
 
         if (key == VK_F8) {
-            if (down && console_) {
-                console_();
+            if (down && actions_.console) {
+                actions_.console();
             }
             return true;
         }
 
         if (key == VK_F4 && held(VK_MENU)) {
-            if (down && quit_) {
+            if (down && actions_.askExit) {
                 spdlog::info("Alt+F4 — выходим из игры");
-                quit_();
+                actions_.askExit();
             }
             return true;
         }
     }
 
-    if (!wanted_ || !wanted_()) {
+    if (!actions_.wanted || !actions_.wanted()) {
         return false;
     }
 
@@ -394,26 +386,6 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
     // оставленная в очереди, она дошла бы до её же разбора ввода.
     if (message.message == WM_CHAR) {
         return true;
-    }
-
-    // Смена раскладки — своим кругом, тем же, что и у низкоуровневого перехвата.
-    if (down && isLayoutSwitch(key)) {
-        layout_ = nextLayout(layout_ == nullptr ? foregroundLayout() : layout_);
-
-        // Раскладка игрового потока переставляется следом — и ровно один раз, в
-        // самый миг переключения. Отсюда это можно: перехват очереди работает в
-        // потоке игры, а раскладка своя у каждого потока.
-        //
-        // «Ровно один раз» — не мелочь. Была попытка держать её выправленной на
-        // каждом сообщении окна, и она вешала игру на секунды: игра возвращает
-        // свою раскладку при всяком возврате фокуса, и мы толкали её навстречу
-        // сотни раз в секунду. Здесь же нажатий столько, сколько их сделал
-        // игрок. Вернёт игра свою — набору это не помешает: буквы мы переводим
-        // сами, по layout_.
-        ::ActivateKeyboardLayout(layout_, 0);
-
-        spdlog::info("раскладка переключена на {:#x}",
-                     reinterpret_cast<std::uintptr_t>(layout_));
     }
 
     browser_->sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up, key,
@@ -459,11 +431,20 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
         spdlog::info("перехват клавиатуры видит нажатия");
     }
 
+    // Смена языка ввода замечается прежде вопроса «нужен ли ввод странице»:
+    // раскладка нужна в игре не меньше, чем в меню, а в игре меню закрыто.
+    //
+    // Здесь только помечается: переключать язык можно лишь в потоке игры, а этот
+    // перехват работает в нашем.
+    if (down && isLayoutSwitch(key)) {
+        switchWanted_.store(true, std::memory_order_relaxed);
+    }
+
     // F1 разбирается прежде всего остального и в обе стороны: закрытым меню он
     // открывает, открытым — закрывает. Своей клавиши у страницы нет.
     if (key == VK_F1) {
-        if (down && toggle_) {
-            toggle_();
+        if (down && actions_.toggle) {
+            actions_.toggle();
         }
         return true;
     }
@@ -471,8 +452,8 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     // F8 — консоль страницы. Тоже в обе стороны и независимо от меню: консоль
     // живёт поверх него и вне его.
     if (key == VK_F8) {
-        if (down && console_) {
-            console_();
+        if (down && actions_.console) {
+            actions_.console();
         }
         return true;
     }
@@ -482,27 +463,15 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     // oxyMP один, тот же, что по кнопке в меню, и он умеет то, чего не умеет
     // игровой, — дождаться и добить, если игра не закрылась сама.
     if (key == VK_F4 && held(VK_MENU)) {
-        if (down && quit_) {
+        if (down && actions_.askExit) {
             spdlog::info("Alt+F4 — выходим из игры");
-            quit_();
+            actions_.askExit();
         }
         return true;
     }
 
-    if (!wanted_ || !wanted_()) {
+    if (!actions_.wanted || !actions_.wanted()) {
         return false;
-    }
-
-    // Смену раскладки замечаем сами, всеми тремя привычными сочетаниями:
-    // Alt+Shift, Ctrl+Shift и Win+Пробел. Windows в игре её не делает — игра
-    // возвращает свою раскладку всякий раз, как окно становится главным, и
-    // переключённая снаружи она возвращается обратно при первом же возврате в
-    // игру. Проверено: так и происходит.
-    if (down && isLayoutSwitch(key)) {
-        layout_ = nextLayout(layout_ == nullptr ? foregroundLayout() : layout_);
-
-        spdlog::debug("раскладка меню переключена на {:#x}",
-                      reinterpret_cast<std::uintptr_t>(layout_));
     }
 
     // Управляющие клавиши доходят до страницы, но не отбираются: ими Windows
@@ -549,12 +518,17 @@ void MenuInput::sendCharacters(unsigned key, unsigned scan) {
 
     wchar_t characters[8]{};
 
-    if (layout_ == nullptr) {
-        layout_ = foregroundLayout();
-    }
+    // Раскладка спрашивается у Windows на каждую букву, а не помнится своей.
+    //
+    // Прежде здесь был свой круг раскладок, и он был вынужденным: игра глушила
+    // системные сочетания, и Windows раскладку не меняла вовсе. Теперь глушение
+    // снято (см. raw_input.hpp), переключает сама Windows — и свой круг из
+    // помощи превратился во вред: переключали оба, игрок получал ноль, «туда и
+    // сразу обратно».
+    const HKL layout = foregroundLayout();
 
     const int written = ::ToUnicodeEx(key, scan, keyboard, characters,
-                                      static_cast<int>(std::size(characters)), 0, layout_);
+                                      static_cast<int>(std::size(characters)), 0, layout);
 
     // Отрицательное означает мёртвый знак — тот, что ждёт следующей клавиши,
     // чтобы сложиться с ней в букву. Показывать его отдельно нечего.
@@ -567,7 +541,7 @@ void MenuInput::sendCharacters(unsigned key, unsigned scan) {
 
             spdlog::info("клавиша {} (скан {}) при раскладке {:#x} не дала буквы: перевод "
                          "вернул {}",
-                         key, scan, reinterpret_cast<std::uintptr_t>(layout_), written);
+                         key, scan, reinterpret_cast<std::uintptr_t>(layout), written);
         }
         return;
     }
@@ -612,7 +586,7 @@ LRESULT CALLBACK MenuInput::proc(HWND window, UINT message, WPARAM wparam, LPARA
 }
 
 std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lparam) {
-    const bool open = wanted_ && wanted_();
+    const bool open = actions_.wanted && actions_.wanted();
 
     // F1 разбирается прежде всего остального и в обе стороны: закрытым меню он
     // открывает, открытым — закрывает. Иначе закрытое меню было бы уже не
@@ -626,8 +600,8 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
     // Оба сообщения, и нажатие и отпускание: игра иначе увидит одно без другого
     // и сочтёт клавишу зажатой.
     if (message == WM_KEYDOWN && wparam == VK_F1) {
-        if (toggle_) {
-            toggle_();
+        if (actions_.toggle) {
+            actions_.toggle();
         }
 
         return 0;
@@ -638,14 +612,60 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
     }
 
     if (message == WM_KEYDOWN && wparam == VK_F8) {
-        if (console_) {
-            console_();
+        if (actions_.console) {
+            actions_.console();
         }
 
         return 0;
     }
 
     if (message == WM_KEYUP && wparam == VK_F8) {
+        return 0;
+    }
+
+    // Alt+F4 — третьим путём к тому же выходу, и путь этот не запасной.
+    //
+    // Два других — низкоуровневый перехват и очередь сообщений — работают по
+    // очереди: увидев нажатия первым, второй отключается. Стоит первому один
+    // раз не увидеть Alt+F4 (окно игры выше по правам, чужой полноэкранный
+    // режим), и нажатие не разберёт уже никто.
+    //
+    // Отданное игре, оно уходит в обычный обработчик Windows, а тот превращает
+    // его в закрытие окна — то есть в её собственный вопрос «выйти?». Ровно от
+    // него мы и уходим: спрашивает об этом наше окно, а выход один на всех.
+    //
+    // Оба сообщения, и нажатие и отпускание, — как у F1: игра иначе увидит одно
+    // без другого и сочтёт клавишу зажатой.
+    if (message == WM_SYSKEYDOWN && wparam == VK_F4 && held(VK_MENU)) {
+        if (actions_.askExit) {
+            spdlog::info("Alt+F4 — выходим из игры");
+            actions_.askExit();
+        }
+
+        return 0;
+    }
+
+    if (message == WM_SYSKEYUP && wparam == VK_F4) {
+        return 0;
+    }
+
+    // Просьба закрыть окно снаружи игры — панелью задач, диспетчером задач,
+    // системным меню окна.
+    //
+    // Оставленная игре, она поднимает её собственный вопрос «выйти?»: именно так
+    // игра отвечает на WM_CLOSE, и это проверено — пока мы слали его сами, она
+    // не закрылась по нему ни разу. Своего окна здесь не показываем: игрок
+    // просил закрыть окно снаружи, и к этому мгновению оно может быть свёрнуто —
+    // вопрос он увидел бы не скоро.
+    //
+    // Младшие четыре бита у SC_CLOSE Windows держит за собой, отсюда и маска.
+    if (message == WM_CLOSE || (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == SC_CLOSE)) {
+        spdlog::info("Windows просит закрыть окно игры — выходим");
+
+        if (actions_.exitNow) {
+            actions_.exitNow();
+        }
+
         return 0;
     }
 

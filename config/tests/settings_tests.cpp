@@ -71,6 +71,19 @@ TEST_CASE("a file fills in over the defaults", "[settings]") {
     REQUIRE(settings.number("voiceVolume") == 200);
 }
 
+TEST_CASE("the game language is empty until it is chosen", "[settings]") {
+    // Пусто означает «как решит лаунчер Rockstar»: не выбрав языка, игрок
+    // получает ту же игру, что и без нас. Умолчание здесь — половина смысла
+    // настройки, поэтому оно и проверяется.
+    const Settings untouched;
+    REQUIRE(untouched.text("gameLanguage").empty());
+
+    const TemporaryFile file{"gameLanguage = 'en-US'\n"};
+
+    const Settings chosen = Settings::load(file.path());
+    REQUIRE(chosen.text("gameLanguage") == "en-US");
+}
+
 TEST_CASE("an unknown setting in the file is ignored", "[settings]") {
     const TemporaryFile file{"whatEvenIsThis = 'x'\nname = 'oxy'\n"};
 

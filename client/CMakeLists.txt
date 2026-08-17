@@ -46,6 +46,7 @@ if(WIN32)
         src/game/hook.cpp
         src/game/hud.cpp
         src/game/intro.cpp
+        src/game/keyboard_layout.cpp
         src/game/landing_page.cpp
         src/game/loaded_image.cpp
         src/game/menu_input.cpp
@@ -58,6 +59,7 @@ if(WIN32)
         src/game/online_map.cpp
         src/game/overlay_renderer.cpp
         src/game/present_hook.cpp
+        src/game/raw_input.cpp
         src/game/ped_activity.cpp
         src/game/ped_animation.cpp
         src/game/ped_appearance.cpp

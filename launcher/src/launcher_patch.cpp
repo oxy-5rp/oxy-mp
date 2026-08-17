@@ -34,8 +34,7 @@ std::string failureText(const shared::LaunchHandoff& handoff) {
 } // namespace
 
 std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::path& module,
-                                                      const std::filesystem::path& logDirectory,
-                                                      bool straightIntoFreemode,
+                                                      const Order& order,
                                                       std::chrono::seconds timeout,
                                                       std::string& error) {
     const std::uint32_t launcher = findProcessByName(kRockstarLauncherName);
@@ -68,17 +67,22 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
 
     shared::LaunchHandoff& handoff = handoffOf(patch->handoff_);
 
-    const std::wstring logs = logDirectory.wstring();
+    const std::wstring logs = order.logDirectory.wstring();
     const std::size_t length = std::min(logs.size(), std::size(handoff.logDirectory) - 1);
     std::wmemcpy(handoff.logDirectory, logs.c_str(), length);
     handoff.logDirectory[length] = L'\0';
+
+    const std::size_t languageLength =
+        std::min(order.gameLanguage.size(), std::size(handoff.gameLanguage) - 1);
+    std::wmemcpy(handoff.gameLanguage, order.gameLanguage.c_str(), languageLength);
+    handoff.gameLanguage[languageLength] = L'\0';
 
     // Прошлый запуск мог оставить в блоке свою игру. Состояние при этом не
     // сбрасывается намеренно: модуль мог остаться в лаунчере с прошлого раза,
     // и второй раз его DllMain не выполнится — обнулив состояние, мы ждали бы
     // готовности, которую уже некому объявить.
     handoff.gameProcessId.store(0);
-    handoff.straightIntoFreemode.store(straightIntoFreemode ? 1U : 0U);
+    handoff.straightIntoFreemode.store(order.straightIntoFreemode ? 1U : 0U);
 
     // Взводим последним: с этого мгновения ближайший запуск игры будет наш.
     handoff.armed.store(1);

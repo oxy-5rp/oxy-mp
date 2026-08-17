@@ -29,17 +29,34 @@ public:
     LauncherPatch(const LauncherPatch&) = delete;
     LauncherPatch& operator=(const LauncherPatch&) = delete;
 
+    /// Что подмене делать с ближайшим запуском игры.
+    struct Order {
+        /// Куда внедрённый модуль пишет свой журнал.
+        ///
+        /// Передаётся ему до внедрения: изнутри чужого процесса взять этот путь
+        /// неоткуда.
+        std::filesystem::path logDirectory;
+
+        /// Добавить ли игре ключ входа сразу в сетевой свободный режим.
+        bool straightIntoFreemode = false;
+
+        /// На каком языке запускать игру: `ru-RU`, `en-US` и так далее.
+        ///
+        /// Пусто — как решит лаунчер Rockstar. Язык называется здесь, потому что
+        /// внутри сессии игра сменить его не даёт: меню паузы там сетевое, и
+        /// выбранную строку оно возвращает обратно.
+        std::wstring gameLanguage;
+    };
+
     /// Внедряет подмену в работающий Rockstar Games Launcher и дожидается её
     /// готовности.
     ///
     /// Лаунчер должен быть запущен: поднимать его — не наше дело, этим
     /// занимается ensureRockstarLauncherReady.
-    ///
-    /// straightIntoFreemode просит подмену добавить игре ключ входа сразу в
-    /// сетевой свободный режим.
-    [[nodiscard]] static std::unique_ptr<LauncherPatch> install(
-        const std::filesystem::path& module, const std::filesystem::path& logDirectory,
-        bool straightIntoFreemode, std::chrono::seconds timeout, std::string& error);
+    [[nodiscard]] static std::unique_ptr<LauncherPatch> install(const std::filesystem::path& module,
+                                                                const Order& order,
+                                                                std::chrono::seconds timeout,
+                                                                std::string& error);
 
     /// Ждёт, пока лаунчер запустит игру, и отдаёт номер её процесса.
     ///

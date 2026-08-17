@@ -290,10 +290,15 @@ struct UiLayer::State {
 
         std::string error;
 
-        input = MenuInput::install(
-            game, *menuSurface.browser, [this] { return pageWantsInput(); },
-            [this] { menu->toggle(); }, [this] { menu->toggleConsole(); },
-            [this] { askExit(); }, error);
+        MenuInput::Actions actions;
+
+        actions.wanted = [this] { return pageWantsInput(); };
+        actions.toggle = [this] { menu->toggle(); };
+        actions.console = [this] { menu->toggleConsole(); };
+        actions.askExit = [this] { askExit(); };
+        actions.exitNow = quit;
+
+        input = MenuInput::install(game, *menuSurface.browser, std::move(actions), error);
 
         if (input == nullptr) {
             spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);

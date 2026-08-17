@@ -303,8 +303,13 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         // создаёт процесс сразу, и опоздать здесь значит выпустить BattlEye.
         report(Progress::Working, "Убираем BattlEye из запуска");
 
-        auto patch = LauncherPatch::install(settings.launcherPatch, settings.logDirectory,
-                                            settings.straightIntoFreemode, kPatchTimeout, error);
+        auto patch = LauncherPatch::install(settings.launcherPatch,
+                                            LauncherPatch::Order{
+                                                .logDirectory = settings.logDirectory,
+                                                .straightIntoFreemode = settings.straightIntoFreemode,
+                                                .gameLanguage = settings.gameLanguage,
+                                            },
+                                            kPatchTimeout, error);
         if (!patch) {
             report(Progress::Failed, error);
             return nullptr;

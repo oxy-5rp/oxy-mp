@@ -31,9 +31,8 @@ constexpr const wchar_t* kStraightIntoFreemode = L"-StraightIntoFreemode";
 
 /// Доводы лаунчера Rockstar, которым до игры доходить не следует.
 ///
-/// Остальные доводы не разбираются вовсе — см. replaceExecutable, — и эти два
-/// перечислены поимённо не из желания навести порядок, а потому что каждый
-/// из них ломает своё.
+/// Остальные доводы не разбираются вовсе — см. replaceExecutable, — и этот
+/// перечислен поимённо не из желания навести порядок, а потому что ломает своё.
 ///
 /// `-scDiscordClientId` — номер приложения Rockstar в Discord. Его читает
 /// `socialclub.dll`, загруженная в игру, и объявляет через `discord_partner_sdk.dll`,
@@ -42,14 +41,15 @@ constexpr const wchar_t* kStraightIntoFreemode = L"-StraightIntoFreemode";
 /// своими словами. Два показа спорят между собой, и игрок видит то одно, то
 /// другое.
 ///
-/// `-rglLanguage` — язык, назначенный лаунчером. Игра предпочитает его
-/// собственной настройке, и оттого язык в её меню «переключается и возвращается
-/// обратно»: игрок выбирает другой, а игра продолжает читать то, что ей сказали
-/// при запуске. Без этого довода она берёт язык оттуда, откуда и должна, — из
-/// своей настройки, а не из чужой.
+/// Здесь же был `-rglLanguage`, и его отсюда убрали. Отбирали его затем, чтобы
+/// починить язык в меню игры — тот самый, что «переключается и возвращается
+/// обратно», — и это оказалось рассуждением, а не наблюдением: с отобранным
+/// доводом язык возвращается ровно так же. Значит источник у беды другой, а
+/// отбирать чужой довод без причины нельзя — с ним игра хотя бы начинает на том
+/// языке, который выбран в лаунчере. Возвращать его в этот список, не показав
+/// на живой игре, что он и вправду виноват, не нужно.
 constexpr std::wstring_view kStrippedArguments[] = {
     L"-scDiscordClientId",
-    L"-rglLanguage",
 };
 
 /// Перехват один на процесс, поэтому и состояние одно: обработчику неоткуда
@@ -127,8 +127,8 @@ bool isArgument(std::wstring_view word, std::wstring_view name) {
         return false;
     }
 
-    // Довод целиком, а не начало другого: `-rglLanguage` не должен уносить с
-    // собой выдуманный `-rglLanguageOverride`.
+    // Довод целиком, а не начало другого: `-scDiscordClientId` не должен уносить
+    // с собой выдуманный `-scDiscordClientIdOverride`.
     return word.size() == name.size() || word[name.size()] == L'=';
 }
 
@@ -169,6 +169,67 @@ std::wstring withoutArguments(const std::wstring& commandLine) {
 
         at = end;
     }
+
+    return result;
+}
+
+/// Довод, которым лаунчер Rockstar называет игре язык.
+constexpr std::wstring_view kLanguageArgument = L"-rglLanguage";
+
+/// Ставит игре названный язык вместо того, что назначил лаунчер Rockstar.
+///
+/// Внутри сессии язык не сменить: меню паузы там сетевое, и строку языка оно
+/// возвращает обратно — это не наша поломка, так ведёт себя и обычная GTA
+/// Online. Значит выбирать язык нужно там, где игра его ещё слушает, — при
+/// запуске.
+///
+/// Пустой язык означает «не трогать»: тогда игра берёт тот, что выбран в
+/// лаунчере Rockstar, и всё остаётся как было.
+std::wstring withLanguage(const std::wstring& commandLine, const std::wstring& language) {
+    if (language.empty()) {
+        return commandLine;
+    }
+
+    const std::wstring wanted = std::wstring{kLanguageArgument} + L'=' + language;
+
+    const std::size_t executable = executableTokenLength(commandLine);
+
+    std::wstring result = commandLine.substr(0, executable);
+
+    bool replaced = false;
+    std::size_t at = executable;
+
+    while (at < commandLine.size()) {
+        const std::size_t start = commandLine.find_first_not_of(L' ', at);
+        if (start == std::wstring::npos) {
+            break;
+        }
+
+        const std::size_t end = wordEnd(commandLine, start);
+        const std::wstring_view word{commandLine.data() + start, end - start};
+
+        if (isArgument(word, kLanguageArgument)) {
+            // Вместе с пробелами перед доводом: строка остаётся такой же на вид.
+            result.append(commandLine, at, start - at);
+            result.append(wanted);
+
+            replaced = true;
+        } else {
+            result.append(commandLine, at, end - at);
+        }
+
+        at = end;
+    }
+
+    // Довода могло не быть вовсе — тогда он появляется. Лаунчер Rockstar его
+    // передаёт всегда, но полагаться на это незачем: своё слово о языке мы
+    // говорим одинаково в обоих случаях.
+    if (!replaced) {
+        result += L' ';
+        result += wanted;
+    }
+
+    spdlog::info("язык игры: {}", std::filesystem::path{language}.string());
 
     return result;
 }
@@ -243,7 +304,7 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
     }
 
     std::wstring replacedCommandLine =
-        withoutArguments(replaceExecutable(requestedCommandLine, game));
+        withLanguage(withoutArguments(replaceExecutable(requestedCommandLine, game)), order.language);
 
     if (order.straightIntoFreemode) {
         replacedCommandLine += L' ';

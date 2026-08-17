@@ -10,6 +10,7 @@
 #include "paths.hpp"
 #include "session.hpp"
 
+#include <oxymp/config/settings.hpp>
 #include <oxymp/shared/protocol/protocol_version.hpp>
 
 #include <spdlog/sinks/basic_file_sink.h>
@@ -66,6 +67,27 @@ void printUsage() {
                  "             Rockstar Online, заранее не известно.\n";
 }
 
+/// Язык, на котором просят запустить игру, из настроек рядом с лаунчером.
+///
+/// Пусто, если настройка не заполнена, — тогда язык остаётся тем, что назначил
+/// лаунчер Rockstar.
+///
+/// Файл тот же, что правит меню внутри игры: настройка одна на обоих, и второй
+/// такой же файл был бы вторым местом, где её ищут.
+std::wstring gameLanguage(const oxymp::launcher::Paths& paths) {
+    const oxymp::config::Settings settings =
+        oxymp::config::Settings::load(paths.root / "oxymp.toml");
+
+    const std::string chosen = settings.text("gameLanguage");
+    if (chosen.empty()) {
+        return {};
+    }
+
+    // Название языка — латиница и дефис (`ru-RU`), так что расширение до
+    // широких знаков посимвольно здесь честно и не портит ничего.
+    return std::wstring{chosen.begin(), chosen.end()};
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -86,6 +108,11 @@ int main(int argc, char** argv) {
     settings.launcherPatch = paths.launcherPatch();
     settings.logDirectory = paths.logs();
     settings.backupDirectory = paths.backup();
+
+    // Язык игры берётся из тех же настроек, что правит меню внутри игры, — и
+    // читает их лаунчер, а не клиент. Иначе и нельзя: игре язык называют при
+    // запуске, а к тому мгновению клиента ещё нет.
+    settings.gameLanguage = gameLanguage(paths);
 
     bool showWindow = true;
     bool prepareMirrorOnly = false;

@@ -196,6 +196,23 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
         .required = false,
     },
     {
+        .id = "keyboard_layout_lock",
+        .description =
+            "Место, где игра навязывает себе раскладку en-US. При заведении клавиатуры она "
+            "сверяет текущую раскладку со своей и, если та другая, загружает американскую — "
+            "отчего смена раскладки в Windows при игре не работает вовсе и в чат нельзя "
+            "написать ни слова кириллицей.\n"
+            "Адрес указывает на начало сверки (40 8A C6 — mov al, sil). За ней идут cmp "
+            "(7 байт), jnz (2), test (2) и je (6), уводящий мимо загрузки раскладки; правка "
+            "делает этот переход безусловным.\n"
+            "Сигнатура взята у CitizenFX (`gta-core-five/KeyboardLayoutMapping.cpp`, «Disable "
+            "loading of en-US layout in _initKeyboard») и совпала на 3889 ровно в одном месте.",
+        .pattern = "40 8A C6 48 39 35 ? ? ? ? 75 08 84 C0 0F 84 ? ? ? ? 33 D2 33 C9",
+        .offset = 0,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
+    {
         .id = "landing_page_branch",
         .description = "Развилка «показывать ли страницу выбора режима». Игра спрашивает "
                        "это вызовом и при ответе «да» уходит в состояние страницы, при "
