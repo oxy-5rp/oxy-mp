@@ -201,3 +201,130 @@ TEST_CASE("a file saved by Notepad is read the same", "[config]") {
     CHECK(unknown.empty());
     CHECK(config.port == 30120);
 }
+
+TEST_CASE("a TOML list is read as a list of names", "[config]") {
+    Config config;
+
+    // Так перечень ресурсов записан в server.toml у alt:V: списком, в апострофах
+    // и по имени на строку. В живом файле их полторы сотни, и различать «список
+    // в одну строку» и «список во много» обязан разбор, а не человек.
+    const auto unknown = settle(
+        "resources = [\n"
+        "    'main',\n"
+        "    'vehicle-addon',\n"
+        "    'weapon-addon',\n"
+        "]\n",
+        config);
+
+    CHECK(unknown.empty());
+    REQUIRE(config.resources.size() == 3);
+    CHECK(config.resources.front() == "main");
+    CHECK(config.resources.back() == "weapon-addon");
+}
+
+TEST_CASE("a TOML list on one line is read the same", "[config]") {
+    Config config;
+
+    const auto unknown = settle("resources = [ 'main', 'admin' ]\n", config);
+
+    CHECK(unknown.empty());
+    REQUIRE(config.resources.size() == 2);
+    CHECK(config.resources.front() == "main");
+}
+
+TEST_CASE("a comment inside a TOML list is ignored", "[config]") {
+    Config config;
+
+    // Выключенные строки в перечне alt:V — обычное дело: ресурс убирают из
+    // сессии, закомментировав его, а не удалив имя.
+    const auto unknown = settle(
+        "resources = [\n"
+        "    'main',\n"
+        "    #'addon-map',\n"
+        "    'admin',\n"
+        "]\n",
+        config);
+
+    CHECK(unknown.empty());
+    REQUIRE(config.resources.size() == 2);
+    CHECK(config.resources.front() == "main");
+    CHECK(config.resources.back() == "admin");
+}
+
+TEST_CASE("an unclosed TOML list is an error, not a silent truncation", "[config]") {
+    config_file::Entries entries;
+    std::string error;
+
+    // Молчаливая обрезка была бы худшим исходом: сервер поднялся бы с половиной
+    // ресурсов, и искать пропажу пришлось бы по журналу.
+    CHECK_FALSE(config_file::parse("resources = [ 'main',\n", entries, error));
+    CHECK(error.find("список") != std::string::npos);
+}
+
+TEST_CASE("a single quoted value loses its quotes", "[config]") {
+    Config config;
+
+    // TOML пишет строки в апострофах, и без снятия имя сервера стало бы
+    // «'Тестовый'» вместе с ними.
+    const auto unknown = settle("name = 'Тестовый'\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.name == "Тестовый");
+}
+
+TEST_CASE("a TOML section keeps its keys apart from the top level", "[config]") {
+    config_file::Entries entries;
+    std::string error;
+
+    // Без приставки «port» сервера и «port» голосового сервера оказались бы одной
+    // настройкой, и сервер молча уехал бы на чужой порт.
+    REQUIRE(config_file::parse("port = 7788\n"
+                               "[voice]\n"
+                               "port = 7799\n",
+                               entries, error));
+
+    REQUIRE(entries.contains("port"));
+    CHECK(entries.at("port") == "7788");
+
+    REQUIRE(entries.contains("voice.port"));
+    CHECK(entries.at("voice.port") == "7799");
+}
+
+TEST_CASE("a hash inside quotes does not start a comment", "[config]") {
+    config_file::Entries entries;
+    std::string error;
+
+    REQUIRE(config_file::parse("name = '#1 сервер' # пояснение\n", entries, error));
+
+    REQUIRE(entries.contains("name"));
+    CHECK(entries.at("name") == "#1 сервер");
+}
+
+TEST_CASE("the alt:V name for the player limit is understood", "[config]") {
+    Config config;
+
+    // В server.toml предел игроков зовётся «players». Заставлять хозяина
+    // переименовывать его при переносе режима незачем.
+    const auto unknown = settle("players = 1024\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.maxPlayers == 1024);
+}
+
+TEST_CASE("an alt:V only setting is reported calmly, not as a typo", "[config]") {
+    Config config;
+
+    // Промолчать нельзя — хозяин вправе знать, что написанное им не соблюдается.
+    // Но и жаловаться как на опечатку неверно: написано правильно, просто здесь
+    // пока не исполняется.
+    const auto unknown = settle("gamemode = 'Freeroam'\n"
+                                "db_host = 'localhost'\n",
+                                config);
+
+    REQUIRE(unknown.size() == 2);
+
+    for (const std::string& complaint : unknown) {
+        CHECK(complaint.find("alt:V") != std::string::npos);
+        CHECK(complaint.find("не понята") == std::string::npos);
+    }
+}

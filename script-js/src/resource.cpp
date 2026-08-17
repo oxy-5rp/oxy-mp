@@ -3,10 +3,16 @@
 #include "bindings.hpp"
 #include "convert.hpp"
 
+#include <alt_bootstrap.hpp>
+#include <alt_enums.hpp>
+#include <alt_server.hpp>
+#include <alt_shared.hpp>
+
 #include <spdlog/spdlog.h>
 
 #include <uv.h>
 
+#include <string>
 #include <utility>
 
 namespace oxymp::script::js {
@@ -46,18 +52,32 @@ namespace {
 
 /// Что исполняется в ресурсе первым.
 ///
-/// Своего `require` у встроенного окружения нет, и это не упущение Node, а его
-/// устройство: `require` принадлежит модулю, а модуля здесь ещё нет. Строится он
-/// от пути к точке входа — и потому ресурс тянет пакеты из своего node_modules,
-/// а не из чужого.
+/// Четыре встроенных файла подряд, в строгом порядке: перечисления, общая часть
+/// API alt:V, серверная часть, запуск. Порядок не переставляется — каждый
+/// следующий собирается из предыдущего, — и потому склеены они здесь, а не
+/// отдаются движку по одному: одна склейка исполняется одним вызовом и в одном
+/// контексте, а четыре вызова пришлось бы ещё и проверять по отдельности.
 ///
-/// process.argv[1] задаётся при создании окружения и содержит полный путь к
-/// точке входа.
-constexpr std::string_view kBootstrap = R"js(
-const { createRequire } = require('module');
-globalThis.require = createRequire(process.argv[1]);
-globalThis.require(process.argv[1]);
-)js";
+/// Сами файлы лежат в script-js/js и встраиваются в бинарник при сборке
+/// (cmake/embed_text.cmake). Не рядом с сервером — файл рядом можно потерять,
+/// перепутать версией или подменить, а слой alt:V обязан совпадать со сборкой
+/// сервера точно.
+[[nodiscard]] std::string buildBootstrap() {
+    std::string script;
+
+    script.reserve(embedded::altEnums.size() + embedded::altShared.size() +
+                   embedded::altServer.size() + embedded::altBootstrap.size() + 4U);
+
+    // Перевод строки между файлами обязателен: последняя строка одного и первая
+    // другого иначе слились бы в одну.
+    for (const std::string_view part : {embedded::altEnums, embedded::altShared,
+                                        embedded::altServer, embedded::altBootstrap}) {
+        script.append(part);
+        script.push_back('\n');
+    }
+
+    return script;
+}
 
 } // namespace
 
@@ -137,7 +157,7 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
         // процесс, а нам сервер ронять нельзя — виноват один ресурс, а не сессия.
         const v8::TryCatch caught{isolate};
 
-        loaded = !node::LoadEnvironment(setup_->env(), kBootstrap).IsEmpty();
+        loaded = !node::LoadEnvironment(setup_->env(), buildBootstrap()).IsEmpty();
 
         if (!loaded) {
             if (caught.HasCaught()) {

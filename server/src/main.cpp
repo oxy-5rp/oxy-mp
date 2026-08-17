@@ -17,6 +17,7 @@
 #include <charconv>
 #include <cstdio>
 #include <csignal>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -52,6 +53,12 @@ bool parseNumber(std::string_view text, T& value) {
 /// Где искать конфигурацию, если её не назвали явно.
 constexpr const char* kDefaultConfig = "server.cfg";
 
+/// Как называет свою конфигурацию alt:V.
+///
+/// Берётся только если своей нет вовсе: сервер, у которого лежат обе, слушается
+/// написанного для него.
+constexpr const char* kAltConfig = "server.toml";
+
 /// Достаёт путь к конфигурации из командной строки.
 ///
 /// Отдельным проходом до разбора остального, и это не небрежность: файл
@@ -62,6 +69,10 @@ constexpr const char* kDefaultConfig = "server.cfg";
         if (std::string_view{argv[i]} == "--config") {
             return argv[i + 1];
         }
+    }
+
+    if (!std::filesystem::exists(kDefaultConfig) && std::filesystem::exists(kAltConfig)) {
+        return kAltConfig;
     }
 
     return kDefaultConfig;

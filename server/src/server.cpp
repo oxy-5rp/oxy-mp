@@ -1114,6 +1114,30 @@ void Server::teleported(const Player& player, const shared::Vec3& position) {
     sendTo(player.peer, teleport);
 }
 
+void Server::kicked(const Player& player, std::string_view reason) {
+    spdlog::info("игрок {} выгнан: {}", player.nickname,
+                 reason.empty() ? std::string_view{"без объяснения"} : reason);
+
+    // Причина уходит строкой чата, а не своим сообщением, и это осознанный
+    // выбор, а не откладывание работы. Своё сообщение потребовало бы номера в
+    // протоколе, обработчика у клиента и показа где-то поверх кадра — то есть
+    // ещё одного способа сказать игроку одну строку там, где такой способ уже
+    // есть и работает у всех сборок клиента.
+    if (!reason.empty()) {
+        shared::ChatLine line;
+        line.kind = shared::ChatKind::System;
+        line.text = std::string{reason};
+
+        sendTo(player.peer, line);
+    }
+
+    // Выталкивание до разрыва обязательно: закрытое соединение уносит с собой всё
+    // не успевшее уйти, и игрок увидел бы молчаливый обрыв вместо объяснения.
+    // Тем же порядком поступает и отказ в подключении.
+    host_->flush();
+    host_->disconnect(player.peer);
+}
+
 void Server::emitted(const Player& player, std::string_view name, std::string_view payload) {
     shared::ServerEvent event;
     event.name = std::string{name};

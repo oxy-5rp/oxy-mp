@@ -92,6 +92,7 @@ private:
 
     void healthChanged(const Player& player) override;
     void teleported(const Player& player, const shared::Vec3& position) override;
+    void kicked(const Player& player, std::string_view reason) override;
     void emitted(const Player& player, std::string_view name, std::string_view payload) override;
     void loadoutChanged(const Player& player, bool replace) override;
     void vehicleAdded(shared::VehicleId id) override;

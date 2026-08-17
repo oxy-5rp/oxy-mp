@@ -31,8 +31,12 @@ namespace {
 ///
 /// Нужны они одному: значению с решёткой внутри. Во всех остальных случаях
 /// кавычки лишние, и требовать их от человека было бы придиркой.
+///
+/// Одинарные — ради TOML: файлы alt:V (`server.toml`, `resource.toml`) пишут
+/// строки в апострофах, и `type = 'js'` без этого стал бы типом «'js'».
 [[nodiscard]] std::string_view unquote(std::string_view value) {
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') ||
+                              (value.front() == '\'' && value.back() == '\''))) {
         return value.substr(1, value.size() - 2);
     }
 
@@ -42,19 +46,57 @@ namespace {
 /// Отрезает примечание.
 ///
 /// Решётка внутри кавычек примечания не начинает: цвет вида "#FF0000" — это
-/// значение, а не начало пояснения.
+/// значение, а не начало пояснения. То же и для апострофов: в перечне ресурсов
+/// alt:V имена пишут именно в них.
 [[nodiscard]] std::string_view stripComment(std::string_view line) {
-    bool quoted = false;
+    char quote = '\0';
 
     for (std::size_t index = 0; index < line.size(); ++index) {
-        if (line[index] == '"') {
-            quoted = !quoted;
-        } else if (line[index] == '#' && !quoted) {
+        const char symbol = line[index];
+
+        if (quote != '\0') {
+            if (symbol == quote) {
+                quote = '\0';
+            }
+        } else if (symbol == '"' || symbol == '\'') {
+            quote = symbol;
+        } else if (symbol == '#') {
             return line.substr(0, index);
         }
     }
 
     return line;
+}
+
+/// Превращает список TOML в перечень через запятую.
+///
+/// Приведение к запятым, а не свой тип значения, и это не лень. Перечни здесь
+/// уже есть — «resources», «admins», — и читаются они через split(); заведи мы
+/// для TOML отдельное представление, у каждого потребителя списка появилось бы
+/// по две ветви разбора вместо одной.
+///
+/// Внутренние кавычки снимаются здесь же: split() отдаёт части как есть, и
+/// снимать их каждому потребителю пришлось бы заново.
+[[nodiscard]] std::string flattenList(std::string_view body) {
+    std::string result;
+
+    for (const std::string& part : split(body)) {
+        const std::string_view value = unquote(trim(part));
+
+        // Пустые части — след висящей запятой перед закрывающей скобкой. TOML их
+        // допускает, и спотыкаться об это незачем.
+        if (value.empty()) {
+            continue;
+        }
+
+        if (!result.empty()) {
+            result += ", ";
+        }
+
+        result += value;
+    }
+
+    return result;
 }
 
 /// Приводит имя ключа к нижнему регистру.
@@ -139,6 +181,27 @@ template<typename T>
     return true;
 }
 
+/// Известна ли эта настройка alt:V, но ещё не исполняется здесь.
+///
+/// Перечислена явно, а не угадывается: перечень — это ровно то, что мы обещаем
+/// однажды исполнить, и он должен таять по мере того, как обещание исполняется.
+[[nodiscard]] bool isAltOnlyKey(std::string_view key) {
+    // Секции TOML целиком: голос и база данных — чужое хозяйство, разбирать их
+    // по ключам незачем.
+    if (key.starts_with("voice.") || key.starts_with("database.")) {
+        return true;
+    }
+
+    return key == "announce" || key == "description" || key == "gamemode" || key == "host" ||
+           key == "language" || key == "modules" || key == "debug" || key == "tags" ||
+           key == "website" || key == "useearlyauth" || key == "earlyauthurl" ||
+           key == "usecdn" || key == "cdnurl" || key == "voicesamplerate" ||
+           key == "voiceexternal" || key == "voiceexternalpublic" || key == "duplicateplayers" ||
+           key == "streamingdistance" || key == "migrationdistance" || key == "syncreceivethread" ||
+           key == "syncsendthread" || key == "enablelogs" || key == "required-permissions" ||
+           key == "optional-permissions" || key.starts_with("db_");
+}
+
 } // namespace
 
 std::vector<std::string> split(std::string_view value) {
@@ -161,6 +224,9 @@ std::vector<std::string> split(std::string_view value) {
 
 bool parse(std::string_view text, Entries& entries, std::string& error) {
     std::size_t lineNumber = 0;
+
+    /// Секция TOML, в которой мы сейчас находимся. Пусто — верхний уровень.
+    std::string section;
 
     // Метка порядка байтов снимается с начала файла.
     //
@@ -188,6 +254,16 @@ bool parse(std::string_view text, Entries& entries, std::string& error) {
             continue;
         }
 
+        // Заголовок секции TOML вида [inspector].
+        //
+        // Ключи под ним получают его имя приставкой: «inspector.port». Иначе
+        // «port» сервера и «port» отладчика оказались бы одной настройкой, и
+        // сервер молча уехал бы на чужой порт.
+        if (line.front() == '[' && line.back() == ']') {
+            section = lowered(trim(line.substr(1, line.size() - 2)));
+            continue;
+        }
+
         // Разделителем служит и двоеточие, и знак равенства: человеку привычно
         // и то и другое, а спорить об этом с ним незачем.
         const std::size_t separator = line.find_first_of(":=");
@@ -196,13 +272,51 @@ bool parse(std::string_view text, Entries& entries, std::string& error) {
             return false;
         }
 
-        const std::string key = lowered(trim(line.substr(0, separator)));
+        std::string key = lowered(trim(line.substr(0, separator)));
         if (key.empty()) {
             error = std::format("строка {}: пустое имя настройки", lineNumber);
             return false;
         }
 
-        entries[key] = std::string{unquote(trim(line.substr(separator + 1)))};
+        if (!section.empty()) {
+            key = section + '.' + key;
+        }
+
+        std::string_view value = trim(line.substr(separator + 1));
+
+        // Список TOML. Он бывает и в одну строку, и во много — в перечне
+        // ресурсов alt:V их полторы сотни, по имени на строку, — и различать эти
+        // два случая обязан разбор, а не человек.
+        if (!value.empty() && value.front() == '[') {
+            std::string collected{value.substr(1)};
+            std::size_t closing = collected.find(']');
+
+            // Скобка не закрылась на этой строке — собираем следующие.
+            while (closing == std::string::npos) {
+                if (text.empty()) {
+                    error = std::format("строка {}: список не закрыт скобкой", lineNumber);
+                    return false;
+                }
+
+                const std::size_t nextBreak = text.find('\n');
+                const std::string_view nextRaw =
+                    nextBreak == std::string_view::npos ? text : text.substr(0, nextBreak);
+
+                text = nextBreak == std::string_view::npos ? std::string_view{}
+                                                           : text.substr(nextBreak + 1);
+                ++lineNumber;
+
+                collected += ' ';
+                collected += trim(stripComment(nextRaw));
+
+                closing = collected.find(']');
+            }
+
+            entries[key] = flattenList(std::string_view{collected}.substr(0, closing));
+            continue;
+        }
+
+        entries[key] = std::string{unquote(value)};
     }
 
     return true;
@@ -272,6 +386,21 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
             understood = timeOfDay(value, config.startingHour, config.startingMinute);
         } else if (key == "money") {
             understood = number(value, config.startingMoney);
+        } else if (key == "players") {
+            // Так предел игроков называется в server.toml у alt:V. Значение то
+            // же самое, и заставлять хозяина переименовывать его при переносе
+            // режима незачем.
+            understood = number(value, config.maxPlayers);
+        } else if (isAltOnlyKey(key)) {
+            // Настройки alt:V, до которых у нас ещё не дошло, — от объявления
+            // сервера в общем списке до доступа к базе данных.
+            //
+            // Промолчать нельзя: хозяин вправе знать, что написанное им не
+            // соблюдается. Но и жаловаться на них как на опечатку неверно —
+            // написаны они правильно.
+            complaints.push_back(
+                std::format("настройка \"{}\" из alt:V пока не исполняется", key));
+            continue;
         } else if (key == "admins") {
             config.admins.clear();
 

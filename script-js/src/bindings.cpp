@@ -3,6 +3,8 @@
 #include "convert.hpp"
 #include "resource.hpp"
 
+#include <oxymp/shared/protocol/protocol_version.hpp>
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -252,6 +254,20 @@ void playerEmit(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().emit(*id, name, payload));
 }
 
+/// Выгоняет игрока из сессии.
+void playerKick(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    // Причина необязательна: не всякий отказ нужно объяснять.
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().kick(*id, info.Length() >= 1 ? fromJs(isolate, info[0]) : ""));
+}
+
 /// Строка в чат одному игроку.
 void playerTell(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -383,11 +399,8 @@ void broadcast(const v8::FunctionCallbackInfo<v8::Value>& info) {
     resourceOf(isolate).core().broadcast(info.Length() >= 1 ? fromJs(isolate, info[0]) : "");
 }
 
-/// Строка в журнал сервера, с именем ресурса.
-///
-/// Имя обязательно: на сервере с десятком ресурсов строка без него бесполезна —
-/// непонятно, кого спрашивать. Так же поступает и alt:V.
-void log(const v8::FunctionCallbackInfo<v8::Value>& info) {
+/// Собирает доводы журнала в одну строку через пробел.
+[[nodiscard]] std::string joinArguments(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
 
     std::string line;
@@ -399,7 +412,34 @@ void log(const v8::FunctionCallbackInfo<v8::Value>& info) {
         line += fromJs(isolate, info[i]);
     }
 
-    spdlog::info("[{}] {}", resourceOf(isolate).name(), line);
+    return line;
+}
+
+/// Строка в журнал сервера, с именем ресурса.
+///
+/// Имя обязательно: на сервере с десятком ресурсов строка без него бесполезна —
+/// непонятно, кого спрашивать. Так же поступает и alt:V.
+void log(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    spdlog::info("[{}] {}", resourceOf(isolate).name(), joinArguments(info));
+}
+
+/// То же уровнем предупреждения.
+///
+/// Отдельными привязками, а не доводом-уровнем у одной: уровень уходит в spdlog
+/// на этапе сборки строки, и передавать его числом из скрипта значило бы завести
+/// разбор числа там, где хватает трёх имён.
+void logWarning(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    spdlog::warn("[{}] {}", resourceOf(isolate).name(), joinArguments(info));
+}
+
+void logError(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    spdlog::error("[{}] {}", resourceOf(isolate).name(), joinArguments(info));
 }
 
 void players(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -548,6 +588,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "clearWeapons", playerClearWeapons);
     addMethod(isolate, shape, "emit", playerEmit);
     addMethod(isolate, shape, "tell", playerTell);
+    addMethod(isolate, shape, "kick", playerKick);
 
     return shape;
 }
@@ -626,6 +667,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "emitClient", emitClient);
     addFunction(context, oxymp, "broadcast", broadcast);
     addFunction(context, oxymp, "log", log);
+    addFunction(context, oxymp, "logWarning", logWarning);
+    addFunction(context, oxymp, "logError", logError);
     addFunction(context, oxymp, "players", players);
     addFunction(context, oxymp, "vehicles", vehicles);
     addFunction(context, oxymp, "createVehicle", createVehicle);
@@ -643,7 +686,31 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     // событии клиенту.
     (void)oxymp->Set(context, toJs(isolate, "resourceName"), toJs(isolate, resource.name()));
 
+    // Корень ресурса: слою alt:V он нужен, чтобы отдать `alt.Resource.path`, а
+    // ресурсу — чтобы дотянуться до своих файлов, не гадая о рабочем каталоге
+    // сервера.
+    (void)oxymp->Set(context, toJs(isolate, "resourcePath"),
+                     toJs(isolate, resource.root().string()));
+
+    (void)oxymp->Set(context, toJs(isolate, "version"),
+                     toJs(isolate, std::to_string(shared::kProtocolVersion)));
+
+    (void)oxymp->Set(context, toJs(isolate, "tickRate"),
+                     v8::Number::New(isolate, shared::kDefaultTickRate));
+
     (void)context->Global()->Set(context, toJs(isolate, "oxymp"), oxymp);
+
+    // Тот же объект — под именем, которым им пользуется слой alt:V.
+    //
+    // Отдельным именем, а не переиспользованием `oxymp`, по двум причинам. Слой
+    // alt:V складывает сюда же и своё (shared, server, enums), и мешать это с
+    // тем, что видит скрипт, значило бы показать ресурсу свою кухню. А имя с
+    // двумя подчёркиваниями впереди говорит читающему ресурс, что трогать это
+    // не следует, — тогда как `oxymp` трогать как раз можно и нужно.
+    const v8::Local<v8::Object> internals = v8::Object::New(isolate);
+    (void)internals->Set(context, toJs(isolate, "native"), oxymp);
+
+    (void)context->Global()->Set(context, toJs(isolate, "__oxympAlt"), internals);
 }
 
 } // namespace oxymp::script::js

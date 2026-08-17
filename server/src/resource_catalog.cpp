@@ -23,6 +23,23 @@ namespace {
            name.find('\\') == std::string_view::npos;
 }
 
+/// Известна ли эта настройка alt:V.
+///
+/// Перечислена явно, а не угадывается по началу имени: перечень — это ровно то,
+/// что мы обещаем однажды исполнить, и он должен таять по мере того, как обещание
+/// исполняется. Угадывание же молчало бы и о том, чего мы не собираемся делать
+/// вовсе.
+[[nodiscard]] bool isAltOnlyKey(std::string_view key) {
+    // Секции описания (`[inspector]`) приходят сюда с приставкой; отладчик
+    // ресурса — целиком чужое хозяйство, и разбирать его по ключам незачем.
+    if (key.starts_with("inspector.")) {
+        return true;
+    }
+
+    return key == "required-permissions" || key == "optional-permissions" ||
+           key == "client-type" || key == "keep-alive" || key == "config";
+}
+
 /// Остаётся ли путь внутри корня ресурса.
 ///
 /// Раздаётся то, что здесь перечислено, и перечисляет это описание ресурса.
@@ -81,10 +98,24 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
             continue;
         }
 
+        // Описание ресурса ищется под двумя именами.
+        //
+        // `resource.toml` — то, как называет его alt:V, и под этим именем лежат
+        // описания всех готовых игровых режимов; `resource.cfg` — как называли
+        // его здесь раньше. Порядок таков, что своё имя проверяется первым: в
+        // каталоге, где по недосмотру оказались оба, побеждает написанное для
+        // нас, а не притащенное вместе с чужим режимом.
         config_file::Entries entries;
         std::string error;
 
-        if (!config_file::read(root / "resource.cfg", entries, error)) {
+        const std::filesystem::path ownDescription = root / "resource.cfg";
+        const std::filesystem::path altDescription = root / "resource.toml";
+
+        const std::filesystem::path description = std::filesystem::is_regular_file(ownDescription)
+                                                      ? ownDescription
+                                                      : altDescription;
+
+        if (!config_file::read(description, entries, error)) {
             complaints.push_back(std::format("\"{}\": {}", name, error));
             continue;
         }
@@ -102,6 +133,18 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
                 resource.clientMain = value;
             } else if (key == "client-files") {
                 resource.clientFiles = config_file::split(value);
+            } else if (key == "deps") {
+                resource.dependencies = config_file::split(value);
+            } else if (isAltOnlyKey(key)) {
+                // Настройки alt:V, до которых у нас ещё не дошло.
+                //
+                // Молча пропускать их нельзя — хозяин сервера вправе знать, что
+                // объявленное им не соблюдается, — но и жаловаться на них как на
+                // опечатку неверно: написаны они правильно, просто здесь пока не
+                // исполняются. Отсюда отдельная, спокойная формулировка.
+                complaints.push_back(
+                    std::format("\"{}\": настройка \"{}\" из alt:V пока не исполняется", name,
+                                key));
             } else {
                 complaints.push_back(std::format("\"{}\": настройка \"{}\" не понята", name, key));
             }

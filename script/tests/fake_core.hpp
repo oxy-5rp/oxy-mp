@@ -80,6 +80,17 @@ public:
         return true;
     }
 
+    bool kick(shared::PlayerId id, std::string_view reason) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        // Игрок остаётся в списке, как и у настоящего ядра: разрыв соединения не
+        // мгновенен, и до него выгнанный ещё числится в сессии.
+        said.push_back(std::format("kick {} {}", id, reason));
+        return true;
+    }
+
     bool emit(shared::PlayerId id, std::string_view name, std::string_view payload) override {
         if (!player(id)) {
             return false;

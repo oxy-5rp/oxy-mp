@@ -159,6 +159,21 @@ bool ServerCore::teleport(shared::PlayerId id, const shared::Vec3& position) {
     return true;
 }
 
+bool ServerCore::kick(shared::PlayerId id, std::string_view reason) {
+    const Player* player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Из реестра игрок здесь не убирается, и это существенно. Уборка — дело
+    // одного места, обработчика разрыва соединения: она объявляет
+    // playerDisconnect, передаёт машины другим ведущим и рассылает уход
+    // остальным. Убери мы игрока здесь — всё это либо не случилось бы вовсе,
+    // либо случилось дважды.
+    sink_->kicked(*player, reason);
+    return true;
+}
+
 bool ServerCore::emit(shared::PlayerId id, std::string_view name, std::string_view payload) {
     const Player* player = players_->findById(id);
 

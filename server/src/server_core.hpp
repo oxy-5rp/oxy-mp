@@ -43,6 +43,9 @@ public:
     virtual void emitted(const Player& player, std::string_view name,
                          std::string_view payload) = 0;
 
+    /// Игрока следует выгнать из сессии.
+    virtual void kicked(const Player& player, std::string_view reason) = 0;
+
     /// Снаряжение игрока изменилось. replace — прежнее отобрать.
     virtual void loadoutChanged(const Player& player, bool replace) = 0;
 
@@ -94,6 +97,7 @@ public:
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
+    bool kick(shared::PlayerId id, std::string_view reason) override;
     bool emit(shared::PlayerId id, std::string_view name, std::string_view payload) override;
 
     // --- Машины ----------------------------------------------------------------

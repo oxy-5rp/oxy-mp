@@ -23,6 +23,21 @@ add_library(oxymp::script_js ALIAS oxymp_script_js)
 
 target_include_directories(oxymp_script_js PUBLIC include)
 
+# Слой alt:V встраивается в бинарник, а не кладётся рядом с сервером.
+#
+# Рядом лежащий файл теряют, правят и подменяют версией от другой сборки, а этот
+# слой обязан совпадать с сервером точно: он зовёт привязки по именам, которых в
+# другой сборке может не быть. Заодно так у хозяина сервера нет ни одного файла,
+# который «не надо трогать».
+#
+# Порядок здесь не важен — важен он в buildBootstrap(), где они склеиваются.
+include(embed_text)
+
+oxymp_embed_text(oxymp_script_js js/alt_enums.js altEnums oxymp::script::js::embedded)
+oxymp_embed_text(oxymp_script_js js/alt_shared.js altShared oxymp::script::js::embedded)
+oxymp_embed_text(oxymp_script_js js/alt_server.js altServer oxymp::script::js::embedded)
+oxymp_embed_text(oxymp_script_js js/alt_bootstrap.js altBootstrap oxymp::script::js::embedded)
+
 # Динамическая библиотека времени выполнения — та же, что у libnode.dll и у
 # сервера. Иначе стандартные строки, ходящие через границу Node, оказались бы на
 # двух разных кучах.

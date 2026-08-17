@@ -32,6 +32,10 @@ public:
                                    position.y, position.z));
     }
 
+    void kicked(const Player& player, std::string_view reason) override {
+        sent.push_back(std::format("kick {} {}", player.id, reason));
+    }
+
     void emitted(const Player& player, std::string_view name, std::string_view payload) override {
         sent.push_back(std::format("emit {} {} {}", player.id, name, payload));
     }
