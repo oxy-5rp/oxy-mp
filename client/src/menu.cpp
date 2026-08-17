@@ -11,7 +11,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <cstdlib>
+#include <charconv>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -212,8 +212,17 @@ struct Menu::State {
             int port = 0;
 
             if (const std::size_t colon = host.rfind(':'); colon != std::string::npos) {
-                port = std::atoi(host.c_str() + colon + 1);
-                host.resize(colon);
+                const char* const begin = host.c_str() + colon + 1;
+                const char* const end = host.c_str() + host.size();
+
+                // Разбор без исключений и без правки числа при неудаче: адрес
+                // приходит из чужого файла оформления, и двоеточие в нём может
+                // оказаться не перед портом вовсе.
+                if (std::from_chars(begin, end, port).ec == std::errc{}) {
+                    host.resize(colon);
+                } else {
+                    port = 0;
+                }
             }
 
             // Поля перечислены все, какие ждёт страница, и пустые — тоже: она

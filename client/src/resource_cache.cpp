@@ -247,6 +247,13 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         ready.push_back(Ready{.name = entry.name, .path = unpacked});
     }
 
+    // Последний доклад — о том, что разобраны все. Без него счётчик остановился
+    // бы на предпоследнем: доклад идёт перед работой, а не после неё, потому что
+    // закачка длится минутами и сказать о ней нужно до, а не потом.
+    if (report) {
+        report(wanted.size(), wanted.size(), false);
+    }
+
     return ready;
 }
 

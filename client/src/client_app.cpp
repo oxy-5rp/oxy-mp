@@ -348,14 +348,6 @@ constexpr const char* kWindowTitle = "oxy:Multiplayer";
 /// неправда. Игрок в нашей сессии, а не в чужой.
 constexpr const char* kProductName = "Oxy Multiplayer";
 
-/// Сколько сервер вправе молчать, прежде чем об этом стоит сказать игроку.
-///
-/// Подключение занимает доли секунды, но первая попытка приходится на тот же
-/// миг, что и её начало, и до ответа состояние честно называется «ожидание».
-/// Показывать его как беду в эти секунды — значит писать «сервер не отвечает»
-/// каждому входящему.
-constexpr auto kSilenceBeforeAlarm = std::chrono::seconds{5};
-
 /// Пауза между попытками опознать движок.
 constexpr auto kEngineRetryDelay = std::chrono::milliseconds{500};
 
@@ -1152,12 +1144,6 @@ void run() {
     // Проверено: игра замирала сразу после ухода экрана загрузки.
     game::Window window;
 
-    // Когда соединение началось. Ставится не здесь, а в тот миг, когда к серверу
-    // действительно пошли: по нему решается, пора ли жаловаться игроку, и отсчёт
-    // от несделанной попытки объявил бы сервер молчащим ещё до того, как его
-    // о чём-то спросили.
-    std::chrono::steady_clock::time_point connectionStartedAt{};
-
     // Меню, если оно поднялось. Без него клиент работает по-прежнему — просто
     // рассказывать о ходе подключения будет некому.
     Menu* const menu = ui != nullptr ? ui->menu() : nullptr;
@@ -1253,7 +1239,6 @@ void run() {
 
             connection = std::make_unique<Connection>(active);
 
-            connectionStartedAt = std::chrono::steady_clock::now();
             menuProgress = MenuProgress{};
         }
 

@@ -12,8 +12,6 @@
 #include <format>
 #include <thread>
 
-#include <windows.h>
-
 namespace oxymp::client::game {
 namespace {
 
