@@ -60,6 +60,7 @@ if(WIN32)
         src/game/present_hook.cpp
         src/game/ped_activity.cpp
         src/game/ped_animation.cpp
+        src/game/ped_appearance.cpp
         src/game/player.cpp
         src/game/remote_players.cpp
         src/game/respawn.cpp

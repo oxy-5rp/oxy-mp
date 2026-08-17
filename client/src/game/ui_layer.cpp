@@ -258,6 +258,25 @@ struct UiLayer::State {
         return menu != nullptr && (menu->opened() || menu->consoleOpen());
     }
 
+    /// Просит выйти из игры так, как об этом просят у alt:V.
+    ///
+    /// Не выходит, а спрашивает: по Alt+F4 у него появляется его же окно
+    /// подтверждения, то самое, что открывается кнопкой в углу меню. Ответит на
+    /// него страница обратно, и вот тогда выйдем.
+    ///
+    /// Своим путём — только когда спрашивать некому: без страницы игроку иначе
+    /// нечем было бы закрыть игру, кроме диспетчера задач.
+    void askExit() {
+        if (menu != nullptr) {
+            menu->askExit();
+            return;
+        }
+
+        if (quit) {
+            quit();
+        }
+    }
+
     /// Ставит перехват ввода, как только окно игры появилось.
     void catchInput() {
         if (input != nullptr || menu == nullptr || menuSurface.browser == nullptr) {
@@ -273,7 +292,8 @@ struct UiLayer::State {
 
         input = MenuInput::install(
             game, *menuSurface.browser, [this] { return pageWantsInput(); },
-            [this] { menu->toggle(); }, [this] { menu->toggleConsole(); }, quit, error);
+            [this] { menu->toggle(); }, [this] { menu->toggleConsole(); },
+            [this] { askExit(); }, error);
 
         if (input == nullptr) {
             spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);

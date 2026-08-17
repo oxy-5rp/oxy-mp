@@ -1305,6 +1305,12 @@ void run() {
             connection->emit(std::move(event.name), std::move(event.payload));
         }
 
+        // Своя внешность уходит только когда изменилась: игровой поток кладёт её
+        // сюда лишь в этом случае.
+        if (const auto appearance = mail.takeOutgoingAppearance()) {
+            connection->sendAppearance(*appearance);
+        }
+
         // Пришедшее раскладывается по двум разным адресатам: попадания нужны
         // игре, а строки чата — только экрану, и гонять их через игровой поток
         // незачем.
@@ -1312,6 +1318,7 @@ void run() {
         mail.deliverTeleports(connection->takeTeleports());
         mail.deliverServerEvents(connection->takeServerEvents());
         mail.deliverVehicleAppearances(connection->takeVehicleAppearances());
+        mail.deliverPlayerAppearances(connection->takePlayerAppearances());
         mail.deliverWorld(connection->takeWorld());
         mail.deliverLoadout(connection->takeLoadout());
         mail.deliverHealth(connection->takeHealth());

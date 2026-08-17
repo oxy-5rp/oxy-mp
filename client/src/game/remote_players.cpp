@@ -186,6 +186,7 @@ bool aiming(const shared::PlayerState& state) {
 RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles) noexcept
     : vehicles_(vehicles),
       animation_(table),
+      appearance_(table),
       hashKey_(table.handlerFor(natives::kGetHashKey)),
       requestModel_(table.handlerFor(natives::kRequestModel)),
       hasModelLoaded_(table.handlerFor(natives::kHasModelLoaded)),
@@ -303,8 +304,25 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
         invokeNative<void>(canRagdoll_, ped, true);
     }
 
+    // Одежда надевается сразу за созданием, а не следующим кадром: иначе игрок
+    // на мгновение появится голым, и мгновение это заметно — персонаж выходит
+    // из-за поворота уже одетым или не выходит вовсе.
+    if (const auto known = looks_.find(player.id); known != looks_.end()) {
+        appearance_.apply(ped, known->second);
+    }
+
     spdlog::debug("игрок {} ({}) показан персонажем {}", player.id, player.nickname, ped);
     return ped;
+}
+
+void RemotePlayers::dress(shared::PlayerId player, const shared::PlayerAppearance& appearance) {
+    looks_[player] = appearance;
+
+    // Персонажа может ещё не быть: внешность идёт надёжным каналом и обгоняет
+    // снимки, а создаётся персонаж по снимку. Тогда её наденут при создании.
+    if (const auto puppet = puppets_.find(player); puppet != puppets_.end()) {
+        appearance_.apply(puppet->second.ped, appearance);
+    }
 }
 
 void RemotePlayers::remove(int ped) const {

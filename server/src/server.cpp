@@ -211,6 +211,12 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::PlayerAppearance:
+        if (const auto appearance = shared::decode<shared::PlayerAppearance>(packet)) {
+            handlePlayerAppearance(peer, *appearance);
+        }
+        return;
+
     case shared::MessageId::ClientEvent:
         if (const auto event = shared::decode<shared::ClientEvent>(packet)) {
             handleClientEvent(peer, *event);
@@ -370,6 +376,15 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         sendTo(peer, joined);
     }
 
+    // Следом — как эти люди выглядят. Отдельным проходом, а не вместе с
+    // объявлением: объявлен всякий, а внешность объявили не все — сервер её не
+    // выдумывает, и до первого слова владельца рассказывать нечего.
+    for (const auto& [otherPeer, other] : players_) {
+        if (otherPeer != peer && other.appearance.has_value()) {
+            sendTo(peer, *other.appearance);
+        }
+    }
+
     // Погода и время — сразу: мир, в который игрок вот-вот попадёт, обязан
     // выглядеть так же, как у остальных, уже в первом кадре.
     sendTo(peer, world_.snapshot());
@@ -497,6 +512,27 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
     // считать видимость по тому, кто её ведёт, значило бы рассылать снимки не
     // тем, кто её видит.
     broadcastNear(state.position, shared::Channel::State, state, peer);
+}
+
+void Server::handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance) {
+    Player* player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        return;
+    }
+
+    // Чей это вид, решает сервер, а не пришедший пакет. Поверив клиенту, мы
+    // позволили бы ему переодеть кого угодно.
+    appearance.playerId = player->id;
+
+    // Запоминается, а не только пересылается: тот, кто войдёт позже, этого
+    // сообщения уже не услышит, а человека увидит — и увидел бы его в том, что
+    // игра надевает по умолчанию.
+    player->appearance = appearance;
+
+    // Всем, а не только ближним, и надёжным каналом. Внешность — не снимок: она
+    // нужна получателю в тот миг, когда чужой игрок появится у него из-за
+    // поворота, а объявления к тому времени давно не будет.
+    broadcast(appearance, peer);
 }
 
 void Server::handleVehicleAppearance(net::PeerId peer, shared::VehicleAppearance appearance) {

@@ -230,6 +230,36 @@ public:
         return std::exchange(incomingAppearances_, {});
     }
 
+    /// Внешность чужого игрока. Тем же порядком и по той же причине, что и у
+    /// машин: сообщение на игрока, и складывать их в «последнее значение»
+    /// нельзя.
+    void deliverPlayerAppearances(std::vector<shared::PlayerAppearance> appearances) {
+        if (appearances.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        incomingPlayerAppearances_.insert(incomingPlayerAppearances_.end(), appearances.begin(),
+                                          appearances.end());
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerAppearance> takeIncomingPlayerAppearances() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(incomingPlayerAppearances_, {});
+    }
+
+    /// Своя внешность — наружу. Только когда изменилась: она уходит по надёжному
+    /// каналу, и слать её каждый кадр значило бы забить его целиком.
+    void postAppearance(shared::PlayerAppearance appearance) {
+        const std::lock_guard guard{mutex_};
+        outgoingAppearance_ = std::move(appearance);
+    }
+
+    [[nodiscard]] std::optional<shared::PlayerAppearance> takeOutgoingAppearance() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(outgoingAppearance_, std::nullopt);
+    }
+
 private:
     mutable std::mutex mutex_;
 
@@ -241,6 +271,8 @@ private:
     std::vector<shared::ServerEvent> incomingEvents_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
+    std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;
+    std::optional<shared::PlayerAppearance> outgoingAppearance_;
     std::optional<shared::WorldState> incomingWorld_;
     std::optional<shared::PlayerLoadout> incomingLoadout_;
     std::optional<shared::HealthChanged> incomingHealth_;

@@ -258,6 +258,16 @@ public:
     /// Забирает пришедшие описания внешности чужих машин.
     [[nodiscard]] std::vector<shared::VehicleAppearance> takeVehicleAppearances();
 
+    /// Внешность чужих игроков, пришедшая с прошлого раза.
+    [[nodiscard]] std::vector<shared::PlayerAppearance> takePlayerAppearances();
+
+    /// Объявляет серверу, как выглядит наш игрок.
+    ///
+    /// Отправкой сразу, а не складыванием в снимок: снимок уходит по
+    /// ненадёжному каналу двадцать раз в секунду, а внешность обязана дойти и
+    /// меняется редко.
+    void sendAppearance(const shared::PlayerAppearance& appearance);
+
     /// Забирает список раздаваемого сервером, если он приходил.
     ///
     /// Один раз за подключение: список приходит следом за приветствием и больше
@@ -345,6 +355,9 @@ private:
 
     /// Как назвался сервер. Приходит с приветствием и живёт до конца попытки.
     std::string serverName_;
+
+    /// Внешность чужих игроков, пришедшая с прошлого опроса.
+    std::vector<shared::PlayerAppearance> playerAppearances_;
 
     /// Чем кончилась связь. Поднимается разрывом, снимается новым приветствием.
     DisconnectReason disconnect_ = DisconnectReason::None;

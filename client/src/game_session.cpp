@@ -22,6 +22,12 @@ namespace {
 constexpr shared::Vec3 kFallbackSpawn{-1037.7F, -2738.0F, 20.2F};
 constexpr float kSpawnHeading = 328.0F;
 
+/// Как часто смотреть, во что одет свой игрок.
+///
+/// Раз в секунду с запасом: переодевает игрока сервер, и полсекунды задержки в
+/// этом не заметит никто, а чтение стоит полусотни вызовов нативов.
+constexpr auto kLookInterval = std::chrono::seconds{1};
+
 /// Радиус, в котором убирается население при появлении и после смерти.
 constexpr float kClearRadius = 400.0F;
 
@@ -119,6 +125,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       controls_(table),
       onlineMap_(table),
       appearance_(table),
+      look_(table),
       respawn_(table),
       streaming_(table),
       vehicles_(table),
@@ -548,6 +555,7 @@ void GameSession::advance() {
         applyServerState(ped);
         handleDeath(player);
         publishLocalState(player, ped, dead);
+        publishAppearance(ped);
         showRemotePlayers(ped);
         return;
     }
@@ -904,6 +912,44 @@ void GameSession::applyServerState(int ped) {
     objects_.sync();
 }
 
+void GameSession::publishAppearance(int ped) {
+    if (ped == 0 || !look_.ready()) {
+        return;
+    }
+
+    // Раз в секунду, а не каждый кадр: чтение стоит полусотни вызовов нативов, а
+    // переодевается человек раз в час.
+    const Clock::time_point now = Clock::now();
+    if (lookPublished_ && now - lookCheckedAt_ < kLookInterval) {
+        return;
+    }
+    lookCheckedAt_ = now;
+
+    shared::PlayerAppearance look = look_.read(ped);
+
+    if (lookPublished_ && look == publishedLook_) {
+        return;
+    }
+
+    const bool first = !lookPublished_;
+
+    publishedLook_ = look;
+    lookPublished_ = true;
+
+    // Первое объявление — в общий журнал, остальные в отладочный. Проверить
+    // внешность глазами можно только вдвоём, а по этой строке видно, что своя
+    // прочиталась и ушла, ещё до того, как найдётся второй игрок.
+    if (first) {
+        spdlog::info("своя внешность объявлена: модель {:#x}, верх {}, ноги {}, обувь {}",
+                     look.model, look.components[11].drawable, look.components[4].drawable,
+                     look.components[6].drawable);
+    } else {
+        spdlog::debug("внешность изменилась, объявляем заново");
+    }
+
+    mail_.postAppearance(std::move(look));
+}
+
 void GameSession::showRemotePlayers(int ped) {
     // Погода и время — раньше всего остального: они касаются мира целиком, а не
     // того, кто в нём стоит, и ставить их после расстановки людей незачем.
@@ -915,6 +961,13 @@ void GameSession::showRemotePlayers(int ped) {
     // машина, созданная в этом же кадре, должна оказаться уже покрашенной.
     for (const shared::VehicleAppearance& appearance : mail_.takeIncomingVehicleAppearances()) {
         vehicles_.applyAppearance(appearance);
+    }
+
+    // Внешность людей — по той же причине и тем же порядком: она приходит
+    // надёжным каналом и обгоняет снимки, а персонаж создаётся по снимку.
+    // Пришедшая раньше, она дождётся его в памяти чужих игроков.
+    for (const shared::PlayerAppearance& appearance : mail_.takeIncomingPlayerAppearances()) {
+        remotePlayers_.dress(appearance.playerId, appearance);
     }
 
     // Машины появляются раньше людей: чужого игрока некуда сажать, пока его

@@ -54,6 +54,9 @@ private:
     void handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& payload);
 
     void handleHello(net::PeerId peer, const shared::ClientHello& hello);
+
+    /// Принимает объявленную игроком внешность и пересказывает её остальным.
+    void handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance);
     void handlePing(net::PeerId peer, const shared::Ping& ping);
     void handlePlayerState(net::PeerId peer, shared::PlayerState state);
     void handleVehicleState(net::PeerId peer, shared::VehicleState state);

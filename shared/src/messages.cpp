@@ -64,6 +64,88 @@ Pong Pong::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerAppearance::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeU32(model);
+
+    // Длины наборов не пишутся: они заданы протоколом и одинаковы у обеих
+    // сторон. Написанные в пакет, они стали бы полем, которому получатель обязан
+    // верить, — а верить ему нельзя.
+    for (const PedComponent& component : components) {
+        writer.writeU8(component.drawable);
+        writer.writeU8(component.texture);
+        writer.writeU8(component.palette);
+    }
+
+    for (const PedProp& prop : props) {
+        writer.writeU8(static_cast<std::uint8_t>(prop.drawable));
+        writer.writeU8(static_cast<std::uint8_t>(prop.texture));
+    }
+
+    writer.writeU8(shapeFirst);
+    writer.writeU8(shapeSecond);
+    writer.writeU8(shapeThird);
+    writer.writeU8(skinFirst);
+    writer.writeU8(skinSecond);
+    writer.writeU8(skinThird);
+    writer.writeFloat(shapeMix);
+    writer.writeFloat(skinMix);
+    writer.writeFloat(thirdMix);
+
+    for (const PedOverlay& overlay : overlays) {
+        writer.writeU8(overlay.index);
+        writer.writeU8(overlay.colourType);
+        writer.writeU8(overlay.colour);
+        writer.writeU8(overlay.secondColour);
+        writer.writeFloat(overlay.opacity);
+    }
+
+    writer.writeU8(hairColour);
+    writer.writeU8(hairHighlight);
+    writer.writeU8(eyeColour);
+}
+
+PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
+    PlayerAppearance message;
+    message.playerId = reader.readU32();
+    message.model = reader.readU32();
+
+    for (PedComponent& component : message.components) {
+        component.drawable = reader.readU8();
+        component.texture = reader.readU8();
+        component.palette = reader.readU8();
+    }
+
+    for (PedProp& prop : message.props) {
+        prop.drawable = static_cast<std::int8_t>(reader.readU8());
+        prop.texture = static_cast<std::int8_t>(reader.readU8());
+    }
+
+    message.shapeFirst = reader.readU8();
+    message.shapeSecond = reader.readU8();
+    message.shapeThird = reader.readU8();
+    message.skinFirst = reader.readU8();
+    message.skinSecond = reader.readU8();
+    message.skinThird = reader.readU8();
+    message.shapeMix = reader.readFloat();
+    message.skinMix = reader.readFloat();
+    message.thirdMix = reader.readFloat();
+
+    for (PedOverlay& overlay : message.overlays) {
+        overlay.index = reader.readU8();
+        overlay.colourType = reader.readU8();
+        overlay.colour = reader.readU8();
+        overlay.secondColour = reader.readU8();
+        overlay.opacity = reader.readFloat();
+    }
+
+    message.hairColour = reader.readU8();
+    message.hairHighlight = reader.readU8();
+    message.eyeColour = reader.readU8();
+
+    return message;
+}
+
 void PlayerJoined::write(ByteWriter& writer) const {
     writer.writeU32(playerId);
     writer.writeString(nickname);
@@ -555,6 +637,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::ObjectRemoved:
     case MessageId::ClientEvent:
     case MessageId::ServerEvent:
+    case MessageId::PlayerAppearance:
         return static_cast<MessageId>(packet.front());
     }
 

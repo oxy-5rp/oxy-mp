@@ -834,4 +834,58 @@ inline constexpr std::uint64_t kSetPedConfigFlag = 0X0428AFDCAA63B06E;
 /// SET_PED_CAN_PLAY_AMBIENT_ANIMS, канонический хеш 0X6373D1349925A70E.
 inline constexpr std::uint64_t kSetPedCanPlayAmbientAnims = 0XC1BC1B8A5AA67C6B;
 
+// ---------------------------------------------------------------------------
+// Внешность персонажа: одежда, аксессуары, лицо
+//
+// Читаются они у своего игрока и применяются к чужим куклам. Обратного чтения
+// для цвета волос, глаз и слоёв лица у игры нет вовсе — только запись; ровно так
+// же обстоит дело и у alt:V, и оттого эти три величины ведёт тот, кто их задал,
+// а не тот, кто на них смотрит.
+// ---------------------------------------------------------------------------
+
+/// GET_PED_DRAWABLE_VARIATION, канонический хеш 0X67F3780DD425D4FC.
+inline constexpr std::uint64_t kGetPedDrawableVariation = 0XC0120BBCC298EA2F;
+
+/// GET_PED_TEXTURE_VARIATION, канонический хеш 0X04A355E041E004E6.
+inline constexpr std::uint64_t kGetPedTextureVariation = 0XD6AED6BFCC58AF7F;
+
+/// GET_PED_PALETTE_VARIATION, канонический хеш 0XE3DD5F2A84B42281.
+inline constexpr std::uint64_t kGetPedPaletteVariation = 0XDAF263B0E792EAEC;
+
+/// SET_PED_COMPONENT_VARIATION, канонический хеш 0X262B14F48D29DE80.
+inline constexpr std::uint64_t kSetPedComponentVariation = 0XD1C578C204015E1F;
+
+/// GET_PED_PROP_INDEX, канонический хеш 0X898CC20EA75BACD8.
+inline constexpr std::uint64_t kGetPedPropIndex = 0XB204F40D393426B6;
+
+/// GET_PED_PROP_TEXTURE_INDEX, канонический хеш 0XE131A28626F81AB2.
+inline constexpr std::uint64_t kGetPedPropTextureIndex = 0X0DC23FA727759F9F;
+
+/// SET_PED_PROP_INDEX, канонический хеш 0X93376B65A266EB5F.
+inline constexpr std::uint64_t kSetPedPropIndex = 0X7F08C4791E6D6969;
+
+/// CLEAR_PED_PROP, канонический хеш 0X0943E5B8E078E76E.
+inline constexpr std::uint64_t kClearPedProp = 0X09397806857F5DFB;
+
+/// _GET_PED_HEAD_BLEND_DATA, канонический хеш 0X2746BD9D88C5C5D0.
+inline constexpr std::uint64_t kGetPedHeadBlendData = 0X5CB7287FD7611BC7;
+
+/// SET_PED_HEAD_BLEND_DATA, канонический хеш 0X9414E18B9434C2FE.
+inline constexpr std::uint64_t kSetPedHeadBlendData = 0X0A5987DCA39E8BE5;
+
+/// _GET_PED_HEAD_OVERLAY_VALUE, канонический хеш 0XA60EF3B6461A4D43.
+inline constexpr std::uint64_t kGetPedHeadOverlayValue = 0X8E73BECF421D257E;
+
+/// SET_PED_HEAD_OVERLAY, канонический хеш 0X48F44967FA05CC1E.
+inline constexpr std::uint64_t kSetPedHeadOverlay = 0XE5B6C9B29510B84E;
+
+/// _SET_PED_HEAD_OVERLAY_COLOR, канонический хеш 0X497BF74A7B9CB952.
+inline constexpr std::uint64_t kSetPedHeadOverlayColor = 0X94965BB62753D4D6;
+
+/// _SET_PED_HAIR_COLOR, канонический хеш 0X4CFFC65454C93A49.
+inline constexpr std::uint64_t kSetPedHairColor = 0X894EE2587C8D8D1E;
+
+/// _SET_PED_EYE_COLOR, канонический хеш 0X50B56988B170AFDF.
+inline constexpr std::uint64_t kSetPedEyeColor = 0X348FF3E632DCB635;
+
 } // namespace oxymp::client::game::natives

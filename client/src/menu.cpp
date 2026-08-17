@@ -124,6 +124,17 @@ struct Menu::State {
     [[nodiscard]] std::filesystem::path settingsPath() const { return directory / kSettingsFile; }
     [[nodiscard]] std::filesystem::path historyPath() const { return directory / kHistoryFile; }
 
+    /// Показывает или прячет нарисованный указатель.
+    ///
+    /// Считаются оба признака сразу: указатель нужен и открытому меню, и одной
+    /// открытой консоли — в ней есть и кнопки, и выделение текста мышью. Прежде
+    /// он смотрел только на меню, и в консоли, открытой поверх игры, мыши не
+    /// было видно вовсе.
+    void updateCursor() {
+        const bool wanted = opened.load() || consoleOpen.load();
+        browser->evaluate(wanted ? kCursorShow : kCursorHide);
+    }
+
     /// Отдаёт странице событие с готовым списком доводов.
     ///
     /// Запись с заменой негодных знаков, а не с отказом. Строки сюда приходят из
@@ -357,10 +368,7 @@ struct Menu::State {
             spdlog::info("меню сообщает о себе: {}", open ? "открыто" : "закрыто");
 
             opened.store(open);
-
-            // Указатель живёт ровно столько, сколько открыто меню: он нарисован
-            // страницей, а страница остаётся в кадре и после закрытия.
-            browser->evaluate(open ? kCursorShow : kCursorHide);
+            updateCursor();
             return;
         }
 
@@ -433,6 +441,7 @@ struct Menu::State {
                               arguments[0].get<bool>();
 
             consoleOpen.store(open);
+            updateCursor();
             return;
         }
 
@@ -669,6 +678,12 @@ bool Menu::consoleOpen() const noexcept {
     return state_ != nullptr && state_->consoleOpen.load();
 }
 
+void Menu::askExit() {
+    if (state_ != nullptr) {
+        state_->emit("exit");
+    }
+}
+
 void Menu::toggleConsole() {
     if (state_ == nullptr) {
         return;
@@ -681,6 +696,7 @@ void Menu::toggleConsole() {
     state_->consoleOpen.store(open);
 
     state_->emit("console:open", nlohmann::json::array({open}));
+    state_->updateCursor();
 }
 
 void Menu::pushLog(unsigned int level, std::string_view text) {

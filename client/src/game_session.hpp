@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/appearance.hpp"
+#include "game/ped_appearance.hpp"
 #include "game/controls.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/frontend.hpp"
@@ -148,6 +149,9 @@ private:
     void sweepScripts();
     void handleDeath(int player);
     void showRemotePlayers(int ped);
+    /// Рассказывает серверу, во что одет свой игрок, если это изменилось.
+    void publishAppearance(int ped);
+
     void publishLocalState(int player, int ped, bool dead);
     void draw();
     void publishStage();
@@ -220,6 +224,9 @@ private:
     game::Controls controls_;
     game::OnlineMap onlineMap_;
     game::Appearance appearance_;
+
+    /// Одежда и лицо: своё читается отсюда, чужое сюда же и надевается.
+    game::PedAppearance look_;
     game::Respawn respawn_;
     game::Streaming streaming_;
 
@@ -266,6 +273,23 @@ private:
     /// когда экран загрузки и нужен.
     /// Когда внешность машин снимали в прошлый раз.
     Clock::time_point vehicleAppearanceAt_{};
+
+    /// Когда в последний раз смотрели, во что одет свой игрок.
+    ///
+    /// Не каждый кадр: чтение стоит полусотни вызовов нативов, а переодевается
+    /// человек раз в час. Раз в секунду — с большим запасом: смена одежды идёт
+    /// от сервера, и полсекунды задержки в ней не заметит никто.
+    Clock::time_point lookCheckedAt_{};
+
+    /// Что об этой одежде уже знает сервер. По разнице видно, что менять.
+    shared::PlayerAppearance publishedLook_;
+
+    /// Объявляли ли внешность хоть раз.
+    ///
+    /// Отдельно от сравнения: одежда по умолчанию совпадает с пустой записью, и
+    /// без этого признака вошедший в игре по умолчанию не объявил бы себя вовсе
+    /// — а остальным нужно знать и это.
+    bool lookPublished_ = false;
 
     Clock::time_point worldReadyAt_{};
     Clock::time_point playingSince_{};

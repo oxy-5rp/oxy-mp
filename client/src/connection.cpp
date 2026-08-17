@@ -361,6 +361,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerAppearance:
+        if (const auto appearance = shared::decode<shared::PlayerAppearance>(packet)) {
+            playerAppearances_.push_back(*appearance);
+        }
+        return;
+
     case shared::MessageId::VehicleAdded:
         if (const auto added = shared::decode<shared::VehicleAdded>(packet)) {
             handleVehicleAdded(*added);
@@ -646,6 +652,22 @@ std::vector<shared::ObjectId> Connection::takeRemovedObjects() {
 
 std::vector<shared::VehicleAppearance> Connection::takeVehicleAppearances() {
     return std::exchange(vehicleAppearances_, {});
+}
+
+std::vector<shared::PlayerAppearance> Connection::takePlayerAppearances() {
+    return std::exchange(playerAppearances_, {});
+}
+
+void Connection::sendAppearance(const shared::PlayerAppearance& appearance) {
+    if (state_ != ConnectionState::Connected) {
+        return;
+    }
+
+    // Надёжным каналом: внешность обязана дойти целиком, а приходит она раз в
+    // час. Потерянная, она оставила бы игрока без штанов до следующей смены
+    // одежды — и объяснить это было бы нечем.
+    const auto packet = shared::encode(appearance);
+    host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
 }
 
 void Connection::emit(std::string name, std::string payload) {

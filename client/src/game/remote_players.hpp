@@ -2,6 +2,7 @@
 
 #include "native_table.hpp"
 #include "ped_animation.hpp"
+#include "ped_appearance.hpp"
 #include "vehicles.hpp"
 
 #include <oxymp/shared/math/vec3.hpp>
@@ -100,6 +101,14 @@ public:
     ///
     /// Пусто, если персонажа ещё нет: модель могла не успеть загрузиться.
     [[nodiscard]] std::optional<shared::Vec3> positionOf(shared::PlayerId player) const;
+
+    /// Одевает чужого игрока так, как он объявил.
+    ///
+    /// Помнится, а не только применяется, и это не запас: внешность приходит по
+    /// надёжному каналу и обгоняет снимки, а персонажа до первого снимка ещё
+    /// нет. Забыв её, мы одели бы человека только после следующей смены одежды —
+    /// то есть, скорее всего, никогда.
+    void dress(shared::PlayerId player, const shared::PlayerAppearance& appearance);
 
     /// Убирает всех. Нужно при выходе: оставленные персонажи переживут клиент.
     void clear();
@@ -201,6 +210,13 @@ private:
 
     /// Движения, которыми отыгрывается то, чем игрок занят.
     PedAnimation animation_;
+
+    /// Одежда и лицо.
+    PedAppearance appearance_;
+
+    /// Как выглядит каждый игрок. Живёт дольше персонажа: тот появляется и
+    /// исчезает по мере удаления, а внешность объявляется однажды.
+    std::unordered_map<shared::PlayerId, shared::PlayerAppearance> looks_;
 
     NativeHandler hashKey_ = nullptr;
     NativeHandler requestModel_ = nullptr;

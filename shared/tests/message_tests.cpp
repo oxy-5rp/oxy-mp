@@ -68,6 +68,80 @@ TEST_CASE("ServerWelcome survives a round trip", "[messages]") {
     CHECK(received->name == "Тестовый сервер");
 }
 
+TEST_CASE("PlayerAppearance survives a round trip", "[messages]") {
+    PlayerAppearance sent;
+    sent.playerId = 3;
+    sent.model = 0x705E61F2;
+
+    sent.components[3] = PedComponent{.drawable = 12, .texture = 4, .palette = 1};
+    sent.components[11] = PedComponent{.drawable = 250, .texture = 9, .palette = 0};
+
+    sent.props[0] = PedProp{.drawable = 7, .texture = 2};
+    sent.props[4] = PedProp{.drawable = -1, .texture = 0};
+
+    sent.shapeFirst = 21;
+    sent.skinSecond = 33;
+    sent.shapeMix = 0.25F;
+    sent.thirdMix = 0.75F;
+
+    sent.overlays[2] = PedOverlay{
+        .index = 5, .colourType = 1, .colour = 3, .secondColour = 4, .opacity = 0.5F};
+
+    sent.hairColour = 6;
+    sent.hairHighlight = 7;
+    sent.eyeColour = 8;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 3);
+    CHECK(received->model == 0x705E61F2);
+
+    CHECK(received->components[3].drawable == 12);
+    CHECK(received->components[3].texture == 4);
+    CHECK(received->components[3].palette == 1);
+    CHECK(received->components[11].drawable == 250);
+
+    CHECK(received->props[0].drawable == 7);
+    CHECK(received->props[0].texture == 2);
+
+    // Пустой аксессуар — это минус единица, и знак обязан пережить дорогу:
+    // байт без знака превратил бы «ничего не надето» в 255-ю шляпу.
+    CHECK(received->props[4].drawable == -1);
+
+    CHECK(received->shapeFirst == 21);
+    CHECK(received->skinSecond == 33);
+    CHECK(received->shapeMix == 0.25F);
+    CHECK(received->thirdMix == 0.75F);
+
+    CHECK(received->overlays[2].index == 5);
+    CHECK(received->overlays[2].colourType == 1);
+    CHECK(received->overlays[2].secondColour == 4);
+    CHECK(received->overlays[2].opacity == 0.5F);
+
+    CHECK(received->hairColour == 6);
+    CHECK(received->hairHighlight == 7);
+    CHECK(received->eyeColour == 8);
+}
+
+TEST_CASE("an untouched PlayerAppearance means nothing is worn", "[messages]") {
+    // Умолчания важны не меньше заполненного: сервер вправе разослать внешность,
+    // о которой ему ничего не сказали, и она обязана означать «как есть», а не
+    // «надеть нулевую шляпу».
+    const auto received = roundTrip(PlayerAppearance{});
+
+    REQUIRE(received.has_value());
+    CHECK(received->model == 0);
+
+    for (const PedProp& prop : received->props) {
+        CHECK(prop.drawable == -1);
+    }
+
+    for (const PedOverlay& overlay : received->overlays) {
+        CHECK(overlay.index == 255);
+    }
+}
+
 TEST_CASE("ServerReject survives a round trip", "[messages]") {
     ServerReject sent;
     sent.reason = RejectReason::ServerFull;

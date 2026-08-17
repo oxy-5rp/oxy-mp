@@ -105,6 +105,123 @@ struct Pong {
     [[nodiscard]] static Pong read(ByteReader& reader);
 };
 
+/// Сколько у персонажа слотов одежды в нумерации игры.
+///
+/// Двенадцать: голова, маска, волосы, торс, ноги, сумка, обувь, шея, броня,
+/// значок, рубашка и второй торс. Числа эти — не наши, а игры: она принимает их
+/// как есть, и переставлять их местами нельзя.
+inline constexpr std::size_t kPedComponentCount = 12;
+
+/// Сколько у персонажа слотов аксессуаров.
+///
+/// В игре их восемь, но заняты только пять — шляпа, очки, серьги, часы и
+/// браслет, — и передаются именно они. Пустые слоты между ними передавать
+/// незачем: игра сама знает, что в них ничего нет.
+inline constexpr std::size_t kPedPropCount = 5;
+
+/// Сколько у лица слоёв: щетина, брови, старение, макияж, румяна, веснушки и
+/// прочее, чем игрок правит внешность в редакторе.
+inline constexpr std::size_t kPedOverlayCount = 13;
+
+/// Один слот одежды.
+struct PedComponent {
+    /// Какая вещь надета. Ноль — то, что игра надевает по умолчанию.
+    std::uint8_t drawable = 0;
+
+    /// Какой её расцветки.
+    std::uint8_t texture = 0;
+
+    /// Из какого набора цветов взята расцветка. Почти всегда ноль.
+    std::uint8_t palette = 0;
+
+    [[nodiscard]] friend bool operator==(const PedComponent&, const PedComponent&) = default;
+};
+
+/// Один аксессуар. Минус единица означает «ничего не надето».
+struct PedProp {
+    std::int8_t drawable = -1;
+    std::int8_t texture = 0;
+
+    [[nodiscard]] friend bool operator==(const PedProp&, const PedProp&) = default;
+};
+
+/// Один слой лица.
+struct PedOverlay {
+    /// Какой именно слой выбран. 255 — ничего.
+    std::uint8_t index = 255;
+
+    /// Откуда берётся цвет: 0 — из цветов волос, 1 — из цветов помады, 2 — цвета
+    /// у слоя нет вовсе.
+    std::uint8_t colourType = 2;
+
+    std::uint8_t colour = 0;
+    std::uint8_t secondColour = 0;
+
+    /// Насколько слой заметен, от нуля до единицы.
+    float opacity = 1.0F;
+
+    [[nodiscard]] friend bool operator==(const PedOverlay&, const PedOverlay&) = default;
+};
+
+/// Как игрок выглядит.
+///
+/// Состав полей взят у alt:V поле в поле — иначе внешность, собранная в его
+/// редакторе, у нас разошлась бы с оригиналом на мелочах, которые как раз и
+/// делают лицо чужим.
+///
+/// Ходит по надёжному каналу и редко: внешность меняется раз в час, а дойти
+/// обязана целиком. В снимке ей не место — снимок вправе потеряться.
+struct PlayerAppearance {
+    static constexpr MessageId kId = MessageId::PlayerAppearance;
+
+    /// Чей это вид. В сообщении от клиента не заполняется: сервер знает, с
+    /// какого соединения пришёл пакет, и проставляет идентификатор сам.
+    PlayerId playerId = kInvalidPlayerId;
+
+    /// Хеш модели персонажа. Ноль — оставить ту, что есть.
+    ///
+    /// Обычно это `mp_m_freemode_01` или `mp_f_freemode_01`, но не обязательно:
+    /// сервер вправе выдать игроку любую модель игры, и тогда всё остальное к
+    /// ней просто не применяется — у сюжетных моделей одежда своя.
+    std::uint32_t model = 0;
+
+    std::array<PedComponent, kPedComponentCount> components{};
+    std::array<PedProp, kPedPropCount> props{};
+
+    /// Лицо: смешение двух родителей и третьего вклада.
+    ///
+    /// Так устроен редактор внешности в GTA Online: лицо не выбирается из
+    /// списка, а собирается из двух родительских и одного добавочного, и у
+    /// формы с кожей доли смешения свои.
+    std::uint8_t shapeFirst = 0;
+    std::uint8_t shapeSecond = 0;
+    std::uint8_t shapeThird = 0;
+    std::uint8_t skinFirst = 0;
+    std::uint8_t skinSecond = 0;
+    std::uint8_t skinThird = 0;
+    float shapeMix = 0.5F;
+    float skinMix = 0.5F;
+    float thirdMix = 0.0F;
+
+    std::array<PedOverlay, kPedOverlayCount> overlays{};
+
+    /// Цвет волос и цвет мелирования.
+    std::uint8_t hairColour = 0;
+    std::uint8_t hairHighlight = 0;
+
+    /// Цвет глаз.
+    std::uint8_t eyeColour = 0;
+
+    /// Сравнение нужно затем, чтобы объявлять внешность только при изменении.
+    /// Читать её у игры дёшево, а слать надёжным каналом двадцать раз в секунду
+    /// — нет.
+    [[nodiscard]] friend bool operator==(const PlayerAppearance&,
+                                         const PlayerAppearance&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerAppearance read(ByteReader& reader);
+};
+
 struct PlayerJoined {
     static constexpr MessageId kId = MessageId::PlayerJoined;
 
