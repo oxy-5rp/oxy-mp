@@ -42,6 +42,7 @@ if(WIN32)
         src/game/engine_addresses.cpp
         src/game/environment.cpp
         src/game/file_system.cpp
+        src/game/focus_pause.cpp
         src/game/frontend.cpp
         src/game/hook.cpp
         src/game/hud.cpp

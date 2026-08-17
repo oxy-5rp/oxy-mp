@@ -13,6 +13,7 @@
 #include "game/engine_addresses.hpp"
 #include "game/environment.hpp"
 #include "game/file_system.hpp"
+#include "game/focus_pause.hpp"
 #include "game/hook.hpp"
 #include "game/intro.hpp"
 #include "game/keyboard_layout.hpp"
@@ -955,6 +956,12 @@ void run() {
         // остальное, начинается уже после неё.
         if (!game::skipLandingPage(*engine, error)) {
             spdlog::error("страница выбора режима останется: {}", error);
+        }
+
+        // Пауза при потере фокуса убирается здесь же: в сетевой игре её быть не
+        // должно вовсе, а признак игра выставляет рано.
+        if (!game::keepRunningUnfocused(*engine, error)) {
+            spdlog::error("игра будет вставать на паузу при сворачивании: {}", error);
         }
 
         // Раскладка отпускается как можно раньше: игра навязывает себе en-US,

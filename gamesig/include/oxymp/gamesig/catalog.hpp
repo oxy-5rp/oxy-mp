@@ -196,6 +196,32 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
         .required = false,
     },
     {
+        .id = "focus_pause_write",
+        .description =
+            "Место, где игра решает, ставить ли себя на паузу при потере фокуса. Инструкция "
+            "`setne byte ptr [rip+X]` (7 байт) кладёт признак; правка её убирает, а сам "
+            "признак обнуляется по focus_pause_flag.\n"
+            "В сетевой игре пауза при сворачивании — не удобство, а обман: персонаж остаётся "
+            "в мире, а игрок его не видит; вдобавок после возврата приходится дважды жать "
+            "Escape, чтобы игра отмерла.\n"
+            "Сигнатура взята у CitizenFX (`gta-core-five/BlockLoadSetters.cpp`, «don't set "
+            "pause on focus loss») и совпала на 3889 ровно в одном месте.",
+        .pattern = "0F 95 05 ? ? ? ? E8 ? ? ? ? 48 85 C0",
+        .offset = 0,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
+    {
+        .id = "focus_pause_flag",
+        .description = "Сам признак «ставить паузу при потере фокуса», адресуемый той же "
+                       "инструкцией. Обнуляется вместе с её правкой: одной правки мало — "
+                       "признак мог быть выставлен раньше, чем мы до него добрались.",
+        .pattern = "0F 95 05 ? ? ? ? E8 ? ? ? ? 48 85 C0",
+        .offset = 3,
+        .resolution = Resolution::RipRelative,
+        .expectedMatches = 1,
+    },
+    {
         .id = "keyboard_layout_lock",
         .description =
             "Место, где игра навязывает себе раскладку en-US. При заведении клавиатуры она "

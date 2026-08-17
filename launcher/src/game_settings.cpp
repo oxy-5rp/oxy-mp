@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <cctype>
 #include <charconv>
 #include <fstream>
 #include <sstream>
@@ -26,7 +27,44 @@ constexpr const wchar_t* kSettingsFolders[] = {
 };
 
 /// Поле, которым игра хранит оконный режим.
+///
+/// Ищется без учёта регистра, и это исправление, стоившее всей затеи. Написано
+/// оно было строчными, а игра пишет `<Windowed value="2" />` — с заглавной, — и
+/// поле не находилось ни разу. В журнале это выглядело безобидной строкой «в
+/// настройках игры нет поля оконного режима», а на деле означало, что
+/// безрамочный режим не выставлялся никогда: игра шла обычным окном с рамкой,
+/// теряла вид при сворачивании, а слой интерфейса поверх полноэкранной игры не
+/// показывался вовсе.
 constexpr std::string_view kField = "<windowed value=\"";
+
+/// Ищет подстроку без учёта регистра.
+///
+/// Своими руками, а не через готовое: сравнение без учёта регистра в
+/// стандартной библиотеке есть только для строк целиком, а нам нужно место
+/// внутри файла.
+[[nodiscard]] std::size_t findIgnoringCase(std::string_view where, std::string_view what) {
+    if (what.empty() || where.size() < what.size()) {
+        return std::string::npos;
+    }
+
+    const auto lower = [](char symbol) {
+        return static_cast<char>(
+            std::tolower(static_cast<unsigned char>(symbol)));
+    };
+
+    for (std::size_t at = 0; at + what.size() <= where.size(); ++at) {
+        std::size_t matched = 0;
+        while (matched < what.size() && lower(where[at + matched]) == lower(what[matched])) {
+            ++matched;
+        }
+
+        if (matched == what.size()) {
+            return at;
+        }
+    }
+
+    return std::string::npos;
+}
 
 std::filesystem::path documentsDirectory() {
     PWSTR path = nullptr;
@@ -84,7 +122,7 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
         contents = std::move(buffer).str();
     }
 
-    const std::size_t field = contents.find(kField);
+    const std::size_t field = findIgnoringCase(contents, kField);
     if (field == std::string::npos) {
         note = "в настройках игры нет поля оконного режима";
         return true;
