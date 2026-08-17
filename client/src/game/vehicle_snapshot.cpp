@@ -58,6 +58,24 @@ constexpr int kLightsForcedOn = 2;
 /// Восемнадцать — турбина, двадцать — дым из-под колёс, двадцать два — ксенон.
 /// Спрашивать о них тем же нативом, что и об остальных, нельзя: он отвечает про
 /// выбор из списка, которого у них нет.
+/// Стороны неона в том порядке, в каком их нумерует игра.
+constexpr std::array<shared::NeonSide, 4> kNeonSides{
+    shared::NeonSide::Left,
+    shared::NeonSide::Right,
+    shared::NeonSide::Front,
+    shared::NeonSide::Back,
+};
+
+/// Какими числами игра называет дополнения кузова.
+///
+/// С первого по четырнадцатое: нулевого у неё нет, а больше четырнадцати не
+/// бывает ни у одной модели.
+constexpr int kFirstExtra = 1;
+constexpr int kLastExtra = 14;
+
+/// Место дисков, у которого спрашивают про не заводские покрышки.
+constexpr int kFrontWheelSlot = 23;
+
 constexpr int kToggleModSlots[] = {18, 20, 22};
 
 /// Прочность из числа игры в число протокола.
@@ -131,6 +149,16 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       getLivery_(table.handlerFor(natives::kGetVehicleLivery)),
       setLivery_(table.handlerFor(natives::kSetVehicleLivery)),
       getDirt_(table.handlerFor(natives::kGetVehicleDirtLevel)),
+      getNeonColour_(table.handlerFor(natives::kGetVehicleNeonLightsColour)),
+      setNeonColour_(table.handlerFor(natives::kSetVehicleNeonLightsColour)),
+      neonOn_(table.handlerFor(natives::kIsVehicleNeonLightEnabled)),
+      setNeonOn_(table.handlerFor(natives::kSetVehicleNeonLightEnabled)),
+      getTyreSmoke_(table.handlerFor(natives::kGetVehicleTyreSmokeColor)),
+      setTyreSmoke_(table.handlerFor(natives::kSetVehicleTyreSmokeColor)),
+      extraOn_(table.handlerFor(natives::kIsVehicleExtraTurnedOn)),
+      setExtra_(table.handlerFor(natives::kSetVehicleExtra)),
+      extraExists_(table.handlerFor(natives::kDoesExtraExist)),
+      getModVariation_(table.handlerFor(natives::kGetVehicleModVariation)),
       setDirt_(table.handlerFor(natives::kSetVehicleDirtLevel)),
       getMod_(table.handlerFor(natives::kGetVehicleMod)),
       setMod_(table.handlerFor(natives::kSetVehicleMod)),
@@ -345,6 +373,68 @@ shared::VehicleAppearance VehicleSnapshot::readAppearance(int vehicle) const {
                 appearance.toggleMods |= 1U << static_cast<std::uint32_t>(slot);
             }
         }
+    }
+
+    // Неон: четыре стороны по одной и общий цвет.
+    if (neonOn_ != nullptr) {
+        for (std::size_t side = 0; side < kNeonSides.size(); ++side) {
+            if (invokeNative<bool>(neonOn_, vehicle, static_cast<int>(side))) {
+                appearance.neonSides |= static_cast<std::uint8_t>(kNeonSides[side]);
+            }
+        }
+    }
+
+    if (getNeonColour_ != nullptr) {
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+
+        NativeContext context;
+        context.push(vehicle);
+        context.push(&red);
+        context.push(&green);
+        context.push(&blue);
+        getNeonColour_(context.address());
+
+        appearance.neonRed = static_cast<std::uint8_t>(red);
+        appearance.neonGreen = static_cast<std::uint8_t>(green);
+        appearance.neonBlue = static_cast<std::uint8_t>(blue);
+    }
+
+    if (getTyreSmoke_ != nullptr) {
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+
+        NativeContext context;
+        context.push(vehicle);
+        context.push(&red);
+        context.push(&green);
+        context.push(&blue);
+        getTyreSmoke_(context.address());
+
+        appearance.tyreSmokeRed = static_cast<std::uint8_t>(red);
+        appearance.tyreSmokeGreen = static_cast<std::uint8_t>(green);
+        appearance.tyreSmokeBlue = static_cast<std::uint8_t>(blue);
+    }
+
+    // Дополнения кузова: лестницы, багажники, антенны. Спрашиваются только те,
+    // что у модели есть, — у остальных игра отвечает как придётся.
+    if (extraOn_ != nullptr && extraExists_ != nullptr) {
+        for (int extra = kFirstExtra; extra <= kLastExtra; ++extra) {
+            if (!invokeNative<bool>(extraExists_, vehicle, extra)) {
+                continue;
+            }
+
+            if (invokeNative<bool>(extraOn_, vehicle, extra)) {
+                appearance.extras |= static_cast<std::uint16_t>(1U << (extra - kFirstExtra));
+            }
+        }
+    }
+
+    // Не заводские покрышки — свойство места дисков, а не отдельная вещь.
+    if (getModVariation_ != nullptr) {
+        appearance.customTyres = invokeNative<bool>(getModVariation_, vehicle, kFrontWheelSlot);
     }
 
     return appearance;
@@ -563,6 +653,40 @@ void VehicleSnapshot::applyAppearance(int vehicle,
 
     if (setWindowTint_ != nullptr && appearance.windowTint != shared::kStockMod) {
         invokeNative<void>(setWindowTint_, vehicle, static_cast<int>(appearance.windowTint));
+    }
+
+
+    // Неон ставится по сторонам, а цвет — один на все: так устроено и в игре.
+    if (setNeonOn_ != nullptr) {
+        for (std::size_t side = 0; side < kNeonSides.size(); ++side) {
+            const bool on = (appearance.neonSides &
+                             static_cast<std::uint8_t>(kNeonSides[side])) != 0;
+
+            invokeNative<void>(setNeonOn_, vehicle, static_cast<int>(side), on);
+        }
+    }
+
+    if (setNeonColour_ != nullptr) {
+        invokeNative<void>(setNeonColour_, vehicle, static_cast<int>(appearance.neonRed),
+                           static_cast<int>(appearance.neonGreen),
+                           static_cast<int>(appearance.neonBlue));
+    }
+
+    if (setTyreSmoke_ != nullptr) {
+        invokeNative<void>(setTyreSmoke_, vehicle, static_cast<int>(appearance.tyreSmokeRed),
+                           static_cast<int>(appearance.tyreSmokeGreen),
+                           static_cast<int>(appearance.tyreSmokeBlue));
+    }
+
+    if (setExtra_ != nullptr) {
+        for (int extra = kFirstExtra; extra <= kLastExtra; ++extra) {
+            const bool on =
+                (appearance.extras & static_cast<std::uint16_t>(1U << (extra - kFirstExtra))) != 0;
+
+            // Второй довод у игры перевёрнут: ноль означает «включить». Так у
+            // неё и записано, и спорить с этим негде.
+            invokeNative<void>(setExtra_, vehicle, extra, on ? 0 : 1);
+        }
     }
 
     // Тюнинг ставится только после того, как машине выдан набор деталей: без

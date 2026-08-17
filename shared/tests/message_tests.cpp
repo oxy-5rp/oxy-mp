@@ -489,6 +489,57 @@ TEST_CASE("a very fast body does not wrap around in the snapshot", "[messages]")
     CHECK(received->velocity.y < -500.0F);
 }
 
+TEST_CASE("a vehicle carries its neon, smoke and body extras", "[messages]") {
+    VehicleAppearance sent;
+    sent.id = 5;
+    sent.primaryColour = 12;
+
+    sent.neonSides = NeonSide::Left | NeonSide::Back;
+    sent.neonRed = 10;
+    sent.neonGreen = 20;
+    sent.neonBlue = 30;
+
+    sent.tyreSmokeRed = 40;
+    sent.tyreSmokeGreen = 50;
+    sent.tyreSmokeBlue = 60;
+
+    sent.extras = 0b0000'0000'0000'1001;
+    sent.customTyres = true;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->primaryColour == 12);
+
+    CHECK(has(received->neonSides, NeonSide::Left));
+    CHECK(has(received->neonSides, NeonSide::Back));
+    CHECK_FALSE(has(received->neonSides, NeonSide::Right));
+    CHECK_FALSE(has(received->neonSides, NeonSide::Front));
+
+    CHECK(received->neonRed == 10);
+    CHECK(received->neonGreen == 20);
+    CHECK(received->neonBlue == 30);
+
+    CHECK(received->tyreSmokeRed == 40);
+    CHECK(received->tyreSmokeBlue == 60);
+
+    CHECK(received->extras == 0b0000'0000'0000'1001);
+    CHECK(received->customTyres);
+}
+
+TEST_CASE("a stock vehicle keeps its neon and smoke at the factory white", "[messages]") {
+    // Умолчания важны не меньше заполненного: машина, о внешности которой
+    // ничего не сказано, обязана остаться заводской, а не почернеть.
+    const auto received = roundTrip(VehicleAppearance{});
+
+    REQUIRE(received.has_value());
+    CHECK(received->neonSides == 0);
+    CHECK(received->neonRed == 255);
+    CHECK(received->tyreSmokeRed == 255);
+    CHECK(received->extras == 0);
+    CHECK_FALSE(received->customTyres);
+}
+
 TEST_CASE("VehicleState survives a round trip", "[messages]") {
     VehicleState sent;
     sent.id = 25;

@@ -349,6 +349,19 @@ void VehicleAppearance::write(ByteWriter& writer) const {
     }
 
     writer.writeU32(toggleMods);
+
+    writer.writeU8(customTyres ? 1 : 0);
+
+    writer.writeU8(tyreSmokeRed);
+    writer.writeU8(tyreSmokeGreen);
+    writer.writeU8(tyreSmokeBlue);
+
+    writer.writeU8(neonSides);
+    writer.writeU8(neonRed);
+    writer.writeU8(neonGreen);
+    writer.writeU8(neonBlue);
+
+    writer.writeU16(extras);
 }
 
 VehicleAppearance VehicleAppearance::read(ByteReader& reader) {
@@ -370,6 +383,19 @@ VehicleAppearance VehicleAppearance::read(ByteReader& reader) {
     }
 
     message.toggleMods = reader.readU32();
+
+    message.customTyres = reader.readU8() != 0;
+
+    message.tyreSmokeRed = reader.readU8();
+    message.tyreSmokeGreen = reader.readU8();
+    message.tyreSmokeBlue = reader.readU8();
+
+    message.neonSides = reader.readU8();
+    message.neonRed = reader.readU8();
+    message.neonGreen = reader.readU8();
+    message.neonBlue = reader.readU8();
+
+    message.extras = reader.readU16();
 
     if (message.plate.size() > kMaxPlateLength) {
         message.plate.resize(kMaxPlateLength);

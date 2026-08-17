@@ -888,4 +888,38 @@ inline constexpr std::uint64_t kSetPedHairColor = 0X894EE2587C8D8D1E;
 /// _SET_PED_EYE_COLOR, канонический хеш 0X50B56988B170AFDF.
 inline constexpr std::uint64_t kSetPedEyeColor = 0X348FF3E632DCB635;
 
+// ---------------------------------------------------------------------------
+// Внешность машины: неон, дым из-под колёс, дополнения кузова
+// ---------------------------------------------------------------------------
+
+/// _GET_VEHICLE_NEON_LIGHTS_COLOUR, канонический хеш 0X7619EEE8C886757F.
+inline constexpr std::uint64_t kGetVehicleNeonLightsColour = 0X64FEACF0AD019F1F;
+
+/// _SET_VEHICLE_NEON_LIGHTS_COLOUR, канонический хеш 0X8E0A582209A62695.
+inline constexpr std::uint64_t kSetVehicleNeonLightsColour = 0XEAB8A43F6621850F;
+
+/// _IS_VEHICLE_NEON_LIGHT_ENABLED, канонический хеш 0X8C4B92553E4766A5.
+inline constexpr std::uint64_t kIsVehicleNeonLightEnabled = 0XF1B79038130E3C08;
+
+/// _SET_VEHICLE_NEON_LIGHT_ENABLED, канонический хеш 0X2AA720E4287BF269.
+inline constexpr std::uint64_t kSetVehicleNeonLightEnabled = 0XE62930EC6FAABCA5;
+
+/// GET_VEHICLE_TYRE_SMOKE_COLOR, канонический хеш 0XB635392A4938B3C3.
+inline constexpr std::uint64_t kGetVehicleTyreSmokeColor = 0X9D35AABAEE206518;
+
+/// SET_VEHICLE_TYRE_SMOKE_COLOR, канонический хеш 0XB5BA80F839791C0F.
+inline constexpr std::uint64_t kSetVehicleTyreSmokeColor = 0X5DA0536AEAD1FF31;
+
+/// IS_VEHICLE_EXTRA_TURNED_ON, канонический хеш 0XD2E6822DBFD6C8BD.
+inline constexpr std::uint64_t kIsVehicleExtraTurnedOn = 0X5318DF85BEB6B95F;
+
+/// SET_VEHICLE_EXTRA, канонический хеш 0X7EE3A3C5E4A40CC9.
+inline constexpr std::uint64_t kSetVehicleExtra = 0XD772F6AA66750D2B;
+
+/// DOES_EXTRA_EXIST, канонический хеш 0X1262D55792428154.
+inline constexpr std::uint64_t kDoesExtraExist = 0X579FA5568DE0C2A0;
+
+/// GET_VEHICLE_MOD_VARIATION, канонический хеш 0XB3924ECD70E095DC.
+inline constexpr std::uint64_t kGetVehicleModVariation = 0XEFDD8C5443F6C9E4;
+
 } // namespace oxymp::client::game::natives

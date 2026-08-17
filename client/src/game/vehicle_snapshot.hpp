@@ -123,6 +123,19 @@ private:
     NativeHandler getLivery_ = nullptr;
     NativeHandler setLivery_ = nullptr;
     NativeHandler getDirt_ = nullptr;
+
+    // Неон, дым из-под колёс и дополнения кузова: у alt:V они синхронизируются,
+    // а у нас машина без них выглядела заводской, в чём бы её ни собрал хозяин.
+    NativeHandler getNeonColour_ = nullptr;
+    NativeHandler setNeonColour_ = nullptr;
+    NativeHandler neonOn_ = nullptr;
+    NativeHandler setNeonOn_ = nullptr;
+    NativeHandler getTyreSmoke_ = nullptr;
+    NativeHandler setTyreSmoke_ = nullptr;
+    NativeHandler extraOn_ = nullptr;
+    NativeHandler setExtra_ = nullptr;
+    NativeHandler extraExists_ = nullptr;
+    NativeHandler getModVariation_ = nullptr;
     NativeHandler setDirt_ = nullptr;
     NativeHandler getMod_ = nullptr;
     NativeHandler setMod_ = nullptr;
