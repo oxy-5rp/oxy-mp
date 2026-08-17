@@ -5,6 +5,7 @@
 
 #include <alt_bootstrap.hpp>
 #include <alt_enums.hpp>
+#include <alt_objects.hpp>
 #include <alt_server.hpp>
 #include <alt_shared.hpp>
 
@@ -52,11 +53,12 @@ namespace {
 
 /// Что исполняется в ресурсе первым.
 ///
-/// Четыре встроенных файла подряд, в строгом порядке: перечисления, общая часть
-/// API alt:V, серверная часть, запуск. Порядок не переставляется — каждый
-/// следующий собирается из предыдущего, — и потому склеены они здесь, а не
-/// отдаются движку по одному: одна склейка исполняется одним вызовом и в одном
-/// контексте, а четыре вызова пришлось бы ещё и проверять по отдельности.
+/// Пять встроенных файлов подряд, в строгом порядке: перечисления, общая часть
+/// API alt:V, серверная часть, серверные объекты, запуск. Порядок не
+/// переставляется — каждый следующий собирается из предыдущего, — и потому
+/// склеены они здесь, а не отдаются движку по одному: одна склейка исполняется
+/// одним вызовом и в одном контексте, а пять вызовов пришлось бы ещё и
+/// проверять по отдельности.
 ///
 /// Сами файлы лежат в script-js/js и встраиваются в бинарник при сборке
 /// (cmake/embed_text.cmake). Не рядом с сервером — файл рядом можно потерять,
@@ -66,12 +68,14 @@ namespace {
     std::string script;
 
     script.reserve(embedded::altEnums.size() + embedded::altShared.size() +
-                   embedded::altServer.size() + embedded::altBootstrap.size() + 4U);
+                   embedded::altServer.size() + embedded::altObjects.size() +
+                   embedded::altBootstrap.size() + 5U);
 
     // Перевод строки между файлами обязателен: последняя строка одного и первая
     // другого иначе слились бы в одну.
     for (const std::string_view part : {embedded::altEnums, embedded::altShared,
-                                        embedded::altServer, embedded::altBootstrap}) {
+                                        embedded::altServer, embedded::altObjects,
+                                        embedded::altBootstrap}) {
         script.append(part);
         script.push_back('\n');
     }

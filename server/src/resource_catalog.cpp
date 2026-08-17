@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
+#include <system_error>
 
 namespace oxymp::server {
 namespace {
@@ -38,6 +40,100 @@ namespace {
 
     return key == "required-permissions" || key == "optional-permissions" ||
            key == "client-type" || key == "keep-alive" || key == "config";
+}
+
+/// Совпадает ли имя с шаблоном из `*` и `?`.
+///
+/// Своё сравнение, а не чужая библиотека: шаблоны здесь простые, а
+/// std::regex стоил бы и зависимости, и заметного времени на каждом из двух
+/// тысяч файлов.
+///
+/// Написано перебором с возвратом, а не рекурсией: шаблон приходит из файла
+/// настроек, а строка вида `*a*a*a*a*b` на рекурсии разворачивается в дерево
+/// глубиной в длину имени.
+[[nodiscard]] bool matchesPattern(std::string_view name, std::string_view pattern) {
+    std::size_t nameAt = 0;
+    std::size_t patternAt = 0;
+
+    // Куда возвращаться, если дальше не сошлось: последняя встреченная звёздочка
+    // и то, сколько знаков она на тот момент съела.
+    std::size_t starAt = std::string_view::npos;
+    std::size_t starTook = 0;
+
+    while (nameAt < name.size()) {
+        if (patternAt < pattern.size() &&
+            (pattern[patternAt] == '?' || pattern[patternAt] == name[nameAt])) {
+            ++nameAt;
+            ++patternAt;
+        } else if (patternAt < pattern.size() && pattern[patternAt] == '*') {
+            starAt = patternAt;
+            starTook = nameAt;
+            ++patternAt;
+        } else if (starAt != std::string_view::npos) {
+            // Не сошлось — отдаём звёздочке ещё один знак и пробуем снова.
+            patternAt = starAt + 1;
+            ++starTook;
+            nameAt = starTook;
+        } else {
+            return false;
+        }
+    }
+
+    // Хвост из одних звёздочек считается совпавшим: он вправе съесть пустоту.
+    while (patternAt < pattern.size() && pattern[patternAt] == '*') {
+        ++patternAt;
+    }
+
+    return patternAt == pattern.size();
+}
+
+/// Раскрывает шаблон в перечень файлов, лежащих внутри ресурса.
+///
+/// Обход рекурсивный, и звёздочка косую черту пересекает. Так это устроено в
+/// alt:V: `client-files = ['client/*']` означает там весь каталог `client` со
+/// всем, что в нём лежит, — а лежит в нём собранная страница интерфейса из
+/// полутора тысяч файлов по десятку вложенных каталогов. Останавливай
+/// звёздочка на косой черте — тот же перечень пришлось бы выписывать вручную
+/// и дописывать после каждой пересборки страницы.
+[[nodiscard]] std::vector<std::string> expandPattern(const std::filesystem::path& root,
+                                                     std::string_view pattern) {
+    std::vector<std::string> found;
+
+    std::error_code failure;
+    auto walk = std::filesystem::recursive_directory_iterator{
+        root, std::filesystem::directory_options::skip_permission_denied, failure};
+
+    if (failure) {
+        return found;
+    }
+
+    for (const auto& entry : walk) {
+        if (!entry.is_regular_file(failure) || failure) {
+            continue;
+        }
+
+        const std::filesystem::path relative = std::filesystem::relative(entry.path(), root,
+                                                                        failure);
+        if (failure) {
+            continue;
+        }
+
+        // Путь приводится к косым чертям вперёд: в описании их пишут так, а
+        // filesystem на Windows отдаёт обратные, и сравнение не сошлось бы ни
+        // разу.
+        std::string name = relative.generic_string();
+
+        if (matchesPattern(name, pattern)) {
+            found.push_back(std::move(name));
+        }
+    }
+
+    // Порядок обхода каталога системой не задан, а перечень уходит в отпечаток
+    // раздачи. Без сортировки один и тот же ресурс давал бы разный список от
+    // запуска к запуску.
+    std::ranges::sort(found);
+
+    return found;
 }
 
 /// Остаётся ли путь внутри корня ресурса.
@@ -159,6 +255,40 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
             complaints.push_back(std::format("\"{}\": не сказано, что запускать (main)", name));
             continue;
         }
+
+        // Шаблоны раскрываются в настоящие имена.
+        //
+        // Делается это здесь, до всех проверок ниже, и потому дальше по коду
+        // никакой разницы между шаблоном и именем уже нет: и проверка на выход
+        // за пределы ресурса, и проверка на существование файла работают с
+        // готовым перечнем.
+        std::vector<std::string> expanded;
+
+        for (const std::string& file : resource.clientFiles) {
+            if (file.find_first_of("*?") == std::string::npos) {
+                expanded.push_back(file);
+                continue;
+            }
+
+            std::vector<std::string> matched = expandPattern(root, file);
+
+            if (matched.empty()) {
+                complaints.push_back(
+                    std::format("\"{}\": под \"{}\" не подошёл ни один файл", name, file));
+                continue;
+            }
+
+            expanded.insert(expanded.end(), std::make_move_iterator(matched.begin()),
+                            std::make_move_iterator(matched.end()));
+        }
+
+        // Один файл мог подойти сразу под два шаблона — раздавать его дважды
+        // незачем.
+        std::ranges::sort(expanded);
+        const auto duplicates = std::ranges::unique(expanded);
+        expanded.erase(duplicates.begin(), duplicates.end());
+
+        resource.clientFiles = std::move(expanded);
 
         // Клиентский вход раздаётся сам собой: перечислять его ещё и в списке
         // файлов — лишняя работа для хозяина и лишний повод забыть.

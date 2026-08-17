@@ -6,20 +6,34 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 
 namespace oxymp::server {
 namespace {
 
 /// Читает файл целиком. Пусто — прочитать не вышло.
-std::vector<std::uint8_t> readFile(const std::filesystem::path& path) {
+/// Читает файл целиком. Пусто — прочитать не удалось.
+///
+/// Ответ обёрнут в optional, а не отдан пустым вектором, и это не украшательство.
+/// Пустой файл — законный файл: в собранной странице интерфейса такие есть
+/// (заготовка значка, до которой не дошли руки у художника). Пока «не открылся»
+/// и «пуст» отвечали одинаково, сервер жаловался на исправный файл и не раздавал
+/// его вовсе — а клиент потом не находил его у себя и показывал страницу с
+/// дырой, и по журналу это выглядело виной клиента.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> readFile(
+    const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) {
-        return {};
+        return std::nullopt;
     }
 
     const std::streamoff size = file.tellg();
-    if (size <= 0) {
-        return {};
+    if (size < 0) {
+        return std::nullopt;
+    }
+
+    if (size == 0) {
+        return std::vector<std::uint8_t>{};
     }
 
     file.seekg(0);
@@ -28,7 +42,7 @@ std::vector<std::uint8_t> readFile(const std::filesystem::path& path) {
     file.read(reinterpret_cast<char*>(data.data()), size);
 
     if (!file) {
-        return {};
+        return std::nullopt;
     }
 
     return data;
@@ -57,13 +71,13 @@ void ResourceStore::load(const std::filesystem::path& directory) {
 
         const std::filesystem::path& path = entry.path();
 
-        const std::vector<std::uint8_t> plain = readFile(path);
-        if (plain.empty()) {
+        const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
+        if (!plain) {
             spdlog::warn("ресурс {} прочитать не удалось — пропускаем", path.filename().string());
             continue;
         }
 
-        std::vector<std::uint8_t> packed = shared::Vault::pack(plain, key);
+        std::vector<std::uint8_t> packed = shared::Vault::pack(*plain, key);
 
         // Отпечаток считается по зашифрованному, а не по исходному, и это
         // важно: клиент проверяет им то, что скачал, — а скачивает он именно
@@ -97,12 +111,12 @@ void ResourceStore::load(const std::filesystem::path& directory) {
 }
 
 bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
-    const std::vector<std::uint8_t> plain = readFile(path);
-    if (plain.empty()) {
+    const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
+    if (!plain) {
         return false;
     }
 
-    std::vector<std::uint8_t> packed = shared::Vault::pack(plain, shared::Vault::builtInKey());
+    std::vector<std::uint8_t> packed = shared::Vault::pack(*plain, shared::Vault::builtInKey());
     const std::string hash = shared::fingerprint(packed);
 
     Item item;

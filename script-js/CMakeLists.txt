@@ -36,6 +36,7 @@ include(embed_text)
 oxymp_embed_text(oxymp_script_js js/alt_enums.js altEnums oxymp::script::js::embedded)
 oxymp_embed_text(oxymp_script_js js/alt_shared.js altShared oxymp::script::js::embedded)
 oxymp_embed_text(oxymp_script_js js/alt_server.js altServer oxymp::script::js::embedded)
+oxymp_embed_text(oxymp_script_js js/alt_objects.js altObjects oxymp::script::js::embedded)
 oxymp_embed_text(oxymp_script_js js/alt_bootstrap.js altBootstrap oxymp::script::js::embedded)
 
 # Динамическая библиотека времени выполнения — та же, что у libnode.dll и у

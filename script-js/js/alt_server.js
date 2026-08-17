@@ -219,6 +219,108 @@
         }
     }
 
+    // --- Вызовы с ответом (RPC) ----------------------------------------------
+    //
+    // Событие уходит и забывается; вызов уходит и ждёт ответа. Разница для
+    // игрового режима существенная: «покажи окно» — событие, а «что игрок выбрал
+    // в этом окне» — вызов, и писать второе поверх первого пришлось бы с
+    // собственными номерами запросов в каждом ресурсе.
+
+    /// Сколько ждать ответа, прежде чем считать вызов пропавшим.
+    ///
+    /// Ждать бесконечно нельзя: обещание, которое никогда не разрешится, — это
+    /// утечка, и ресурс, сделавший вызов в цикле, съел бы память сервера. Пять
+    /// секунд — столько же, сколько ждёт alt:V.
+    const kRpcTimeout = 5000;
+
+    /// Обработчики вызовов по имени. По одному на имя, в отличие от событий:
+    /// ответ может быть только один, и двое отвечающих означали бы гонку.
+    const answerers = new Map();
+
+    /// Вызовы, ожидающие ответа, по номеру запроса.
+    const pending = new Map();
+    let nextCall = 1;
+
+    function onRpc(name, handler) {
+        if (typeof handler !== 'function') {
+            throw new TypeError('alt.onRpc ждёт имя вызова и обработчик');
+        }
+
+        if (answerers.has(name)) {
+            logWarning(`обработчик вызова «${name}» заменён: отвечать может только один`);
+        }
+
+        answerers.set(name, handler);
+    }
+
+    function offRpc(name) {
+        answerers.delete(name);
+    }
+
+    /// Отвечает на вызов, пришедший от клиента.
+    function answerRpc(player, id, name, args) {
+        const handler = answerers.get(name);
+
+        const reply = (ok, value) =>
+            native.emitClient(player, '__oxymp:rpc:answer',
+                              encodeArgs([id, ok, ok ? value : String(value)]));
+
+        if (handler === undefined) {
+            reply(false, `на вызов «${name}» никто не отвечает`);
+            return;
+        }
+
+        // Обработчик волен вернуть и обещание, и готовое значение: Promise.resolve
+        // сводит оба случая к одному, и ветвиться по типу не приходится.
+        Promise.resolve()
+            .then(() => handler(player, ...args))
+            .then((value) => reply(true, value === undefined ? null : value),
+                  (failure) => {
+                      logError(`ошибка в обработчике вызова «${name}»:`, failure);
+                      reply(false, failure?.message ?? failure);
+                  });
+    }
+
+    /// Делает вызов клиенту и ждёт ответа.
+    function callClient(player, name, args) {
+        return new Promise((resolve, reject) => {
+            const id = nextCall++;
+
+            const timer = setTimeout(() => {
+                pending.delete(id);
+                reject(new Error(`вызов «${name}» остался без ответа за ${kRpcTimeout} мс`));
+            }, kRpcTimeout);
+
+            pending.set(id, { resolve, reject, timer });
+
+            native.emitClient(player, '__oxymp:rpc:call', encodeArgs([id, name, args]));
+        });
+    }
+
+    /// Принимает ответ на свой вызов.
+    function takeAnswer(id, ok, value) {
+        const waiting = pending.get(id);
+        if (waiting === undefined) {
+            // Ответ на вызов, которого уже никто не ждёт: он опоздал и был
+            // отброшен по времени. Это не ошибка — просто поздно.
+            return;
+        }
+
+        clearTimeout(waiting.timer);
+        pending.delete(id);
+
+        if (ok) {
+            waiting.resolve(value);
+        } else {
+            waiting.reject(new Error(String(value)));
+        }
+    }
+
+    onClient('__oxymp:rpc:call', (player, id, name, args) =>
+        answerRpc(player, id, name, Array.isArray(args) ? args : []));
+
+    onClient('__oxymp:rpc:answer', (_player, id, ok, value) => takeAnswer(id, ok, value));
+
     // --- Журнал --------------------------------------------------------------
 
     function log(...args) {
@@ -355,6 +457,10 @@
         },
         emitRaw: {
             value(name, payload) { native.emitClient(this, name, String(payload)); },
+        },
+        /// Вызов клиенту с ответом. Обещание — как в alt:V.
+        emitRpc: {
+            value(name, ...args) { return callClient(this, name, args); },
         },
         // `kick` не переопределяется: ядро уже даёт его с той же подписью, что и
         // alt:V, — `player.kick(reason)`.
@@ -502,6 +608,9 @@
         offClient,
         emitClient,
         emitAllClients,
+        onRpc,
+        offRpc,
+        emitRpc: (player, name, ...args) => callClient(player, name, args),
         emitClientRaw: (target, name, payload) => target.emitRaw(name, payload),
 
         log,
@@ -529,21 +638,14 @@
         broadcast: (text) => native.broadcast(String(text)),
 
         // Того, чего ещё нет. Отказом, а не тишиной: см. absent().
-        Blip: absent('alt.Blip'),
-        PointBlip: absent('alt.PointBlip'),
-        Checkpoint: absent('alt.Checkpoint'),
-        Colshape: absent('alt.Colshape'),
-        ColshapeSphere: absent('alt.ColshapeSphere'),
-        ColshapeCylinder: absent('alt.ColshapeCylinder'),
-        ColshapeCuboid: absent('alt.ColshapeCuboid'),
-        ColshapePolygon: absent('alt.ColshapePolygon'),
+        //
+        // Метки, зоны, чекпоинты, маркеры и голосовые каналы кладёт сюда
+        // alt_objects.js — он исполняется следом и заменяет их настоящими.
         Ped: absent('alt.Ped'),
         Object: absent('alt.Object'),
         NetworkObject: absent('alt.NetworkObject'),
         VirtualEntity: absent('alt.VirtualEntity'),
         VirtualEntityGroup: absent('alt.VirtualEntityGroup'),
-        VoiceChannel: absent('alt.VoiceChannel'),
-        Marker: absent('alt.Marker'),
         HttpClient: absent('alt.HttpClient'),
         WebSocketClient: absent('alt.WebSocketClient'),
         Resource: absent('alt.Resource'),

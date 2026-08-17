@@ -176,3 +176,155 @@ TEST_CASE("a missing client file costs the file, not the resource", "[server][re
     CHECK(catalog.all().front().clientFiles.front() == "есть.txt");
     CHECK(complaints.size() == 1);
 }
+
+TEST_CASE("a resource is read from a resource.toml too", "[server][resources]") {
+    const Sandbox sandbox;
+
+    // Так описание называется у alt:V, и под этим именем лежат описания всех
+    // готовых игровых режимов.
+    sandbox.write("main/resource.toml", "type = 'js'\n"
+                                        "main = 'server/index.cjs'\n"
+                                        "client-main = 'client/index.cjs'\n"
+                                        "deps = []\n");
+    sandbox.write("main/server/index.cjs", "// сервер");
+    sandbox.write("main/client/index.cjs", "// клиент");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    REQUIRE(catalog.all().size() == 1);
+    CHECK(catalog.all().front().type == "js");
+    CHECK(catalog.all().front().main == "server/index.cjs");
+}
+
+TEST_CASE("our own description wins over the alt:V one", "[server][resources]") {
+    const Sandbox sandbox;
+
+    // В каталоге, где по недосмотру оказались оба, побеждает написанное для нас,
+    // а не притащенное вместе с чужим режимом.
+    sandbox.write("both/resource.cfg", "type: js\nmain: наш.js\n");
+    sandbox.write("both/resource.toml", "type = 'js'\nmain = 'чужой.js'\n");
+    sandbox.write("both/наш.js", "// сервер");
+
+    ResourceCatalog catalog;
+    (void)catalog.load(sandbox.root(), {"both"});
+
+    REQUIRE(catalog.all().size() == 1);
+    CHECK(catalog.all().front().main == "наш.js");
+}
+
+TEST_CASE("a wildcard in client files takes the whole directory", "[server][resources]") {
+    const Sandbox sandbox;
+
+    // `client-files = ['client/*']` у alt:V означает весь каталог со всем, что в
+    // нём лежит: собранная страница интерфейса — это полторы тысячи файлов по
+    // десятку вложенных каталогов, и выписывать их руками пришлось бы заново
+    // после каждой пересборки.
+    sandbox.write("main/resource.toml", "type = 'js'\n"
+                                        "main = 'server/index.cjs'\n"
+                                        "client-files = [ 'client/*' ]\n");
+    sandbox.write("main/server/index.cjs", "// сервер");
+    sandbox.write("main/client/index.cjs", "// клиент");
+    sandbox.write("main/client/ui/index.html", "<b>страница</b>");
+    sandbox.write("main/client/ui/assets/app.js", "// сборка");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    REQUIRE(catalog.all().size() == 1);
+
+    const std::vector<std::string>& files = catalog.all().front().clientFiles;
+
+    // Звёздочка пересекает косую черту: иначе вложенные каталоги страницы не
+    // попали бы в раздачу.
+    REQUIRE(files.size() == 3);
+    CHECK(std::ranges::find(files, "client/ui/assets/app.js") != files.end());
+}
+
+TEST_CASE("a wildcard does not reach outside the resource", "[server][resources]") {
+    const Sandbox sandbox;
+
+    sandbox.write("main/resource.cfg", "type: js\n"
+                                       "main: index.js\n"
+                                       "client-files: *\n");
+    sandbox.write("main/index.js", "// сервер");
+    sandbox.write("secret.txt", "чужое");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    REQUIRE(catalog.all().size() == 1);
+
+    // Обход идёт от корня ресурса, и выйти за него звёздочке не по чему.
+    for (const std::string& file : catalog.all().front().clientFiles) {
+        CHECK(file.find("secret") == std::string::npos);
+    }
+}
+
+TEST_CASE("a wildcard matching nothing is reported", "[server][resources]") {
+    const Sandbox sandbox;
+
+    // Промолчать нельзя: хозяин, ошибшийся в шаблоне, иначе получил бы сессию,
+    // в которой страница интерфейса просто не показывается, и без единой строки
+    // о том, почему.
+    sandbox.write("main/resource.cfg", "type: js\n"
+                                       "main: index.js\n"
+                                       "client-files: html/*.html\n");
+    sandbox.write("main/index.js", "// сервер");
+
+    ResourceCatalog catalog;
+    const std::vector<std::string> complaints = catalog.load(sandbox.root(), {"main"});
+
+    REQUIRE(complaints.size() == 1);
+    CHECK(complaints.front().find("не подошёл ни один файл") != std::string::npos);
+}
+
+TEST_CASE("a wildcard picks files by extension", "[server][resources]") {
+    const Sandbox sandbox;
+
+    sandbox.write("main/resource.cfg", "type: js\n"
+                                       "main: index.js\n"
+                                       "client-files: html/*.html\n");
+    sandbox.write("main/index.js", "// сервер");
+    sandbox.write("main/html/hud.html", "<b>да</b>");
+    sandbox.write("main/html/menu.html", "<b>да</b>");
+    sandbox.write("main/html/style.css", "/* нет */");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    const std::vector<std::string>& files = catalog.all().front().clientFiles;
+
+    REQUIRE(files.size() == 2);
+    CHECK(std::ranges::find(files, "html/style.css") == files.end());
+}
+
+TEST_CASE("a file matched by two patterns is served once", "[server][resources]") {
+    const Sandbox sandbox;
+
+    sandbox.write("main/resource.cfg", "type: js\n"
+                                       "main: index.js\n"
+                                       "client-files: html/*, html/hud.html\n");
+    sandbox.write("main/index.js", "// сервер");
+    sandbox.write("main/html/hud.html", "<b>да</b>");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    REQUIRE(catalog.all().front().clientFiles.size() == 1);
+}
+
+TEST_CASE("the alt:V dependency list is read", "[server][resources]") {
+    const Sandbox sandbox;
+
+    sandbox.write("main/resource.toml", "type = 'js'\n"
+                                        "main = 'index.js'\n"
+                                        "deps = [ 'core', 'chat' ]\n");
+    sandbox.write("main/index.js", "// сервер");
+
+    ResourceCatalog catalog;
+    CHECK(catalog.load(sandbox.root(), {"main"}).empty());
+
+    REQUIRE(catalog.all().front().dependencies.size() == 2);
+    CHECK(catalog.all().front().dependencies.front() == "core");
+}
