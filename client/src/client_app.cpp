@@ -313,19 +313,18 @@ void setUpLogging() {
 
 /// Настройки из файла сессии.
 ///
-/// Запасной путь для случая, когда модуль внедрён в уже запущенную игру
-/// (режим --attach лаунчера): окружения такой процесс от лаунчера не получал,
-/// поэтому адрес сервера и имя берутся из файла, который лаунчер кладёт рядом
-/// с журналом.
-void applySessionFile(Startup& startup) {
+/// Файл лаунчер кладёт рядом с журналом перед каждым запуском. Отвечает, нашёлся
+/// ли он: не нашёлся — значит игру подняли мимо лаунчера, и спрашивать остаётся
+/// только окружение.
+bool applySessionFile(Startup& startup) {
     const std::string localAppData = environmentValue(L"LOCALAPPDATA");
     if (localAppData.empty()) {
-        return;
+        return false;
     }
 
     std::ifstream file(std::filesystem::path{localAppData} / "oxyMP" / "session.cfg");
     if (!file) {
-        return;
+        return false;
     }
 
     std::string line;
@@ -348,14 +347,29 @@ void applySessionFile(Startup& startup) {
             startup.connection.nickname = value;
         }
     }
+
+    return true;
 }
 
 Startup readSettings() {
     Startup startup;
 
-    // Файл читается первым, окружение — вторым и имеет приоритет: когда игру
-    // запускает лаунчер, окружение свежее файла, оставшегося от прошлого раза.
-    applySessionFile(startup);
+    // Файл — источник правды, окружение — запасной путь, и порядок этот
+    // выстрадан.
+    //
+    // Игру запускает не наш лаунчер, а Rockstar Games Launcher, и окружение она
+    // наследует от него. Тот живёт куда дольше одного запуска: подняв его
+    // однажды с адресом сервера, мы получаем этот же адрес во всех последующих
+    // запусках — в том числе тогда, когда игрок не выбирал ничего. Ровно так
+    // игра и уезжала «сама» на сервер прошлого раза, минуя меню и удержание
+    // мира.
+    //
+    // Файл же лаунчер пишет заново перед каждым запуском, и пустая строка в нём
+    // означает именно пустую строку. Нашёлся файл — окружение не спрашиваем
+    // вовсе: свежее его в нём быть уже не может.
+    if (applySessionFile(startup)) {
+        return startup;
+    }
 
     startup.addressGiven |=
         applyServerAddress(environmentValue(L"OXYMP_SERVER"), startup.connection);
