@@ -37,6 +37,12 @@ public:
         /// Таблица нативов игры. Пусто — клиент запущен без игры (бот).
         const game::NativeTable* natives = nullptr;
 
+        /// Наш номер в сессии. −1 — сервер ещё не принял.
+        ///
+        /// Обработчиком, а не числом: номер меняется при переподключении, а
+        /// машина спрашивает его тогда, когда он ей понадобился.
+        std::function<std::int32_t()> localPlayerId;
+
         /// Завести окно интерфейса. Ноль — отказ.
         std::function<std::uint32_t(std::string_view resource, std::string_view url)> createView;
 

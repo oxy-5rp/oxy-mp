@@ -28,6 +28,29 @@ namespace oxymp::client::js {
         .ToLocalChecked();
 }
 
+/// Часть методов V8 нельзя звать вовсе — они определены дважды.
+///
+/// `v8::Value::IsNullOrUndefined` и `v8::String::Utf8Value` объявлены
+/// экспортируемыми из библиотеки, но определены прямо в заголовке. Подключая
+/// Node отдельной библиотекой, их тело получаешь дважды — своё и
+/// импортированное, — и линковщик отказывается выбирать (LNK2005).
+///
+/// Обходятся они своими помощниками: вместо `IsNullOrUndefined()` — isNothing
+/// ниже, вместо `Utf8Value` — fromJs. Разобрать первый на `IsNull()` и
+/// `IsUndefined()` не выйдет: они определены дважды точно так же.
+
+/// Пусто ли значение — null, undefined или вовсе нет.
+///
+/// Через StrictEquals, а не через IsNull/IsUndefined: последние определены и в
+/// заголовке, и в библиотеке, и линковщик отказывается выбирать между ними
+/// (см. выше). StrictEquals же живёт только в библиотеке, и сравнение с
+/// одиночками даёт ровно тот же ответ: в JavaScript `null === null` и
+/// `undefined === undefined`.
+[[nodiscard]] inline bool isNothing(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+    return value.IsEmpty() || value->StrictEquals(v8::Null(isolate)) ||
+           value->StrictEquals(v8::Undefined(isolate));
+}
+
 /// Строка из V8. Всё, что строкой не является, приводится к ней по правилам JS.
 ///
 /// Написано вручную, а не через `v8::String::Utf8Value`, и это не вкусовщина.

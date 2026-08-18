@@ -34,6 +34,9 @@ struct Recorder {
 
     std::vector<std::string> createdViews;
     std::uint32_t nextView = 1;
+
+    /// Каким номером клиент отвечает на вопрос машины.
+    std::int32_t selfId = -1;
 };
 
 Recorder& recorder() {
@@ -70,6 +73,10 @@ std::int32_t onCallNative(void*, std::uint64_t hash, const std::uint64_t* argume
 
     results[0] = kept.nativeAnswer;
     return 1;
+}
+
+std::int32_t onLocalPlayerId(void*) {
+    return recorder().selfId;
 }
 
 OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
@@ -121,6 +128,7 @@ private:
         host_.log = &onLog;
         host_.emitServer = &onEmitServer;
         host_.callNative = &onCallNative;
+        host_.localPlayerId = &onLocalPlayerId;
         host_.readResourceFile = &onReadResourceFile;
         host_.createWebView = &onCreateWebView;
         host_.destroyWebView = &onDestroyWebView;
@@ -152,14 +160,14 @@ private:
 /// Каталог с ресурсом на диске, убирающий за собой.
 class Sandbox {
 public:
-    explicit Sandbox(std::string_view script) {
+    explicit Sandbox(std::string_view script, std::string_view name = "index.js") {
         root_ = std::filesystem::temp_directory_path() /
                 ("oxymp-client-js-" + std::to_string(::GetTickCount64()) + "-" +
                  std::to_string(counter()++));
 
         std::filesystem::create_directories(root_);
 
-        std::ofstream file{root_ / "index.js", std::ios::binary};
+        std::ofstream file{root_ / name, std::ios::binary};
         file << script;
     }
 
@@ -186,14 +194,15 @@ private:
 ///
 /// Прокрутка обязательна: без неё не сработает ни один таймер и не разрешится ни
 /// одно обещание — ровно как в игре.
-[[nodiscard]] bool run(std::string_view name, std::string_view script) {
+[[nodiscard]] bool run(std::string_view name, std::string_view script,
+                       std::string_view entry = "index.js") {
     static std::vector<std::unique_ptr<Sandbox>> kept;
 
-    kept.push_back(std::make_unique<Sandbox>(script));
+    kept.push_back(std::make_unique<Sandbox>(script, entry));
 
     const std::string root = kept.back()->root();
 
-    if (Engine::instance()->startResource(text(name), text(root), text("index.js")) == 0) {
+    if (Engine::instance()->startResource(text(name), text(root), text(entry)) == 0) {
         return false;
     }
 
@@ -505,12 +514,102 @@ TEST_CASE("a deleted synced key stops being readable", "[client][js]") {
     CHECK(said("осталось: undefined"));
 }
 
-TEST_CASE("entity synced meta refuses instead of answering nothing", "[client][js]") {
+TEST_CASE("the local player knows its session number at once", "[client][js]") {
+    // Спрашивается у клиента, а не присылается событием: ресурс читает номер
+    // первыми же строками, ещё до того, как до него дойдёт хоть одно событие.
+    recorder().selfId = 7;
+
+    REQUIRE(run("selfid", "const alt = require('alt-client');\n"
+                          "alt.log('я — номер ' + alt.Player.local.id);\n"));
+
+    CHECK(said("я — номер 7"));
+}
+
+TEST_CASE("the local player reads its own synced meta", "[client][js]") {
+    recorder().selfId = 7;
+
+    REQUIRE(run("selfmeta",
+                "const alt = require('alt-client');\n"
+                "alt.onServer('спроси', () =>\n"
+                "    alt.log('моё имя: ' + alt.Player.local.getSyncedMeta('имя')));\n"));
+
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes("[\"player\",7,\"имя\",\"Иван\"]"));
+    Engine::instance()->dispatchServerEvent(text("спроси"), bytes("[]"));
+
+    CHECK(said("моё имя: Иван"));
+}
+
+TEST_CASE("meta of an entity without a number refuses out loud", "[client][js]") {
     // undefined выглядело бы как «ключа нет», и режим искал бы ошибку на
     // сервере, где её нет.
     REQUIRE(run("metaentity", "const alt = require('alt-client');\n"
-                              "try { alt.Player.local.getSyncedMeta('x'); }\n"
+                              "const чужой = new alt.Ped(123);\n"
+                              "try { чужой.getSyncedMeta('x'); }\n"
                               "catch (e) { alt.log('отказ meta: ' + e.message); }\n"));
 
-    CHECK(said("отказ meta: entity.getSyncedMeta: номеров сессии на клиенте ещё нет"));
+    CHECK(said("отказ meta: entity.getSyncedMeta: номер этой сущности клиенту неизвестен"));
+}
+
+TEST_CASE("a resource written as an ES module runs", "[client][js]") {
+    // Клиентская половина у alt:V почти всегда модуль ES: собранный бандл
+    // начинается с `import * as alt from 'alt-client'`. Загрузчик CommonJS
+    // спотыкается о первую же такую строку — «Cannot use import statement
+    // outside a module», — и на этом чужой режим кончался.
+    REQUIRE(run("esm", "import * as alt from 'alt-client';\n"
+                       "import { Vector3 } from 'alt-shared';\n"
+                       "alt.log('модуль ES поднялся, длина ' + new Vector3(0, 3, 4).length);\n",
+                "index.mjs"));
+
+    CHECK(said("модуль ES поднялся, длина 5"));
+}
+
+TEST_CASE("named imports of natives work in an ES module", "[client][js]") {
+    // `import { getGameTimer } from 'natives'` — так их и тянут собранные
+    // бандлы. Именованный экспорт обязан быть тем же самым, что и через
+    // посредник: иначе получились бы два разных натива с одним именем.
+    recorder().nativeKnown = true;
+    recorder().nativeAnswer = 999;
+
+    REQUIRE(run("esmnatives", "import { getGameTimer } from 'natives';\n"
+                              "import * as alt from 'alt-client';\n"
+                              "alt.log('время ' + getGameTimer());\n",
+                "index.mjs"));
+
+    CHECK(recorder().nativeHash == 0x1DD05E817C89C737ULL);
+    CHECK(said("время 999"));
+}
+
+TEST_CASE("an ES module that throws is reported as a failed resource", "[client][js]") {
+    // Ошибка в первой строке чужого ресурса обязана попасть в журнал отказом
+    // ресурса, а не необработанным отказом обещания спустя кадр, когда связать
+    // её уже не с чем.
+    CHECK_FALSE(run("esmbroken", "import * as alt from 'alt-client';\n"
+                                 "throw new Error('нарочно');\n",
+                    "index.mjs"));
+
+    CHECK(said("нарочно"));
+}
+
+TEST_CASE("a module disguised as commonjs still runs", "[client][js]") {
+    // Собранный бандл alt:V зовётся `index.cjs`, а внутри у него `import`.
+    // Node глядит на расширение, объявляет файл CommonJS и жалуется «Cannot use
+    // import statement outside a module» — на этом чужой режим и кончался.
+    REQUIRE(run("disguised", "import * as alt from 'alt-client';\n"
+                             "alt.log('переодетый модуль поднялся');\n",
+                "index.cjs"));
+
+    CHECK(said("переодетый модуль поднялся"));
+}
+
+TEST_CASE("a real commonjs file is left alone", "[client][js]") {
+    // Обратная сторона: проверка на модуль не должна принимать за него обычный
+    // файл CommonJS — тот сломался бы, объявленный модулем, на первом же
+    // `module.exports`.
+    REQUIRE(run("realcjs", "const alt = require('alt-client');\n"
+                           "module.exports = {};\n"
+                           "alt.log('обычный CommonJS поднялся');\n",
+                "index.cjs"));
+
+    CHECK(said("обычный CommonJS поднялся"));
 }

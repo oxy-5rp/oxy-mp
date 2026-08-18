@@ -181,7 +181,23 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
 
         loaded = !node::LoadEnvironment(setup_->env(), buildBootstrap()).IsEmpty();
 
-        if (!loaded) {
+        // Точка входа грузится обещанием: к этой строке она ещё не исполнилась.
+        //
+        // Ждём здесь, а не отдаём наверх «поднимется когда-нибудь»: хозяину
+        // сервера нужно сказать, поднялся ресурс или нет, а ошибка в его первой
+        // строке должна попасть в журнал отказом ресурса — не необработанным
+        // отказом обещания спустя такт, когда связать её уже не с чем.
+        // Уборка при отказе — не здесь: она разбирает изолят, а делать это можно
+        // только после того, как охранники на стеке сняты. Здесь только признак.
+        const bool started = loaded && awaitStart(context, isolate, error);
+
+        if (loaded && !started) {
+            loaded = false;
+
+            handlers_.clear();
+            playerShape_.Reset();
+            vehicleShape_.Reset();
+        } else if (!loaded) {
             if (caught.HasCaught()) {
                 error = fromJs(isolate, caught.Exception());
 
@@ -212,6 +228,68 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
     }
 
     return true;
+}
+
+bool Resource::awaitStart(v8::Local<v8::Context> context, v8::Isolate* isolate,
+                          std::string& error) {
+    // Предел нужен не от медленного ресурса, а от зависшего: обещание, которое
+    // никогда не разрешится, оставило бы нас крутиться навсегда. Двухсот
+    // оборотов хватает с большим запасом — загрузчик модулей укладывается в
+    // единицы, а тяжёлое ресурс делает уже после подъёма.
+    constexpr int kStartSpins = 200;
+
+    const v8::Local<v8::Object> global = context->Global();
+
+    for (int spin = 0; spin < kStartSpins; ++spin) {
+        (void)uv_run(setup_->event_loop(), UV_RUN_NOWAIT);
+        platform_->DrainTasks(isolate);
+        isolate->PerformMicrotaskCheckpoint();
+
+        v8::Local<v8::Value> state;
+        if (!global->Get(context, toJs(isolate, "__oxympStart")).ToLocal(&state) ||
+            !state->IsObject()) {
+            error = "слой не объявил признака запуска";
+            return false;
+        }
+
+        const v8::Local<v8::Object> started = state.As<v8::Object>();
+
+        v8::Local<v8::Value> done;
+        if (!started->Get(context, toJs(isolate, "готов")).ToLocal(&done) ||
+            !done->BooleanValue(isolate)) {
+            continue;
+        }
+
+        v8::Local<v8::Value> failure;
+        if (!started->Get(context, toJs(isolate, "ошибка")).ToLocal(&failure)) {
+            return true;
+        }
+
+        // Пустота проверяется через StrictEquals: IsNull и IsUndefined
+        // определены и в заголовке V8, и в libnode, и линковщик отказывается
+        // выбирать между ними (LNK2005).
+        if (failure->StrictEquals(v8::Null(isolate)) ||
+            failure->StrictEquals(v8::Undefined(isolate))) {
+            return true;
+        }
+
+        // Стек ценнее текста: «x is not a function» без места ищут часами.
+        if (failure->IsObject()) {
+            v8::Local<v8::Value> stack;
+
+            if (failure.As<v8::Object>()->Get(context, toJs(isolate, "stack")).ToLocal(&stack) &&
+                stack->IsString()) {
+                error = fromJs(isolate, stack);
+                return false;
+            }
+        }
+
+        error = fromJs(isolate, failure);
+        return false;
+    }
+
+    error = "точка входа не исполнилась за отведённое время";
+    return false;
 }
 
 void Resource::pump() {

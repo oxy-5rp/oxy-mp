@@ -6,6 +6,7 @@
 #include <alt_client.hpp>
 #include <alt_client_bootstrap.hpp>
 #include <alt_client_entities.hpp>
+#include <alt_client_extras.hpp>
 #include <alt_client_objects.hpp>
 #include <alt_enums.hpp>
 #include <alt_natives.hpp>
@@ -33,11 +34,13 @@ namespace {
     script.reserve(embedded::altEnums.size() + embedded::altShared.size() +
                    embedded::altNativesTable.size() + embedded::altNatives.size() +
                    embedded::altClientEntities.size() + embedded::altClientObjects.size() +
-                   embedded::altClient.size() + embedded::altClientBootstrap.size() + 8U);
+                   embedded::altClientExtras.size() +
+                   embedded::altClient.size() + embedded::altClientBootstrap.size() + 9U);
 
     for (const std::string_view part : {embedded::altEnums, embedded::altShared,
                                         embedded::altNativesTable, embedded::altNatives,
                                         embedded::altClientEntities, embedded::altClientObjects,
+                                        embedded::altClientExtras,
                                         embedded::altClient, embedded::altClientBootstrap}) {
         script.append(part);
         script.push_back('\n');
@@ -45,6 +48,37 @@ namespace {
 
     return script;
 }
+
+/// Сколько раз прокрутить цикл событий, дожидаясь точки входа.
+///
+/// Предел нужен не от медленного ресурса, а от зависшего: обещание, которое
+/// никогда не разрешится, оставило бы нас крутиться в кадре игры навсегда.
+/// Двухсот оборотов хватает с большим запасом — загрузчик модулей укладывается
+/// в единицы.
+/// Во что превращается отказ обещания при показе в журнале.
+///
+/// Стек ценнее текста: сообщение вида «x is not a function» без места ищут
+/// часами. У обычной ошибки он есть; у брошенного не-объекта — нет, и тогда
+/// показывается он сам.
+[[nodiscard]] std::string describeFailureOf(v8::Local<v8::Context> context,
+                                            v8::Local<v8::Value> failure) {
+    v8::Isolate* const isolate = context->GetIsolate();
+
+    if (failure->IsObject()) {
+        v8::Local<v8::Value> stack;
+
+        if (failure.As<v8::Object>()
+                ->Get(context, toJs(isolate, "stack"))
+                .ToLocal(&stack) &&
+            stack->IsString()) {
+            return fromJs(isolate, stack);
+        }
+    }
+
+    return fromJs(isolate, failure);
+}
+
+constexpr int kStartSpins = 200;
 
 } // namespace
 
@@ -135,6 +169,18 @@ bool Resource::start(const std::filesystem::path& entry) {
 
         loaded = !node::LoadEnvironment(setup_->env(), buildBootstrap()).IsEmpty();
 
+        // Точка входа грузится через import(), то есть обещанием: к этой строке
+        // она ещё не исполнилась. Ждём, прокручивая цикл событий.
+        //
+        // Ждём здесь, а не отдаём наверх «поднимется когда-нибудь», по двум
+        // причинам. Ресурсу нужно сказать, поднялся он или нет, — а до конца
+        // загрузки это неизвестно. И ошибка в его первой строке должна попасть
+        // в журнал как отказ ресурса, а не как необработанный отказ обещания
+        // спустя кадр, когда связать её уже не с чем.
+        if (loaded) {
+            loaded = awaitStart(context, isolate);
+        }
+
         if (!loaded) {
             std::string reason = caught.HasCaught() ? fromJs(isolate, caught.Exception())
                                                     : "точка входа не исполнилась";
@@ -162,6 +208,47 @@ bool Resource::start(const std::filesystem::path& entry) {
     }
 
     return true;
+}
+
+bool Resource::awaitStart(v8::Local<v8::Context> context, v8::Isolate* isolate) {
+    const v8::Local<v8::Object> global = context->Global();
+
+    for (int spin = 0; spin < kStartSpins; ++spin) {
+        // Обещания разрешаются здесь же: без этой строки цикл событий крутился
+        // бы, а `then` так и не позвался.
+        (void)uv_run(setup_->event_loop(), UV_RUN_NOWAIT);
+        platform_->DrainTasks(isolate);
+        isolate->PerformMicrotaskCheckpoint();
+
+        v8::Local<v8::Value> state;
+        if (!global->Get(context, toJs(isolate, "__oxympStart")).ToLocal(&state) ||
+            !state->IsObject()) {
+            // Признака нет вовсе — значит запуск и не начинался. Это поломка не
+            // ресурса, а наша: слой обязан его выставить.
+            log(kOxympJsLogError, "слой не объявил признака запуска");
+            return false;
+        }
+
+        const v8::Local<v8::Object> started = state.As<v8::Object>();
+
+        v8::Local<v8::Value> done;
+        if (!started->Get(context, toJs(isolate, "готов")).ToLocal(&done) ||
+            !done->BooleanValue(isolate)) {
+            continue;
+        }
+
+        v8::Local<v8::Value> failure;
+        if (started->Get(context, toJs(isolate, "ошибка")).ToLocal(&failure) &&
+            !isNothing(isolate, failure)) {
+            log(kOxympJsLogError, describeFailureOf(context, failure));
+            return false;
+        }
+
+        return true;
+    }
+
+    log(kOxympJsLogError, "точка входа не исполнилась за отведённое время");
+    return false;
 }
 
 void Resource::pump() {

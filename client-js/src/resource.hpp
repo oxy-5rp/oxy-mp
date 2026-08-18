@@ -70,6 +70,13 @@ private:
     /// Пишет в журнал то, что скрипт не поймал сам.
     void report(v8::Local<v8::Context> context, const v8::TryCatch& caught) const;
 
+    /// Дожидается, пока исполнится точка входа. false — она отказала.
+    ///
+    /// Точка входа грузится обещанием (см. alt_client_bootstrap.js), и к концу
+    /// LoadEnvironment ещё не исполнена. Ждать приходится прокруткой цикла
+    /// событий — другого способа сдвинуть обещание с места нет.
+    [[nodiscard]] bool awaitStart(v8::Local<v8::Context> context, v8::Isolate* isolate);
+
     std::string name_;
     std::filesystem::path root_;
     const OxympJsHost* host_ = nullptr;

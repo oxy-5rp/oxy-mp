@@ -176,6 +176,14 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
 
     addFunction(context, native, "callNative", callNative);
 
+    addFunction(context, native, "selfId", [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+        const OxympJsHost& host = Resource::of(info.GetIsolate())->host();
+
+        info.GetReturnValue().Set(host.localPlayerId == nullptr
+                                      ? -1
+                                      : host.localPlayerId(host.context));
+    });
+
     addFunction(context, native, "createWebView", createWebView);
     addFunction(context, native, "destroyWebView", destroyWebView);
     addFunction(context, native, "emitWebView", emitWebView);

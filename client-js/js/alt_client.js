@@ -158,6 +158,109 @@
         native.emitServer(String(name), String(payload));
     }
 
+    // --- Вызовы с ответом (RPC) ----------------------------------------------
+    //
+    // Зеркало серверного (script-js/js/alt_server.js): те же служебные имена, те
+    // же правила. Разъедутся — вызовы перестанут доходить, и без единой жалобы:
+    // событие просто никто не ждёт.
+
+    /// Сколько ждать ответа, прежде чем считать вызов пропавшим.
+    const kRpcTimeout = 5000;
+
+    const kRpcCall = '__oxymp:rpc:call';
+    const kRpcAnswer = '__oxymp:rpc:answer';
+
+    /// Обработчики вызовов по имени. По одному: ответ может быть только один.
+    const answerers = new Map();
+
+    /// Свои вызовы, ожидающие ответа.
+    const pending = new Map();
+    let nextCall = 1;
+
+    function onRpc(name, handler) {
+        if (typeof handler !== 'function') {
+            throw new TypeError('alt.onRpc ждёт имя вызова и обработчик');
+        }
+
+        if (answerers.has(name)) {
+            logWarning(`обработчик вызова «${name}» заменён: отвечать может только один`);
+        }
+
+        answerers.set(name, handler);
+    }
+
+    function offRpc(name) {
+        answerers.delete(name);
+    }
+
+    /// Отвечает на вызов, пришедший с сервера.
+    function answerRpc(id, name, args) {
+        const handler = answerers.get(name);
+
+        const reply = (ok, value) =>
+            native.emitServer(kRpcAnswer, encodeArgs([id, ok, ok ? value : String(value)]));
+
+        if (handler === undefined) {
+            reply(false, `на вызов «${name}» никто не отвечает`);
+            return;
+        }
+
+        // Обработчик волен вернуть и обещание, и готовое значение.
+        Promise.resolve()
+            .then(() => handler(...args))
+            .then((value) => reply(true, value === undefined ? null : value),
+                  (failure) => {
+                      logError(`ошибка в обработчике вызова «${name}»:`, failure);
+                      reply(false, failure?.message ?? failure);
+                  });
+    }
+
+    /// Делает вызов серверу и ждёт ответа.
+    function emitRpc(name, ...args) {
+        return new Promise((resolve, reject) => {
+            const id = nextCall++;
+
+            const timer = setTimeout(() => {
+                pending.delete(id);
+                reject(new Error(`вызов «${name}» остался без ответа за ${kRpcTimeout} мс`));
+            }, kRpcTimeout);
+
+            pending.set(id, { resolve, reject, timer });
+
+            native.emitServer(kRpcCall, encodeArgs([id, name, args]));
+        });
+    }
+
+    function takeAnswer(id, ok, value) {
+        const waiting = pending.get(id);
+        if (waiting === undefined) {
+            // Ответ на вызов, которого уже никто не ждёт: он опоздал и был
+            // отброшен по времени. Это не ошибка — просто поздно.
+            return;
+        }
+
+        clearTimeout(waiting.timer);
+        pending.delete(id);
+
+        if (ok) {
+            waiting.resolve(value);
+        } else {
+            waiting.reject(new Error(String(value)));
+        }
+    }
+
+    bridged.add(`server:${kRpcCall}`);
+    native.on(`server:${kRpcCall}`, (payload) => {
+        const [id, name, args] = decodeArgs(payload);
+        answerRpc(id, name, Array.isArray(args) ? args : []);
+    });
+
+    bridged.add(`server:${kRpcAnswer}`);
+    native.on(`server:${kRpcAnswer}`, (payload) => {
+        const [id, ok, value] = decodeArgs(payload);
+        takeAnswer(id, ok, value);
+    });
+
     // --- Журнал --------------------------------------------------------------
 
     function render(value) {
@@ -224,12 +327,20 @@
 
     bridged.add(`server:${kSyncedMetaEvent}`);
 
-    // Чтение — тем же способом, что и на сервере.
-    const entityKinds = { player: 'player', vehicle: 'vehicle' };
+    // --- Свой номер в сессии --------------------------------------------------
 
+    // Слой сущностей читает метаданные и свой номер через эти окошки: он
+    // исполняется раньше и о них ещё не знает.
     alt.readSyncedMeta = (kind, id, key) => syncedFor(kind, id).get(key);
     alt.readSyncedMetaKeys = (kind, id) => [...syncedFor(kind, id).keys()];
-    alt.entityKinds = entityKinds;
+
+    /// Кем нас числит сервер. −1 — ещё не принял.
+    ///
+    /// Спрашивается у клиента на каждое обращение, а не запоминается. Так надо:
+    /// ресурс читает его первыми же строками, ещё до первого события, а при
+    /// переподключении сервер выдаёт другой — запомненный однажды устарел бы
+    /// молча.
+    alt.selfId = () => native.selfId();
 
     // --- Окно интерфейса -----------------------------------------------------
 
@@ -437,6 +548,7 @@
 
     const entities = alt.entities;
     const objects = alt.objects;
+    const extras = alt.extras;
 
     // Кадровая работа слоя: маркеры, курсор, запрет управления.
     //
@@ -469,6 +581,13 @@
         offServer,
         emitServer,
         emitServerRaw,
+
+        onRpc,
+        offRpc,
+        emitRpc,
+
+        /// Так этот вызов зовут в части ресурсов — то же самое под другим именем.
+        emitRpcServer: emitRpc,
 
         log,
         logWarning,
@@ -517,9 +636,21 @@
         Marker: objects.Marker,
 
         showCursor: objects.showCursor,
+        get isCursorVisible() { return objects.cursorVisible; },
 
         get gameControlsEnabled() { return objects.gameControlsEnabled; },
         toggleGameControls: objects.toggleGameControls,
+
+        // Статистика, курсор, признаки персонажа, местные предметы, хранилище.
+        setStat: extras.setStat,
+        getStat: extras.getStat,
+        getCursorPos: extras.getCursorPos,
+        setCursorPos: extras.setCursorPos,
+        setConfigFlag: extras.setConfigFlag,
+        getConfigFlag: extras.getConfigFlag,
+        LocalObject: extras.LocalObject,
+        LocalStorage: extras.LocalStorage,
+        Utils: extras.Utils,
 
         /// Метаданные сессии, присланные сервером.
         getSyncedMeta: (key) => syncedFor('global', 0).get(key),
@@ -529,7 +660,6 @@
         // Того, чего ещё нет. Отказом, а не тишиной.
         LocalVehicle: absent('alt.LocalVehicle'),
         LocalPed: absent('alt.LocalPed'),
-        LocalObject: absent('alt.LocalObject'),
         Checkpoint: absent('alt.Checkpoint'),
         Colshape: absent('alt.Colshape'),
         VirtualEntity: absent('alt.VirtualEntity'),
@@ -538,10 +668,7 @@
         HttpClient: absent('alt.HttpClient'),
         WebSocketClient: absent('alt.WebSocketClient'),
         RmlDocument: absent('alt.RmlDocument'),
-        LocalStorage: absent('alt.LocalStorage'),
         Discord: absent('alt.Discord'),
-        getCursorPos: absent('alt.getCursorPos'),
-        setCursorPos: absent('alt.setCursorPos'),
         loadModel: absent('alt.loadModel'),
         requestIpl: absent('alt.requestIpl'),
         setWeatherCycle: absent('alt.setWeatherCycle'),

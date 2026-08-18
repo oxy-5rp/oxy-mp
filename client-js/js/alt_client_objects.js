@@ -278,6 +278,9 @@
 
         showCursor,
 
+        /// Просил ли кто-нибудь курсор прямо сейчас.
+        get cursorVisible() { return cursorRequests > 0; },
+
         get gameControlsEnabled() { return controlsEnabled; },
 
         toggleGameControls(enabled) {

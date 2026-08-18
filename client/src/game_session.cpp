@@ -719,6 +719,14 @@ void GameSession::runScripts() {
             mail_.postEvent(std::string{name}, std::string{payload});
         };
 
+        hooks.localPlayerId = [this] {
+            const shared::PlayerId id = status_.snapshot().playerId;
+
+            // −1, а не наш недействительный номер: у alt:V «нас ещё нет»
+            // выражается именно так, и ресурсы сравнивают с ним.
+            return id == shared::kInvalidPlayerId ? -1 : static_cast<std::int32_t>(id);
+        };
+
         // Мостик к слою интерфейса берётся один раз: слой живёт до конца
         // процесса, и спрашивать о нём заново на каждое окно незачем.
         const SessionMail::ViewBridge views = mail_.viewBridge();

@@ -136,6 +136,14 @@ std::int32_t onCallNative(void*, std::uint64_t hash, const std::uint64_t* argume
     return 1;
 }
 
+std::int32_t onLocalPlayerId(void*) {
+    ScriptHost::State* const state = current();
+
+    // −1, а не ноль: ноль — это законный номер первого игрока, и выдать его за
+    // «нас ещё не приняли» значило бы отдать ресурсу чужое имя.
+    return state != nullptr && state->hooks.localPlayerId ? state->hooks.localPlayerId() : -1;
+}
+
 OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
     // Файлы ресурса клиент уже разложил на диске (см. ResourceCache), и машина
     // читает их обычным путём — своим require. Отдельный путь через границу
@@ -234,6 +242,7 @@ std::unique_ptr<ScriptHost> ScriptHost::load(const std::filesystem::path& client
     state->host.log = &onLog;
     state->host.emitServer = &onEmitServer;
     state->host.callNative = &onCallNative;
+    state->host.localPlayerId = &onLocalPlayerId;
     state->host.readResourceFile = &onReadResourceFile;
     state->host.createWebView = &onCreateWebView;
     state->host.destroyWebView = &onDestroyWebView;

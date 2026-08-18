@@ -97,6 +97,14 @@ private:
     /// Пишет в журнал сервера то, что скрипт не поймал сам.
     void report(v8::Local<v8::Context> context, const v8::TryCatch& caught) const;
 
+    /// Дожидается, пока исполнится точка входа. false — она отказала.
+    ///
+    /// Точка входа грузится через import(), то есть обещанием, и к концу
+    /// LoadEnvironment ещё не исполнена. Ждать приходится прокруткой цикла
+    /// событий — другого способа сдвинуть обещание с места нет.
+    [[nodiscard]] bool awaitStart(v8::Local<v8::Context> context, v8::Isolate* isolate,
+                                  std::string& error);
+
     std::string name_;
     std::filesystem::path root_;
     Core* core_ = nullptr;

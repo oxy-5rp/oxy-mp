@@ -153,7 +153,7 @@ void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
         case 's': {
             // Пустота — это нулевой указатель, а не пустая строка. Нативы
             // различают их: одному «нет имени», другому «имя длиной ноль».
-            if (given->IsNullOrUndefined()) {
+            if (isNothing(isolate, given)) {
                 cells[i] = 0;
                 break;
             }
@@ -213,7 +213,7 @@ void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
             // выходной, а **и входной, и выходной**. REMOVE_BLIP получает метку
             // указателем, убирает её и обнуляет его же; передай мы туда ноль —
             // натив прилежно убрал бы метку номер ноль, то есть ничего. Молча.
-            if (!given->IsNullOrUndefined()) {
+            if (!isNothing(isolate, given)) {
                 if (takes[i] == 'F') {
                     double number = 0.0;
                     (void)given->NumberValue(context).To(&number);

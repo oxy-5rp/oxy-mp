@@ -142,16 +142,36 @@
             throw new Error('entity.setMeta: на клиенте этого ещё нет');
         }
 
-        getSyncedMeta() {
-            // Присланное сервером у клиента есть — оно лежит в слое и читается
-            // через `alt.getSyncedMeta`. Но привязать его к **этой** сущности
-            // нельзя: сервер называет сущности своими номерами, а здесь у нас
-            // дескриптор игры, и переводчика между ними ещё нет.
-            //
-            // Отказ, а не undefined: второе выглядело бы как «ключа нет», и
-            // режим искал бы ошибку на сервере, где её нет.
-            throw new Error('entity.getSyncedMeta: номеров сессии на клиенте ещё нет — ' +
-                            'пользуйтесь alt.getSyncedMeta для общих');
+        /// Номер сущности в сессии — тот, которым её зовёт сервер.
+        ///
+        /// Есть он пока у одного: у своего персонажа. Остальных клиент видит
+        /// дескрипторами игры, а переводчика между дескриптором и номером
+        /// сессии ещё нет — для этого нужен канал синхронизации сущностей.
+        get sessionId() {
+            return -1;
+        }
+
+        getSyncedMeta(key) {
+            const номер = this.sessionId;
+
+            if (номер < 0) {
+                // Отказ, а не undefined: второе выглядело бы как «ключа нет», и
+                // режим искал бы ошибку на сервере, где её нет.
+                throw new Error('entity.getSyncedMeta: номер этой сущности клиенту ' +
+                                'неизвестен — сервер называет её своим номером, а здесь ' +
+                                'дескриптор игры');
+            }
+
+            return alt.readSyncedMeta('player', номер, key);
+        }
+
+        getSyncedMetaKeys() {
+            const номер = this.sessionId;
+            return номер < 0 ? [] : alt.readSyncedMetaKeys('player', номер);
+        }
+
+        hasSyncedMeta(key) {
+            return this.getSyncedMeta(key) !== undefined;
         }
 
         toString() {
@@ -231,6 +251,16 @@
 
         get name() {
             return natives.getPlayerName(natives.playerId());
+        }
+
+        /// Свой номер в сессии — тот, которым нас зовёт сервер.
+        get sessionId() {
+            return alt.selfId();
+        }
+
+        /// alt:V зовёт его просто `id`. У остальных сущностей его пока нет.
+        get id() {
+            return alt.selfId();
         }
 
         get isTalking() { throw new Error('player.isTalking: в oxyMP этого ещё нет'); }
