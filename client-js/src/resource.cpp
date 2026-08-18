@@ -5,6 +5,8 @@
 
 #include <alt_client.hpp>
 #include <alt_client_bootstrap.hpp>
+#include <alt_client_entities.hpp>
+#include <alt_client_objects.hpp>
 #include <alt_enums.hpp>
 #include <alt_natives.hpp>
 #include <alt_natives_table.hpp>
@@ -30,10 +32,12 @@ namespace {
 
     script.reserve(embedded::altEnums.size() + embedded::altShared.size() +
                    embedded::altNativesTable.size() + embedded::altNatives.size() +
-                   embedded::altClient.size() + embedded::altClientBootstrap.size() + 6U);
+                   embedded::altClientEntities.size() + embedded::altClientObjects.size() +
+                   embedded::altClient.size() + embedded::altClientBootstrap.size() + 8U);
 
     for (const std::string_view part : {embedded::altEnums, embedded::altShared,
                                         embedded::altNativesTable, embedded::altNatives,
+                                        embedded::altClientEntities, embedded::altClientObjects,
                                         embedded::altClient, embedded::altClientBootstrap}) {
         script.append(part);
         script.push_back('\n');

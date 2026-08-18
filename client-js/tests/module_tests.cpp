@@ -403,10 +403,50 @@ TEST_CASE("a throwing handler does not stop the others", "[client][js]") {
 TEST_CASE("what is not done yet refuses out loud", "[client][js]") {
     // Молчаливая заглушка хуже отсутствия: её ищут часами.
     REQUIRE(run("absent", "const alt = require('alt-client');\n"
-                          "try { alt.Player(); } catch (e) { alt.log('отказ: ' + e.message); }\n"));
+                          "try { alt.Voice(); } catch (e) { alt.log('отказ: ' + e.message); }\n"));
 
-    CHECK(said("отказ: alt.Player: в oxyMP этого ещё нет"));
+    CHECK(said("отказ: alt.Voice: в oxyMP этого ещё нет"));
 }
+
+TEST_CASE("the entity layer is built on natives", "[client][js]") {
+    // Свойство, которое можно спросить у игры, спрашивается у игры — и никогда
+    // не кешируется: она меняет их каждый кадр.
+    recorder().nativeKnown = true;
+    recorder().nativeAnswer = 4321;
+
+    REQUIRE(run("entities", "const alt = require('alt-client');\n"
+                            "const я = alt.Player.local;\n"
+                            "alt.log('дескриптор ' + я.scriptID);\n"));
+
+    // PLAYER_PED_ID: хеш выверен по живой игре.
+    CHECK(recorder().nativeHash == 0x4A8C381C258A124DULL);
+    CHECK(said("дескриптор 4321"));
+}
+
+TEST_CASE("a blip is made through the game, not invented", "[client][js]") {
+    recorder().nativeKnown = true;
+    recorder().nativeAnswer = 77;
+
+    REQUIRE(run("blip", "const alt = require('alt-client');\n"
+                        "const метка = new alt.PointBlip(1, 2, 3);\n"
+                        "alt.log('метка ' + метка.scriptID);\n"));
+
+    CHECK(said("метка 77"));
+}
+
+TEST_CASE("a blip that the game refuses is an error, not a ghost", "[client][js]") {
+    // Ноль от игры означает «метки нет». Обернув его молча, мы отдали бы
+    // ресурсу объект, у которого не работает ничего и который не жалуется.
+    recorder().nativeKnown = true;
+    recorder().nativeAnswer = 0;
+
+    REQUIRE(run("blipfail", "const alt = require('alt-client');\n"
+                            "try { new alt.PointBlip(1, 2, 3); }\n"
+                            "catch (e) { alt.log('отказ метки: ' + e.message); }\n"));
+
+    CHECK(said("отказ метки: метка не завелась: игра отказала"));
+}
+
 
 TEST_CASE("a timer fires when the engine is pumped", "[client][js]") {
     REQUIRE(run("timer", "const alt = require('alt-client');\n"

@@ -59,6 +59,10 @@ oxymp_embed_text(oxymp_client_js js/alt_natives_table.js
                  altNativesTable oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_natives.js
                  altNatives oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_client_entities.js
+                 altClientEntities oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_client_objects.js
+                 altClientObjects oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client.js
                  altClient oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client_bootstrap.js

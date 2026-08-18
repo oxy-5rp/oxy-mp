@@ -386,6 +386,24 @@
 
     // --- Сборка модуля -------------------------------------------------------
 
+    const entities = alt.entities;
+    const objects = alt.objects;
+
+    // Кадровая работа слоя: маркеры, курсор, запрет управления.
+    //
+    // Подписка своя, а не через everyTick: она принадлежит самому слою и не
+    // должна сниматься вместе с обработчиками ресурса.
+    bridged.add('render');
+    native.on('render', () => {
+        try {
+            alt.drawFrame();
+        } catch (failure) {
+            logError('ошибка при отрисовке кадра:', failure?.stack ?? failure);
+        }
+
+        fire('render', []);
+    });
+
     const client = {
         ...shared,
 
@@ -427,18 +445,37 @@
         WebView,
         isKeyDown,
 
+        // Сущности: то, что стоит в мире. Собраны поверх нативов.
+        WorldObject: entities.WorldObject,
+        Entity: entities.Entity,
+        Ped: entities.Ped,
+        Vehicle: entities.Vehicle,
+        LocalPlayer: entities.LocalPlayer,
+
+        /// `alt.Player.local` — свой персонаж. Так его и зовут ресурсы alt:V.
+        Player: Object.defineProperty(entities.LocalPlayer, 'local', {
+            get: () => entities.local,
+            configurable: true,
+        }),
+
+        /// Сущность по дескриптору игры: нативы отдают именно их.
+        fromScriptID: entities.fromScriptID,
+
+        // Метки и маркеры. Эти видны по-настоящему: рисует их сама игра.
+        Blip: objects.Blip,
+        PointBlip: objects.PointBlip,
+        RadiusBlip: objects.RadiusBlip,
+        Marker: objects.Marker,
+
+        showCursor: objects.showCursor,
+
+        get gameControlsEnabled() { return objects.gameControlsEnabled; },
+        toggleGameControls: objects.toggleGameControls,
+
         // Того, чего ещё нет. Отказом, а не тишиной.
-        Player: absent('alt.Player'),
-        Vehicle: absent('alt.Vehicle'),
-        Entity: absent('alt.Entity'),
-        LocalPlayer: absent('alt.LocalPlayer'),
         LocalVehicle: absent('alt.LocalVehicle'),
         LocalPed: absent('alt.LocalPed'),
         LocalObject: absent('alt.LocalObject'),
-        WorldObject: absent('alt.WorldObject'),
-        Blip: absent('alt.Blip'),
-        PointBlip: absent('alt.PointBlip'),
-        Marker: absent('alt.Marker'),
         Checkpoint: absent('alt.Checkpoint'),
         Colshape: absent('alt.Colshape'),
         VirtualEntity: absent('alt.VirtualEntity'),
@@ -449,11 +486,8 @@
         RmlDocument: absent('alt.RmlDocument'),
         LocalStorage: absent('alt.LocalStorage'),
         Discord: absent('alt.Discord'),
-        showCursor: absent('alt.showCursor'),
         getCursorPos: absent('alt.getCursorPos'),
         setCursorPos: absent('alt.setCursorPos'),
-        gameControlsEnabled: absent('alt.gameControlsEnabled'),
-        toggleGameControls: absent('alt.toggleGameControls'),
         loadModel: absent('alt.loadModel'),
         requestIpl: absent('alt.requestIpl'),
         setWeatherCycle: absent('alt.setWeatherCycle'),

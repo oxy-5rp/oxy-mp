@@ -198,14 +198,47 @@ void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
         case 'F':
         case 'B':
         case 'V': {
-            // Выходной довод: натив получает указатель на пустое место и пишет
-            // туда ответ. Место обнуляется заранее — натив, ничего не
-            // написавший, иначе отдал бы мусор от прошлого вызова.
+            // Выходной довод: натив получает указатель на место и пишет туда
+            // ответ. Место обнуляется заранее — натив, ничего не написавший,
+            // иначе отдал бы мусор от прошлого вызова.
             const std::size_t at = i * Scratch::kCellsPerArgument;
 
             room.cells[at] = 0;
             room.cells[at + 1] = 0;
             room.cells[at + 2] = 0;
+
+            // Переданное скриптом кладётся туда же, до вызова.
+            //
+            // Не лишняя предосторожность: у части нативов такой довод не
+            // выходной, а **и входной, и выходной**. REMOVE_BLIP получает метку
+            // указателем, убирает её и обнуляет его же; передай мы туда ноль —
+            // натив прилежно убрал бы метку номер ноль, то есть ничего. Молча.
+            if (!given->IsNullOrUndefined()) {
+                if (takes[i] == 'F') {
+                    double number = 0.0;
+                    (void)given->NumberValue(context).To(&number);
+                    room.cells[at] = floatBits(number);
+                } else if (takes[i] == 'B') {
+                    room.cells[at] = given->BooleanValue(isolate) ? 1U : 0U;
+                } else if (takes[i] == 'V' && given->IsObject()) {
+                    const v8::Local<v8::Object> object = given.As<v8::Object>();
+
+                    for (std::size_t axis = 0; axis < 3; ++axis) {
+                        static constexpr std::string_view kAxes[] = {"x", "y", "z"};
+
+                        v8::Local<v8::Value> field;
+                        double number = 0.0;
+
+                        if (object->Get(context, toJs(isolate, kAxes[axis])).ToLocal(&field)) {
+                            (void)field->NumberValue(context).To(&number);
+                        }
+
+                        room.cells[at + axis] = floatBits(number);
+                    }
+                } else if (takes[i] == 'L') {
+                    room.cells[at] = integerFrom(context, given);
+                }
+            }
 
             cells[i] = pointerTo(&room.cells[at]);
             outgoing.push_back(Outgoing{takes[i], at});
