@@ -136,10 +136,22 @@
             return this.pos.distanceTo(there);
         }
 
-        setMeta() { throw new Error('entity.setMeta: на клиенте этого ещё нет'); }
-        getSyncedMeta() { throw new Error('entity.getSyncedMeta: в oxyMP этого ещё нет'); }
-        getStreamSyncedMeta() {
-            throw new Error('entity.getStreamSyncedMeta: в oxyMP этого ещё нет');
+        setMeta() {
+            // Своя метаданная на клиенте не заведена: у alt:V она принадлежит
+            // сущности, а сущность здесь — отражение чужой, живущее один вызов.
+            throw new Error('entity.setMeta: на клиенте этого ещё нет');
+        }
+
+        getSyncedMeta() {
+            // Присланное сервером у клиента есть — оно лежит в слое и читается
+            // через `alt.getSyncedMeta`. Но привязать его к **этой** сущности
+            // нельзя: сервер называет сущности своими номерами, а здесь у нас
+            // дескриптор игры, и переводчика между ними ещё нет.
+            //
+            // Отказ, а не undefined: второе выглядело бы как «ключа нет», и
+            // режим искал бы ошибку на сервере, где её нет.
+            throw new Error('entity.getSyncedMeta: номеров сессии на клиенте ещё нет — ' +
+                            'пользуйтесь alt.getSyncedMeta для общих');
         }
 
         toString() {

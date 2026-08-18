@@ -464,3 +464,53 @@ TEST_CASE("a timer fires when the engine is pumped", "[client][js]") {
 
     CHECK(said("таймер сработал"));
 }
+
+TEST_CASE("synced meta from the server reaches the client", "[client][js]") {
+    // Метаданные приходят служебным событием, а не своим сообщением: событие
+    // уже умеет ходить, а сообщение стоило бы номера в протоколе.
+    REQUIRE(run("meta", "const alt = require('alt-client');\n"
+                        "alt.on('syncedMetaChange', (род, номер, ключ, что) =>\n"
+                        "    alt.log(`меняли ${род}:${номер}.${ключ} = ${что}`));\n"));
+
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes("[\"global\",0,\"погода\",\"дождь\"]"));
+
+    CHECK(said("меняли global:0.погода = дождь"));
+}
+
+TEST_CASE("global synced meta is readable after it arrives", "[client][js]") {
+    REQUIRE(run("metaread", "const alt = require('alt-client');\n"
+                            "alt.onServer('прочти', () =>\n"
+                            "    alt.log('час: ' + alt.getSyncedMeta('час')));\n"));
+
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes("[\"global\",0,\"час\",12]"));
+    Engine::instance()->dispatchServerEvent(text("прочти"), bytes("[]"));
+
+    CHECK(said("час: 12"));
+}
+
+TEST_CASE("a deleted synced key stops being readable", "[client][js]") {
+    // Пустота в значении означает «ключ убрали», а не «значение пустое».
+    REQUIRE(run("metadel", "const alt = require('alt-client');\n"
+                           "alt.onServer('прочти', () =>\n"
+                           "    alt.log('осталось: ' + alt.getSyncedMeta('вр')));\n"));
+
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes("[\"global\",0,\"вр\",\"есть\"]"));
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes("[\"global\",0,\"вр\",null]"));
+    Engine::instance()->dispatchServerEvent(text("прочти"), bytes("[]"));
+
+    CHECK(said("осталось: undefined"));
+}
+
+TEST_CASE("entity synced meta refuses instead of answering nothing", "[client][js]") {
+    // undefined выглядело бы как «ключа нет», и режим искал бы ошибку на
+    // сервере, где её нет.
+    REQUIRE(run("metaentity", "const alt = require('alt-client');\n"
+                              "try { alt.Player.local.getSyncedMeta('x'); }\n"
+                              "catch (e) { alt.log('отказ meta: ' + e.message); }\n"));
+
+    CHECK(said("отказ meta: entity.getSyncedMeta: номеров сессии на клиенте ещё нет"));
+}

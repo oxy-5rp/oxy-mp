@@ -387,26 +387,109 @@
     /// его и объявляют до уборки.
     function forget(kind, id) {
         metaStore.delete(`${kind}:${id}`);
+        syncedStore.delete(`${kind}:${id}`);
+    }
+
+    /// Метаданные, которые видит и клиент.
+    ///
+    /// Отдельно от `meta`, и разница не в удобстве, а в том, кто их видит.
+    /// `meta` не покидает сервер — так обещает alt:V, и так оно и есть. А
+    /// `syncedMeta` обязана дойти до клиента: на ней держатся половина режимов —
+    /// имя над головой, состояние двери, номер организации.
+    const syncedStore = new Map();
+
+    function syncedFor(kind, id) {
+        const key = `${kind}:${id}`;
+        let found = syncedStore.get(key);
+
+        if (found === undefined) {
+            found = new Map();
+            syncedStore.set(key, found);
+        }
+
+        return found;
+    }
+
+    /// Имя служебного события, которым метаданные уходят клиенту.
+    ///
+    /// Служебным событием, а не своим сообщением в протоколе, и это осознанно.
+    /// Сообщение стоило бы номера, разбора на обеих сторонах и подъёма версии
+    /// протокола — ради того, что уже умеет ходить. Две приставки-подчёркивания
+    /// говорят читающему, что имя занято и режиму его брать нельзя.
+    const kSyncedMetaEvent = '__oxymp:meta';
+
+    /// Рассылает изменение всем, кто его увидит.
+    ///
+    /// Всем, а не одному владельцу: `syncedMeta` на то и synced, что её видит
+    /// каждый. Клиент, знающий чужое имя над головой, узнаёт его отсюда.
+    function publishSynced(kind, id, key, value) {
+        const payload = encodeArgs([kind, id, key, value === undefined ? null : value]);
+
+        for (const player of native.players()) {
+            native.emitClient(player, kSyncedMetaEvent, payload);
+        }
+    }
+
+    /// Отдаёт вошедшему всё, что уже накоплено.
+    ///
+    /// Без этого игрок, вошедший вторым, не знал бы о первом ничего: рассылка
+    /// случилась до него. Ошибка эта из тех, что не видно на одном игроке и
+    /// видно сразу на двух.
+    function sendSyncedSnapshot(player) {
+        for (const [where, values] of syncedStore) {
+            const split = where.indexOf(':');
+            const kind = where.slice(0, split);
+            const id = Number(where.slice(split + 1));
+
+            for (const [key, value] of values) {
+                native.emitClient(player, kSyncedMetaEvent, encodeArgs([kind, id, key, value]));
+            }
+        }
     }
 
     /// Примешивает набор meta-действий классу сущности.
+    ///
+    /// Обычным присваиванием, а не через Object.defineProperties, и это не
+    /// вкусовщина. Последний запечатывает свойство намертво: второе объявление
+    /// того же имени бросает «Cannot redefine property», и падает при этом не
+    /// то место, где ошибка, а подъём ресурса целиком — без внятной причины.
+    /// Проверено: так и случилось, когда рядом с настоящим setSyncedMeta
+    /// осталась его прежняя заглушка.
     function addMeta(target, kind) {
-        Object.defineProperties(target.prototype, {
-            setMeta: {
-                value(key, value) { metaFor(kind, this.id).set(key, value); },
+        // Обычным объектом, а не набором дескрипторов: так все свойства выходят
+        // переопределяемыми сами собой, и заводить их вручную не приходится.
+        Object.assign(target.prototype, {
+            setMeta(key, value) { metaFor(kind, this.id).set(key, value); },
+            getMeta(key) { return metaFor(kind, this.id).get(key); },
+            hasMeta(key) { return metaFor(kind, this.id).has(key); },
+            deleteMeta(key) { metaFor(kind, this.id).delete(key); },
+            getMetaKeys() { return [...metaFor(kind, this.id).keys()]; },
+
+            setSyncedMeta(key, value) {
+                syncedFor(kind, this.id).set(key, value);
+                publishSynced(kind, this.id, key, value);
             },
-            getMeta: {
-                value(key) { return metaFor(kind, this.id).get(key); },
+            getSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
+            hasSyncedMeta(key) { return syncedFor(kind, this.id).has(key); },
+            deleteSyncedMeta(key) {
+                syncedFor(kind, this.id).delete(key);
+                publishSynced(kind, this.id, key, undefined);
             },
-            hasMeta: {
-                value(key) { return metaFor(kind, this.id).has(key); },
+            getSyncedMetaKeys() { return [...syncedFor(kind, this.id).keys()]; },
+
+            /// streamSyncedMeta отличается от synced тем, кому она доходит:
+            /// только тем, кто сущность видит. Раздачи по видимости у oxyMP пока
+            /// нет, поэтому здесь она ведёт себя как обычная synced — то есть
+            /// доходит до всех.
+            ///
+            /// Разница в пользу режима, а не против: он получит больше, чем
+            /// ожидал, но не меньше. Молчать об этом всё же нельзя — потому и
+            /// сказано здесь.
+            setStreamSyncedMeta(key, value) {
+                syncedFor(kind, this.id).set(key, value);
+                publishSynced(kind, this.id, key, value);
             },
-            deleteMeta: {
-                value(key) { metaFor(kind, this.id).delete(key); },
-            },
-            getMetaKeys: {
-                value() { return [...metaFor(kind, this.id).keys()]; },
-            },
+            getStreamSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
         });
     }
 
@@ -474,9 +557,6 @@
                 this.teleport(point);
             },
         },
-        setSyncedMeta: { value: absent('player.setSyncedMeta') },
-        getSyncedMeta: { value: absent('player.getSyncedMeta') },
-        setStreamSyncedMeta: { value: absent('player.setStreamSyncedMeta') },
         setClothes: { value: absent('player.setClothes') },
         setDlcClothes: { value: absent('player.setDlcClothes') },
         setProp: { value: absent('player.setProp') },
@@ -523,8 +603,6 @@
         toString: {
             value() { return `Vehicle{ id: ${this.id} }`; },
         },
-        setSyncedMeta: { value: absent('vehicle.setSyncedMeta') },
-        getSyncedMeta: { value: absent('vehicle.getSyncedMeta') },
         setMod: { value: absent('vehicle.setMod') },
         repair: { value: absent('vehicle.repair') },
     });
@@ -545,6 +623,7 @@
     // Метаданные вышедшего игрока убираются последним подписчиком, а не первым:
     // событие объявляется до уборки нарочно (см. CLAUDE.md), и ресурс вправе
     // прочесть их в своём обработчике.
+    on('playerConnect', (player) => sendSyncedSnapshot(player));
     on('playerDisconnect', (player) => forget('player', player.id));
     on('vehicleDestroy', (vehicle) => forget('vehicle', vehicle.id));
 
@@ -653,8 +732,16 @@
         startResource: absent('alt.startResource'),
         stopResource: absent('alt.stopResource'),
         getServerConfig: absent('alt.getServerConfig'),
-        setSyncedMeta: absent('alt.setSyncedMeta'),
-        getSyncedMeta: absent('alt.getSyncedMeta'),
+        /// Метаданные сессии, не привязанные ни к какой сущности.
+        setSyncedMeta: (key, value) => {
+            syncedFor('global', 0).set(key, value);
+            publishSynced('global', 0, key, value);
+        },
+        getSyncedMeta: (key) => syncedFor('global', 0).get(key),
+        deleteSyncedMeta: (key) => {
+            syncedFor('global', 0).delete(key);
+            publishSynced('global', 0, key, undefined);
+        },
     };
 
     alt.server = server;

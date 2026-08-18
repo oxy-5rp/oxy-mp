@@ -182,6 +182,55 @@
     const logWarning = (...args) => native.logWarning(...args.map(render));
     const logError = (...args) => native.logError(...args.map(render));
 
+    // --- Метаданные, присланные сервером -------------------------------------
+
+    /// Что сервер о ком рассказал, по роду и номеру.
+    ///
+    /// Только на чтение: `syncedMeta` принадлежит серверу, и клиент, поменявший
+    /// её у себя, обманул бы сам себя — до следующей рассылки, которая вернула
+    /// бы серверное значение.
+    const synced = new Map();
+
+    /// То же служебное имя, что и на сервере. Разъедутся — метаданные
+    /// перестанут доходить, и без единой жалобы: событие просто никто не ждёт.
+    const kSyncedMetaEvent = '__oxymp:meta';
+
+    function syncedFor(kind, id) {
+        const key = `${kind}:${id}`;
+        let found = synced.get(key);
+
+        if (found === undefined) {
+            found = new Map();
+            synced.set(key, found);
+        }
+
+        return found;
+    }
+
+    native.on(`server:${kSyncedMetaEvent}`, (payload) => {
+        const [kind, id, key, value] = decodeArgs(payload);
+
+        if (value === null) {
+            syncedFor(kind, id).delete(key);
+        } else {
+            syncedFor(kind, id).set(key, value);
+        }
+
+        // Ресурсам сообщается так же, как в alt:V: изменение — это событие, а не
+        // только новое значение. Режим, рисующий имя над головой, перерисовывает
+        // его по нему, а не опросом каждый кадр.
+        fire('syncedMetaChange', [kind, id, key, value === null ? undefined : value]);
+    });
+
+    bridged.add(`server:${kSyncedMetaEvent}`);
+
+    // Чтение — тем же способом, что и на сервере.
+    const entityKinds = { player: 'player', vehicle: 'vehicle' };
+
+    alt.readSyncedMeta = (kind, id, key) => syncedFor(kind, id).get(key);
+    alt.readSyncedMetaKeys = (kind, id) => [...syncedFor(kind, id).keys()];
+    alt.entityKinds = entityKinds;
+
     // --- Окно интерфейса -----------------------------------------------------
 
     /// Страница поверх кадра игры.
@@ -471,6 +520,11 @@
 
         get gameControlsEnabled() { return objects.gameControlsEnabled; },
         toggleGameControls: objects.toggleGameControls,
+
+        /// Метаданные сессии, присланные сервером.
+        getSyncedMeta: (key) => syncedFor('global', 0).get(key),
+        hasSyncedMeta: (key) => syncedFor('global', 0).has(key),
+        getSyncedMetaKeys: () => [...syncedFor('global', 0).keys()],
 
         // Того, чего ещё нет. Отказом, а не тишиной.
         LocalVehicle: absent('alt.LocalVehicle'),
