@@ -549,6 +549,7 @@
     const entities = alt.entities;
     const objects = alt.objects;
     const extras = alt.extras;
+    const locals = alt.locals;
 
     // Кадровая работа слоя: маркеры, курсор, запрет управления.
     //
@@ -691,11 +692,22 @@
         hasSyncedMeta: (key) => syncedFor('global', 0).has(key),
         getSyncedMetaKeys: () => [...syncedFor('global', 0).keys()],
 
+        // Местные сущности: те, что клиент заводит сам и видит только сам.
+        // Сервер о них не знает, и потому им не нужно ни сети, ни синхронизации.
+        LocalVehicle: locals.LocalVehicle,
+        LocalPed: locals.LocalPed,
+        WeaponObject: locals.WeaponObject,
+        Checkpoint: locals.Checkpoint,
+
+        // Зоны считаются здесь и только про своего игрока — так же, как у alt:V.
+        // Те, о которых должен знать сервер, заводятся на сервере: они там есть.
+        Colshape: locals.Colshape,
+        ColshapeCylinder: locals.ColshapeCylinder,
+        ColshapeCuboid: locals.ColshapeCuboid,
+        ColshapeSphere: locals.ColshapeSphere,
+        ColshapeCircle: locals.ColshapeCircle,
+
         // Того, чего ещё нет. Отказом, а не тишиной.
-        LocalVehicle: absent('alt.LocalVehicle'),
-        LocalPed: absent('alt.LocalPed'),
-        Checkpoint: absent('alt.Checkpoint'),
-        Colshape: absent('alt.Colshape'),
         VirtualEntity: absent('alt.VirtualEntity'),
         Voice: absent('alt.Voice'),
         Audio: absent('alt.Audio'),

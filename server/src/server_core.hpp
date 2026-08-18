@@ -33,6 +33,13 @@ public:
     /// Здоровье или броня игрока изменились не от чужой руки.
     virtual void healthChanged(const Player& player) = 0;
 
+    /// Внешность игрока изменилась на сервере и должна уйти по сети.
+    ///
+    /// Всем, включая самого игрока, — в отличие от внешности, пришедшей от
+    /// клиента. Ту он объявил сам и у себя её уже надел; эту ему назначили, и
+    /// узнать о ней ему неоткуда.
+    virtual void appearanceChanged(const Player& player) = 0;
+
     /// Игрока следует перенести в точку.
     ///
     /// Единственное, чего сервер не делает у себя: персонаж живёт в игре у
@@ -96,6 +103,7 @@ public:
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
+    bool setModel(shared::PlayerId id, std::uint32_t model) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;
     bool emit(shared::PlayerId id, std::string_view name, std::string_view payload) override;

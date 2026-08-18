@@ -18,6 +18,7 @@ namespace {
         .heading = player.heading,
         .health = player.health,
         .armour = player.armour,
+        .model = player.appearance ? player.appearance->model : 0,
         .vehicle = seat.vehicle,
         .seat = seat.index,
 
@@ -143,6 +144,34 @@ bool ServerCore::clearWeapons(shared::PlayerId id) {
     // С заменой: пустой список без этого признака означал бы «добавить ничего»,
     // и оружие осталось бы у игрока в руках.
     sink_->loadoutChanged(*player, true);
+    return true;
+}
+
+bool ServerCore::setModel(shared::PlayerId id, std::uint32_t model) {
+    Player* player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Ноль — «оставить как есть»: так же его толкует и сама PlayerAppearance.
+    // Отдельного распоряжения «сними модель» у игры нет, и выдумывать его,
+    // подставляя ноль в поле, значило бы оставить игрока без тела.
+    if (model == 0) {
+        return false;
+    }
+
+    // Внешности может не быть вовсе: игрок объявляет свою не сразу, а сервер
+    // вправе назначить модель хоть в обработчике входа — то есть раньше. Тогда
+    // она заводится здесь, пустой, с одной лишь моделью, и остальное игрок
+    // допишет своим объявлением.
+    if (!player->appearance) {
+        player->appearance.emplace();
+    }
+
+    player->appearance->playerId = id;
+    player->appearance->model = model;
+
+    sink_->appearanceChanged(*player);
     return true;
 }
 

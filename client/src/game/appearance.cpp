@@ -50,6 +50,7 @@ Appearance::Appearance(const NativeTable& table) noexcept
       defaultVariation_(table.handlerFor(natives::kSetPedDefaultComponentVariation)),
       releaseModel_(table.handlerFor(natives::kSetModelAsNoLongerNeeded)),
       playerPedId_(table.handlerFor(natives::kPlayerPedId)),
+      entityModel_(table.handlerFor(natives::kGetEntityModel)),
       ambientVoice_(table.handlerFor(natives::kSetAmbientVoiceName)) {}
 
 void Appearance::describeHandlers() const {
@@ -82,6 +83,12 @@ bool Appearance::ready() const noexcept {
 }
 
 std::uint32_t Appearance::modelHash() {
+    // Назначенное сервером главнее заготовки: заготовка — это то, во что
+    // одеваются, когда никто ничего не назначил.
+    if (wanted_ != 0) {
+        return wanted_;
+    }
+
     if (model_ != 0) {
         return model_;
     }
@@ -103,6 +110,44 @@ std::uint32_t Appearance::modelHash() {
 
     spdlog::debug("хеш модели {}: {:#010x}", kFreemodeModel, model_);
     return model_;
+}
+
+bool Appearance::want(std::uint32_t model, int player) {
+    if (!ready()) {
+        return false;
+    }
+
+    // Ноль означает «сетевую заготовку»: у alt:V `player.model` нулём не
+    // бывает, а вот у нас ноль — законное «сервер ничего не назначал».
+    const std::uint32_t target = model != 0 ? model : modelHash();
+
+    if (target == 0) {
+        return false;
+    }
+
+    // Та же модель уже стоит — менять нечего. Проверка обязательна: замена
+    // пересоздаёт персонажа, теряя одежду, оружие и положение, и повторить её
+    // на каждом объявлении внешности значило бы раздевать человека раз в
+    // секунду.
+    //
+    // Спрашивается у персонажа, а не у игрока: номер игрока в одиночной игре
+    // равен нулю, и проверять его на ноль — значит не проверять модель вовсе
+    // ровно у того, кто здесь единственный. На этом проверка и не срабатывала.
+    if (entityModel_ != nullptr) {
+        const int ped = invokeNative<int>(playerPedId_);
+
+        if (ped != 0 && invokeNative<std::uint32_t>(entityModel_, ped) == target) {
+            return false;
+        }
+    }
+
+    wanted_ = target;
+    step_ = Step::LoadModel;
+    waitedFrames_ = 0;
+    settledFrames_ = 0;
+
+    spdlog::info("сервер назначил модель {:#010x}, заменяем", target);
+    return true;
 }
 
 Appearance::Progress Appearance::advance(int player) {

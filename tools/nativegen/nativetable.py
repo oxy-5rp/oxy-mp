@@ -87,6 +87,24 @@ ALT_ALIASES = {
     "setScriptGfxAlign": "_SCREEN_DRAW_POSITION_BEGIN",
     "resetScriptGfxAlign": "_SCREEN_DRAW_POSITION_END",
     "setScriptGfxAlignParams": "_SET_SCRIPT_GFX_ALIGN_PARAMS",
+
+    # Обратный счёт к тому же выравниванию: «куда на самом деле попадёт точка,
+    # если применить SET_SCRIPT_GFX_ALIGN и его параметры». Имени в базе у него
+    # нет вовсе — только хеш, — и потому его здесь легко не найти.
+    #
+    # Опознан не по догадке: подпись из @altv/types-natives
+    # (`(x, y, calculatedX, calculatedY) -> [void, number, number]`) сошлась с
+    # доводами из базы (float, float, floatPtr, floatPtr, returns void), а стоит
+    # он в GRAPHICS сразу за остальными тремя из этой же семьи.
+    "getScriptGfxAlignPosition": "0x6DD8F5AA635EB4B2",
+
+    # Двери зданий: у alt:V это «состояние двери», у базы — «предел ускорения».
+    # Имена разошлись потому, что довод у натива один и тот же, а толкуют его
+    # по-разному: ноль запирает дверь, прочее задаёт, насколько быстро она
+    # открывается. Опознаны по подписи (Hash, int, BOOL, BOOL -> void) — среди
+    # соседей по OBJECT это единственный с целым доводом, у прочих дробный.
+    "doorSystemSetDoorState": "_SET_DOOR_ACCELERATION_LIMIT",
+    "doorSystemGetDoorState": "0x160AA1B32F6139B8",
 }
 
 

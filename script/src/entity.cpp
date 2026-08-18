@@ -61,6 +61,10 @@ bool Player::clearWeapons() const {
     return core_ != nullptr && core_->clearWeapons(id_);
 }
 
+bool Player::setModel(std::uint32_t model) const {
+    return core_ != nullptr && core_->setModel(id_, model);
+}
+
 bool Player::teleport(const shared::Vec3& position) const {
     return core_ != nullptr && core_->teleport(id_, position);
 }

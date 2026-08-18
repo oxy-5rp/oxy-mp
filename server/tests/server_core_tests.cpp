@@ -27,6 +27,11 @@ public:
         sent.push_back(std::format("health {} {} {}", player.id, player.health, player.armour));
     }
 
+    void appearanceChanged(const Player& player) override {
+        sent.push_back(std::format("appearance {} {:#x}", player.id,
+                                   player.appearance ? player.appearance->model : 0U));
+    }
+
     void teleported(const Player& player, const shared::Vec3& position) override {
         sent.push_back(std::format("teleport {} {:.1f} {:.1f} {:.1f}", player.id, position.x,
                                    position.y, position.z));
@@ -359,6 +364,45 @@ TEST_CASE("a teleport is a request, not a change", "[server][script]") {
     // сервер решает, кому какую машину вести и кому о чём рассказывать.
     CHECK(player.position.x == 1.0F);
     CHECK(session.sink.sent.back() == "teleport 0 50.0 60.0 70.0");
+}
+
+TEST_CASE("a model named by a script reaches everyone, the owner included",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Внешности у него ещё нет вовсе: свою он объявляет не сразу, а сервер
+    // вправе назначить модель хоть в обработчике входа — то есть раньше.
+    REQUIRE_FALSE(player.appearance.has_value());
+
+    REQUIRE(session.core.setModel(player.id, 0x705E61F2));
+
+    REQUIRE(player.appearance.has_value());
+    CHECK(player.appearance->model == 0x705E61F2);
+
+    // Чей это вид, проставляет сервер: без этого получатель не понял бы, кого
+    // переодевать.
+    CHECK(player.appearance->playerId == player.id);
+
+    CHECK(session.sink.sent.back() == "appearance 0 0x705e61f2");
+}
+
+TEST_CASE("a model of zero is refused instead of stripping the player",
+          "[server][script]") {
+    // Ноль в PlayerAppearance означает «оставить ту, что есть», и приняв его за
+    // распоряжение, сервер оставил бы игрока без тела.
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    CHECK_FALSE(session.core.setModel(player.id, 0));
+    CHECK_FALSE(player.appearance.has_value());
+}
+
+TEST_CASE("a model named for nobody changes nothing", "[server][script]") {
+    Session session;
+    session.join(1, "игрок");
+
+    CHECK_FALSE(session.core.setModel(7, 0x705E61F2));
 }
 
 TEST_CASE("an event without a name goes nowhere", "[server][script]") {

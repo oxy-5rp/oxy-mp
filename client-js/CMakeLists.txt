@@ -65,6 +65,8 @@ oxymp_embed_text(oxymp_client_js js/alt_client_objects.js
                  altClientObjects oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client_extras.js
                  altClientExtras oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_client_locals.js
+                 altClientLocals oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client.js
                  altClient oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client_bootstrap.js

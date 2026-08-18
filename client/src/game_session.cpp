@@ -521,6 +521,30 @@ void GameSession::advance() {
             holdSession();
         }
 
+        // Смена модели, назначенная сервером, доводится здесь же: она занимает
+        // десятки кадров — модель нужно загрузить, персонажа пересоздать и дать
+        // ему устояться, — и ждать этого внутри одного кадра нельзя.
+        if (changingModel_) {
+            const game::Appearance::Progress progress = appearance_.advance(player_.id());
+
+            if (progress != game::Appearance::Progress::Loading) {
+                changingModel_ = false;
+
+                if (progress == game::Appearance::Progress::Done) {
+                    // Одежда надевается после замены, а не до: замена
+                    // пересоздаёт персонажа, и надетое до неё осталось бы на
+                    // прежнем теле, которого уже нет.
+                    look_.apply(player_.ped(), ownLook_);
+
+                    // Объявить себя заново обязательно: остальные видят нас по
+                    // тому, что мы им сказали, а сказали мы прежнюю модель.
+                    lookPublished_ = false;
+                } else {
+                    spdlog::warn("модель, назначенная сервером, не встала");
+                }
+            }
+        }
+
         // Каждый кадр, а не один раз после смерти. Игра гасит интерфейс сама и
         // не всегда возвращает: на смерти она убирает и радар, и полосы, считая,
         // что дальше её собственный порядок разбора смерти включит их обратно, —
@@ -1144,6 +1168,22 @@ void GameSession::applyServerState(int ped) {
     objects_.sync();
 }
 
+void GameSession::wearOwn(const shared::PlayerAppearance& appearance) {
+    ownLook_ = appearance;
+
+    // Модель меняется отдельно от одежды и не всегда: `want` сам решает, нужна
+    // ли замена вовсе. Пересоздание персонажа теряет всё, что на нём было, и
+    // делать его на каждое объявление внешности значило бы раздевать человека.
+    if (appearance_.want(appearance.model, player_.id())) {
+        changingModel_ = true;
+        return;
+    }
+
+    // Модель та же — остаётся одежда.
+    look_.apply(player_.ped(), appearance);
+    lookPublished_ = false;
+}
+
 void GameSession::publishAppearance(int ped) {
     if (ped == 0 || !look_.ready()) {
         return;
@@ -1198,7 +1238,17 @@ void GameSession::showRemotePlayers(int ped) {
     // Внешность людей — по той же причине и тем же порядком: она приходит
     // надёжным каналом и обгоняет снимки, а персонаж создаётся по снимку.
     // Пришедшая раньше, она дождётся его в памяти чужих игроков.
+    const shared::PlayerId self = status_.snapshot().playerId;
+
     for (const shared::PlayerAppearance& appearance : mail_.takeIncomingPlayerAppearances()) {
+        // Своя внешность приходит только тогда, когда её назначил сервер: ту,
+        // что мы объявили сами, он нам обратно не шлёт. Значит, спорить не о
+        // чем — это распоряжение, и его нужно исполнить у себя.
+        if (appearance.playerId == self && self != shared::kInvalidPlayerId) {
+            wearOwn(appearance);
+            continue;
+        }
+
         remotePlayers_.dress(appearance.playerId, appearance);
     }
 

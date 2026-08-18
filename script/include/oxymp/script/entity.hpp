@@ -46,6 +46,9 @@ public:
     [[nodiscard]] class Vehicle vehicle() const;
 
     bool setHealth(std::uint16_t health, std::uint16_t armour) const;
+
+    /// Меняет модель его персонажа. Ноль означает «оставить как есть».
+    bool setModel(std::uint32_t model) const;
     bool giveWeapon(std::uint32_t weapon, std::uint16_t ammo) const;
     bool clearWeapons() const;
 

@@ -1153,6 +1153,19 @@ void Server::loadoutChanged(const Player& player, bool replace) {
     sendLoadout(player, replace);
 }
 
+void Server::appearanceChanged(const Player& player) {
+    // Всем без исключения, включая самого игрока, — и в этом отличие от
+    // внешности, пришедшей от клиента. Ту он объявил сам и у себя уже надел, и
+    // возвращать её ему значило бы переодевать его в то же самое каждый раз.
+    // Эту ему назначил скрипт, и узнать о ней ему больше неоткуда.
+    //
+    // Без except — то есть и отправителю тоже: у broadcast это и означает
+    // «всем без изъятия».
+    if (player.appearance) {
+        broadcast(*player.appearance);
+    }
+}
+
 void Server::teleported(const Player& player, const shared::Vec3& position) {
     shared::PlayerTeleport teleport;
     teleport.position = position;

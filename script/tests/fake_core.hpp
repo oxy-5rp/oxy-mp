@@ -64,6 +64,17 @@ public:
         return true;
     }
 
+    bool setModel(shared::PlayerId id, std::uint32_t model) override {
+        const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
+        if (it == playerList.end() || model == 0) {
+            return false;
+        }
+
+        it->model = model;
+        said.push_back(std::format("model {} {:#x}", id, model));
+        return true;
+    }
+
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override {
         const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
         if (it == playerList.end()) {

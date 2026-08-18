@@ -3,6 +3,7 @@
 #include "convert.hpp"
 #include "resource.hpp"
 
+#include <oxymp/shared/math/joaat.hpp>
 #include <oxymp/shared/protocol/protocol_version.hpp>
 
 #include <spdlog/spdlog.h>
@@ -135,6 +136,36 @@ void setPlayerHealth(v8::Local<v8::Name>, v8::Local<v8::Value> value,
 
     (void)core.setHealth(*id, static_cast<std::uint16_t>(std::clamp<std::int64_t>(*health, 0, 200)),
                          player->armour);
+}
+
+/// Модель персонажа, назначенная сервером.
+///
+/// Принимает и хеш числом, и имя строкой — так же, как alt:V: режимы пишут
+/// `player.model = 'mp_m_freemode_01'` куда чаще, чем считают хеш руками.
+void setPlayerModel(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                    const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = idOf<shared::PlayerId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    // Числом или строкой — решается по числу, а не по строке, и это не
+    // вкусовщина: `v8::Value::IsString` объявлен экспортируемым из библиотеки,
+    // но определён прямо в заголовке, и линковщик отказывается выбирать между
+    // двумя его телами (LNK2005). `IsNumber` таким не страдает — через него и
+    // спрашиваем.
+    const std::optional<std::int64_t> number = intFromJs(isolate->GetCurrentContext(), value);
+
+    const std::uint32_t model = number ? static_cast<std::uint32_t>(*number)
+                                       : shared::joaat(fromJs(isolate, value));
+
+    if (model == 0) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setModel(*id, model);
 }
 
 void setPlayerArmour(v8::Local<v8::Name>, v8::Local<v8::Value> value,
@@ -578,6 +609,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "heading", playerField<&PlayerInfo::heading>);
     addGetter(isolate, shape, "health", playerField<&PlayerInfo::health>, setPlayerHealth);
     addGetter(isolate, shape, "armour", playerField<&PlayerInfo::armour>, setPlayerArmour);
+    addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
     addGetter(isolate, shape, "seat", playerField<&PlayerInfo::seat>);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
     addGetter(isolate, shape, "vehicle", playerVehicle);
