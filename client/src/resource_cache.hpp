@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -60,13 +61,37 @@ public:
                                           const std::vector<shared::ResourceEntry>& wanted,
                                           const Progress& report);
 
+    /// Корень, в котором лежат разложенные ресурсы сервера.
+    ///
+    /// По каталогу на ресурс, внутри — то же дерево файлов, что и у хозяина
+    /// сервера. Именно отсюда клиентская скриптовая машина берёт точку входа и
+    /// всё, что та тянет через require.
+    [[nodiscard]] std::filesystem::path resourceRoot() const;
+
 private:
     /// Качает один ресурс. Возвращает зашифрованное содержимое.
     [[nodiscard]] std::vector<std::uint8_t> download(const std::string& url,
                                                      std::uint64_t expectedSize,
                                                      std::string& error) const;
 
+    /// Читает опись разложенного: составное имя файла в его отпечаток.
+    void readIndex();
+
+    /// Пишет опись обратно.
+    void writeIndex() const;
+
     std::filesystem::path directory_;
+
+    /// Что уже разложено и с каким содержимым.
+    ///
+    /// Опись нужна затем, что дерево ресурса лежит под настоящими именами, а не
+    /// под отпечатками: иначе `require('./утилиты')` не нашёл бы соседний файл.
+    /// Но имя не говорит о содержимом ничего — сервер мог пересобрать ресурс, и
+    /// файл с тем же именем стал другим. Сверять же отпечаток пересчётом значило
+    /// бы читать все полторы тысячи файлов при каждом входе в сессию.
+    ///
+    /// Опись отвечает на этот вопрос одним сравнением строк.
+    std::map<std::string, std::string> laid_;
 };
 
 } // namespace oxymp::client

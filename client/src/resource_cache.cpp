@@ -14,6 +14,9 @@
 namespace oxymp::client {
 namespace {
 
+/// Опись разложенного: строка на файл, отпечаток и составное имя.
+constexpr const char* kIndexName = "resources.index";
+
 /// Сколько ждать сервера, в миллисекундах.
 ///
 /// Полминуты. Ресурсы бывают в десятки мегабайт, и канал у людей разный, но
@@ -106,6 +109,8 @@ ResourceCache::ResourceCache(std::filesystem::path directory) : directory_(std::
     if (ec) {
         spdlog::warn("каталог кеша {} не создан: {}", directory_.string(), ec.message());
     }
+
+    readIndex();
 }
 
 std::vector<std::uint8_t> ResourceCache::download(const std::string& url,
@@ -177,6 +182,49 @@ std::vector<std::uint8_t> ResourceCache::download(const std::string& url,
     return content;
 }
 
+std::filesystem::path ResourceCache::resourceRoot() const {
+    return directory_ / "resources";
+}
+
+void ResourceCache::readIndex() {
+    std::ifstream file{directory_ / kIndexName, std::ios::binary};
+    if (!file) {
+        return;
+    }
+
+    std::string line;
+
+    while (std::getline(file, line)) {
+        // Строка: отпечаток, пробел, составное имя. Имя идёт последним, потому
+        // что в нём бывают пробелы, а в отпечатке — нет.
+        const std::size_t space = line.find(' ');
+        if (space == std::string::npos) {
+            continue;
+        }
+
+        // Возврат каретки снимается: опись могли открыть Блокнотом.
+        std::string name = line.substr(space + 1);
+        while (!name.empty() && (name.back() == '\r' || name.back() == '\n')) {
+            name.pop_back();
+        }
+
+        if (!name.empty()) {
+            laid_[std::move(name)] = line.substr(0, space);
+        }
+    }
+}
+
+void ResourceCache::writeIndex() const {
+    std::ofstream file{directory_ / kIndexName, std::ios::binary | std::ios::trunc};
+    if (!file) {
+        return;
+    }
+
+    for (const auto& [name, hash] : laid_) {
+        file << hash << ' ' << name << '\n';
+    }
+}
+
 std::vector<ResourceCache::Ready> ResourceCache::sync(
     const std::string& serverAddress, std::uint16_t serverPort,
     const std::vector<shared::ResourceEntry>& wanted, const Progress& report) {
@@ -193,12 +241,32 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
     std::size_t done = 0;
 
     for (const shared::ResourceEntry& entry : wanted) {
-        // Расшифрованное лежит под отпечатком, а не под именем: имя у разных
+        // Куда лечь — решает вид имени.
+        //
+        // Игровой файл (`amgone.rpf`) ложится под отпечатком: имя у разных
         // серверов может совпасть при разном содержимом, отпечаток — нет.
-        const std::filesystem::path unpacked = directory_ / (entry.hash + "-" + entry.name);
+        //
+        // Файл ресурса (`main/client/index.cjs`) ложится деревом, под своим
+        // настоящим именем, и иначе нельзя. Ресурс — это не набор отдельных
+        // файлов, а дерево: точка входа делает `require('./утилиты')`, страница
+        // тянет `./assets/app.js`. Разложи мы их под отпечатками — ни один из
+        // этих путей не нашёл бы ничего, а поправить их некому: писал их
+        // хозяин сервера под alt:V, где дерево сохраняется.
+        const bool partOfResource = entry.name.find('/') != std::string::npos;
+
+        const std::filesystem::path unpacked =
+            partOfResource ? resourceRoot() / entry.name
+                           : directory_ / (entry.hash + "-" + entry.name);
 
         std::error_code ec;
-        const bool cached = std::filesystem::exists(unpacked, ec);
+
+        // У дерева одного существования файла мало: имя не говорит о содержимом
+        // ничего, и сервер мог пересобрать ресурс. Отвечает опись.
+        const auto laid = laid_.find(entry.name);
+
+        const bool cached =
+            std::filesystem::exists(unpacked, ec) &&
+            (!partOfResource || (laid != laid_.end() && laid->second == entry.hash));
 
         if (report) {
             report(done, wanted.size(), !cached);
@@ -233,7 +301,10 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
         const std::vector<std::uint8_t> plain = shared::Vault::unpack(packed, key, error);
 
-        if (plain.empty()) {
+        // Пустота считается отказом только если о нём сказано. Пустой файл —
+        // файл законный: в собранной странице интерфейса такие есть, и отвергать
+        // их значило бы оставлять на странице дыру без единого слова о причине.
+        if (plain.empty() && !error.empty()) {
             spdlog::error("ресурс {} не открылся: {}", entry.name, error);
             continue;
         }
@@ -243,9 +314,15 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
             continue;
         }
 
+        laid_[entry.name] = entry.hash;
+
         spdlog::info("ресурс {} готов", entry.name);
         ready.push_back(Ready{.name = entry.name, .path = unpacked});
     }
+
+    // Опись пишется один раз, в конце: полторы тысячи записей на диск после
+    // каждого файла стоили бы дороже самой закачки.
+    writeIndex();
 
     // Последний доклад — о том, что разобраны все. Без него счётчик остановился
     // бы на предпоследнем: доклад идёт перед работой, а не после неё, потому что

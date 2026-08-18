@@ -1394,6 +1394,30 @@ void run() {
                 feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
             }
 
+            // Клиентские половины ресурсов уезжают в игровой поток.
+            //
+            // Точку входа сервер помечает сам (ResourceEntry::page): по имени
+            // её не угадать, а угадывать нельзя — сегодня она называется
+            // index.cjs, завтра иначе.
+            std::vector<SessionMail::ClientResource> startable;
+
+            for (const shared::ResourceEntry& entry : *offered) {
+                const std::size_t slash = entry.name.find('/');
+
+                // Составное имя — «ресурс/путь/к/файлу». Без косой черты это
+                // игровой файл, а не часть ресурса.
+                if (!entry.page || slash == std::string::npos) {
+                    continue;
+                }
+
+                startable.push_back(SessionMail::ClientResource{
+                    .name = entry.name.substr(0, slash),
+                    .root = resources.resourceRoot() / entry.name.substr(0, slash),
+                    .entry = entry.name.substr(slash + 1)});
+            }
+
+            mail.deliverClientResources(std::move(startable));
+
             // Разложенное сервер теперь запускает — об этом странице и говорим.
             if (menu != nullptr) {
                 menu->loadingResources();

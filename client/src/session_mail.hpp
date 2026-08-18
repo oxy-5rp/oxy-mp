@@ -2,6 +2,7 @@
 
 #include <oxymp/shared/protocol/messages.hpp>
 
+#include <filesystem>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -170,6 +171,39 @@ public:
         return std::exchange(incomingEvents_, {});
     }
 
+    /// Клиентская половина ресурса, разложенная и готовая к запуску.
+    struct ClientResource {
+        /// Имя ресурса — то же, что и на сервере.
+        std::string name;
+
+        /// Корень его дерева в кеше клиента.
+        std::filesystem::path root;
+
+        /// Точка входа, путём от корня.
+        std::string entry;
+    };
+
+    /// Сеть разложила ресурсы; поднимать их будет игровой поток.
+    ///
+    /// Через почту, а не напрямую, и это не формальность: скриптовая машина
+    /// зовёт нативы, а нативы игра принимает только из своего потока. Заведи мы
+    /// машину там, где качались файлы, — первый же вызов натива уронил бы игру.
+    void deliverClientResources(std::vector<ClientResource> resources) {
+        if (resources.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        clientResources_.insert(clientResources_.end(),
+                                std::make_move_iterator(resources.begin()),
+                                std::make_move_iterator(resources.end()));
+    }
+
+    [[nodiscard]] std::vector<ClientResource> takeClientResources() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(clientResources_, {});
+    }
+
     void deliverObjects(std::vector<shared::ObjectAdded> added,
                         std::vector<shared::ObjectId> removed) {
         if (added.empty() && removed.empty()) {
@@ -269,6 +303,7 @@ private:
 
     std::vector<shared::DamageTaken> incomingDamage_;
     std::vector<shared::ServerEvent> incomingEvents_;
+    std::vector<ClientResource> clientResources_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;

@@ -1,5 +1,7 @@
 #include "game_session.hpp"
 
+#include "game/environment.hpp"
+
 #include "game/native_table.hpp"
 
 #include <spdlog/spdlog.h>
@@ -110,7 +112,8 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
                          UiFeed& feed)
-    : settings_(std::move(settings)),
+    : natives_(table),
+      settings_(std::move(settings)),
       status_(status),
       roster_(roster),
       localState_(localState),
@@ -551,6 +554,7 @@ void GameSession::advance() {
         }
 
         applyServerEvents(ped);
+        runScripts();
         applyIncomingDamage(ped);
         applyServerState(ped);
         handleDeath(player);
@@ -654,14 +658,60 @@ void GameSession::applyServerEvents(int ped) {
         }
     }
 
-    // Именованные события забираются, но пока никому не достаются: их адресат —
-    // клиентская часть ресурса, а её ещё нет. Забирать при этом обязательно,
-    // иначе они копились бы в почте до конца сессии.
+    // Именованные события уходят клиентским половинам ресурсов.
     //
-    // Толковать их здесь не будет и потом. Что значит имя и что значит нагрузка,
-    // знает написавший ресурс; клиент только доставляет.
-    for ([[maybe_unused]] const shared::ServerEvent& event : mail_.takeIncomingEvents()) {
+    // Толковать их здесь не будет никто и никогда. Что значит имя и что значит
+    // нагрузка, знает написавший ресурс; клиент только доставляет. Забирать их
+    // из почты нужно в любом случае — даже когда машины нет: иначе они
+    // копились бы там до конца сессии.
+    for (const shared::ServerEvent& event : mail_.takeIncomingEvents()) {
+        if (scripts_ != nullptr) {
+            scripts_->serverEvent(event.name, event.payload);
+        }
     }
+}
+
+void GameSession::runScripts() {
+    // Машина поднимается один раз и по требованию: до появления ресурсов она не
+    // нужна, а сто сорок мегабайт движка при входе в сессию стоят заметного
+    // времени там, где игра и так занята загрузкой.
+    std::vector<SessionMail::ClientResource> waiting = mail_.takeClientResources();
+
+    if (!waiting.empty() && scripts_ == nullptr && !scriptsTried_) {
+        scriptsTried_ = true;
+
+        ScriptHost::Hooks hooks;
+
+        hooks.natives = &natives_;
+
+        hooks.emitServer = [this](std::string_view name, std::string_view payload) {
+            mail_.postEvent(std::string{name}, std::string{payload});
+        };
+
+        std::string error;
+        scripts_ = ScriptHost::load(game::clientDirectory(), std::move(hooks), error);
+
+        if (scripts_ == nullptr) {
+            spdlog::warn("скриптовая машина клиента не поднялась: {}", error);
+            spdlog::warn("ресурсы сервера работать не будут, остальное — как обычно");
+        }
+    }
+
+    if (scripts_ == nullptr) {
+        return;
+    }
+
+    for (const SessionMail::ClientResource& resource : waiting) {
+        if (scripts_->startResource(resource.name, resource.root, resource.entry)) {
+            spdlog::info("клиентский ресурс \"{}\" поднят", resource.name);
+        } else {
+            spdlog::error("клиентский ресурс \"{}\" не поднялся", resource.name);
+        }
+    }
+
+    // Прокрутка раз в кадр: без неё не сработает ни один таймер и не разрешится
+    // ни одно обещание.
+    scripts_->tick();
 }
 
 void GameSession::applyIncomingDamage(int ped) {
