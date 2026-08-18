@@ -865,3 +865,30 @@ TEST_CASE("a teleport carries only where to", "[protocol]") {
     REQUIRE(back);
     CHECK(back->position.y == -2.5F);
 }
+
+TEST_CASE("a resource list of a real game mode survives a round trip", "[messages]") {
+    // Раздаётся не «ресурс», а каждый его файл: у живого режима клиентская
+    // половина — это собранная страница интерфейса, полторы-две тысячи картинок,
+    // шрифтов и кусков сборки. Прежний предел в пятьсот двенадцать обрезал
+    // список молча, и клиент открывал страницу, которой нет.
+    ResourceList list;
+
+    for (int i = 0; i < 1879; ++i) {
+        list.entries.push_back(ResourceEntry{.name = std::format("main/client/ui/file{}.js", i),
+                                             .hash = std::string(64, 'a'),
+                                             .size = 1024,
+                                             .page = i == 0});
+    }
+
+    ByteWriter writer;
+    list.write(writer);
+
+    ByteReader reader{ByteView{writer.bytes()}};
+    const ResourceList restored = ResourceList::read(reader);
+
+    CHECK(reader.ok());
+    CHECK(reader.exhausted());
+    REQUIRE(restored.entries.size() == 1879);
+    CHECK(restored.entries.front().page);
+    CHECK(restored.entries.back().name == "main/client/ui/file1878.js");
+}

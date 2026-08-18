@@ -432,6 +432,17 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         });
     }
 
+    // Список, не влезший в предел, — это молча недоданные файлы.
+    //
+    // Молчать здесь нельзя ни в коем случае: клиент скачает начало, откроет
+    // страницу, которой нет, и покажет ошибку браузера. Связать её с числом в
+    // протоколе будет не по чему — а хозяину сервера нужно понять, что резать
+    // надо не тут.
+    if (resources.entries.size() > shared::kMaxResources) {
+        spdlog::error("раздаётся {} файлов, а протокол вмещает {} — остальные не дойдут",
+                      resources.entries.size(), shared::kMaxResources);
+    }
+
     sendTo(peer, resources);
 
     for (const auto& joined : existing) {

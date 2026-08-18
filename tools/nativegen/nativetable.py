@@ -65,6 +65,31 @@ POINTERS = {
 }
 
 
+# Имена, которыми alt:V зовёт нативы иначе, чем открытая база.
+#
+# Ключ — имя у alt:V, значение — имя в базе CitizenFX. Расхождений немного, и
+# все они у неофициальных нативов: имя им давали разные люди в разное время.
+#
+# Перечислено вручную и растёт по мере встреч. Угадывать нельзя: имя ведёт к
+# хешу, а неверный хеш даёт не ошибку, а вылет игры в мгновение вызова.
+ALT_ALIASES = {
+    # Поворот камеры, каким его видит игрок. У CitizenFX он «второй вариант».
+    "getFinalRenderedCamRot": "_GET_GAMEPLAY_CAM_ROT_2",
+    "getFinalRenderedCamCoord": "GET_GAMEPLAY_CAM_COORD",
+    "getFinalRenderedCamFov": "GET_GAMEPLAY_CAM_FOV",
+
+    # Луч проверки видимости. У alt:V имя длиннее и говорит о том, что вызов
+    # ждёт ответа прямо в кадре, — у базы оно короче.
+    "startExpensiveSynchronousShapeTestLosProbe": "START_SHAPE_TEST_LOS_PROBE",
+
+    # Привязка рисуемого к краю экрана. У базы имя описывает, что вызов
+    # открывает область, у alt:V — что он задаёт выравнивание.
+    "setScriptGfxAlign": "_SCREEN_DRAW_POSITION_BEGIN",
+    "resetScriptGfxAlign": "_SCREEN_DRAW_POSITION_END",
+    "setScriptGfxAlignParams": "_SET_SCRIPT_GFX_ALIGN_PARAMS",
+}
+
+
 def resolve_alias(name: str, aliases: dict[str, str]) -> str:
     """Разворачивает псевдоним типа до его основы.
 
@@ -235,6 +260,11 @@ def main() -> int:
 
     entries: dict[str, str] = {}
 
+    # Имена без ведущего подчёркивания — те, что добавит alt:V. Кладутся в
+    # отдельный словарь и вливаются в конце: официальный натив с тем же именем
+    # обязан победить, а встретиться он может и позже.
+    stripped: dict[str, str] = {}
+
     skipped_unmapped = 0
     skipped_types = 0
 
@@ -264,7 +294,23 @@ def main() -> int:
             skipped_types += 1
             continue
 
-        entries[camel_case(native)] = f"{build:X}|{''.join(letters)}:{result}"
+        signature = f"{build:X}|{''.join(letters)}:{result}"
+        name = camel_case(native)
+
+        entries[name] = signature
+
+        # Неофициальные нативы кладутся и под именем без подчёркивания.
+        #
+        # Так их зовёт alt:V: `_GET_ASPECT_RATIO` у него `getAspectRatio`, и
+        # режимы написаны под это. Оба имени, а не одно взамен другого: под
+        # подчёркиванием их зовут тоже, и отнять его значило бы сломать половину
+        # уже написанного.
+        #
+        # Занятое имя не перебивается: если официальный натив с таким именем
+        # есть, оно принадлежит ему. Порядок обхода базы при этом значения не
+        # имеет — проверка идёт по готовому словарю в конце.
+        if name.startswith('_'):
+            stripped.setdefault(name[1:], signature)
 
     print("// Таблица нативов игры: имя, хеш нашей сборки и подпись.")
     print("//")
@@ -282,6 +328,28 @@ def main() -> int:
     print("//   v вектор  a что угодно  n ничего")
     print("//   L F B V — выходные доводы: указатель на место под ответ")
     print("")
+    for name, signature in stripped.items():
+        entries.setdefault(name, signature)
+
+    # Имена alt:V, расходящиеся с базой. Ставятся поверх: своё имя у alt:V
+    # главнее, ресурсы написаны под него.
+    by_native = {}
+    for native, canonical, _, _ in load_natives(text):
+        by_native[native] = canonical
+
+    for alt_name, native_name in ALT_ALIASES.items():
+        canonical = by_native.get(native_name)
+        build = translator.mapping.get(canonical) if canonical is not None else None
+
+        if build is None:
+            print(f"// псевдоним {alt_name}: натива {native_name} нет", file=sys.stderr)
+            continue
+
+        # Подпись берётся у того же натива — она у них одна.
+        source = camel_case(native_name)
+        if source in entries:
+            entries[alt_name] = entries[source]
+
     print("globalThis.__oxympAlt.nativeTable = {")
 
     for name in sorted(entries):

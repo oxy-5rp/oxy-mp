@@ -617,13 +617,31 @@
         WorldObject: entities.WorldObject,
         Entity: entities.Entity,
         Ped: entities.Ped,
-        Vehicle: entities.Vehicle,
         LocalPlayer: entities.LocalPlayer,
 
         /// `alt.Player.local` — свой персонаж. Так его и зовут ресурсы alt:V.
-        Player: Object.defineProperty(entities.LocalPlayer, 'local', {
-            get: () => entities.local,
-            configurable: true,
+        ///
+        /// `all` при этом отдаёт одного — себя. Это не упрощение, а правда:
+        /// чужих игроков клиент видит болванчиками игры, а какому номеру сессии
+        /// какой болванчик отвечает, ему не сказано — канала синхронизации
+        /// сущностей ещё нет. Пустой список был бы неверен (себя-то он знает),
+        /// а отказ сломал бы всякий обход `for (const p of alt.Player.all)`,
+        /// который режимы делают каждый кадр.
+        Player: Object.defineProperties(entities.LocalPlayer, {
+            local: { get: () => entities.local, configurable: true },
+            all: { get: () => [entities.local], configurable: true },
+            count: { get: () => 1, configurable: true },
+            getByID: {
+                value: (id) => (id === alt.selfId() ? entities.local : null),
+                configurable: true,
+            },
+        }),
+
+        /// Тех же правил список машин: клиент знает только те, что видит игра.
+        Vehicle: Object.defineProperties(entities.Vehicle, {
+            all: { get: () => [], configurable: true },
+            count: { get: () => 0, configurable: true },
+            getByID: { value: () => null, configurable: true },
         }),
 
         /// Сущность по дескриптору игры: нативы отдают именно их.
@@ -642,6 +660,12 @@
         toggleGameControls: objects.toggleGameControls,
 
         // Статистика, курсор, признаки персонажа, местные предметы, хранилище.
+        /// Размер кадра игры. У alt:V он на самом alt, а не только среди нативов.
+        getScreenResolution: () => {
+            const [ширина, высота] = alt.natives.getScreenResolution(0, 0);
+            return new shared.Vector2(ширина, высота);
+        },
+
         setStat: extras.setStat,
         getStat: extras.getStat,
         getCursorPos: extras.getCursorPos,
