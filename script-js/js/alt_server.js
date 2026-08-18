@@ -670,6 +670,37 @@
         return native.createVehicle(hashed, point, heading);
     }
 
+    /// `new alt.Vehicle(...)` — так машины и заводят в alt:V.
+    ///
+    /// Посредником над классом ядра, а не своим классом, и это существенно:
+    /// `instanceof alt.Vehicle` обязан по-прежнему узнавать машины, пришедшие из
+    /// ядра, — а они объекты того самого класса. Подмени мы его своим, всякая
+    /// проверка рода перестала бы сходиться, и притом молча.
+    ///
+    /// Доводы принимаются в обоих видах, какими их пишут: числами по одному и
+    /// векторами. Поворот берётся вокруг оси Z — вокруг неё машина и стоит.
+    const ConstructibleVehicle = new Proxy(Vehicle, {
+        construct(_target, args) {
+            const [model] = args;
+
+            const position = args.length >= 4
+                ? new shared.Vector3(args[1], args[2], args[3])
+                : new shared.Vector3(args[1]);
+
+            const rotation = args.length >= 7
+                ? new shared.Vector3(args[4], args[5], args[6])
+                : args[2];
+
+            const vehicle = createVehicle(model, position, rotation);
+
+            if (vehicle === null) {
+                throw new Error(`alt.Vehicle: машина модели ${model} не завелась`);
+            }
+
+            return vehicle;
+        },
+    });
+
     // --- Таймеры -------------------------------------------------------------
 
     /// Таймеры alt:V отличаются от родных для JS одним: они возвращают число.
@@ -706,7 +737,7 @@
         get defaultDimension() { return 0; },
 
         Player,
-        Vehicle,
+        Vehicle: ConstructibleVehicle,
 
         on,
         once,
