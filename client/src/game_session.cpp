@@ -727,6 +727,116 @@ void GameSession::runScripts() {
             return id == shared::kInvalidPlayerId ? -1 : static_cast<std::int32_t>(id);
         };
 
+        // Переводчик между номерами сессии и дескрипторами игры.
+        //
+        // Всё, что ему нужно, у клиента уже есть и всегда было: реестр сессии
+        // знает, кто в ней, а RemotePlayers и Vehicles знают, каким телом каждый
+        // из них показан здесь. Недоставало не сведений, а окошка к ним — и
+        // потому здесь нет ни нового сообщения протокола, ни нового поля в
+        // состоянии. Связь эта у каждого игрока своя, и сервер её не знает.
+        //
+        // Зовётся всё это из такта скриптовой машины, то есть из потока игры и
+        // изнутри обработчика скрипта. Другого потока здесь не бывает: движок
+        // крутится только в tick(), а tick() зовётся отсюда же.
+        hooks.entities.players = [this] {
+            std::vector<ScriptHost::Hooks::Entity> found;
+
+            // Себя — первым и всегда, даже до того, как в мире появится тело:
+            // ресурс, обходящий alt.Player.all первыми же строками, обязан найти
+            // там себя. Тело в этот миг может быть ещё нулевым, и это правда, а
+            // не пробел.
+            const shared::PlayerId self = status_.snapshot().playerId;
+
+            if (self != shared::kInvalidPlayerId) {
+                found.push_back(ScriptHost::Hooks::Entity{
+                    .id = static_cast<std::int32_t>(self),
+                    .handle = player_.ped(),
+                });
+            }
+
+            // Все, о ком сказал сервер, — а не только те, кому уже нашлось тело.
+            // Так же поступает и alt:V: у него `Player.all` — это все игроки
+            // сессии, а `streamedIn` — те, кто рядом. Игрок без тела всё равно
+            // нужен: у него есть имя и метаданные, и по ним рисуют список.
+            for (const RemoteView& player : roster_.snapshot()) {
+                found.push_back(ScriptHost::Hooks::Entity{
+                    .id = static_cast<std::int32_t>(player.id),
+                    .handle = remotePlayers_.handleFor(player.id),
+                });
+            }
+
+            return found;
+        };
+
+        hooks.entities.vehicles = [this] {
+            std::vector<ScriptHost::Hooks::Entity> found;
+
+            for (const SessionVehicleView& vehicle : roster_.vehicles()) {
+                found.push_back(ScriptHost::Hooks::Entity{
+                    .id = static_cast<std::int32_t>(vehicle.state.id),
+                    .handle = vehicles_.handleFor(vehicle.state.id),
+                });
+            }
+
+            return found;
+        };
+
+        hooks.entities.pedOf = [this](std::int32_t id) {
+            const shared::PlayerId self = status_.snapshot().playerId;
+
+            // Своё тело спрашивается у игры, а не ищется среди болванчиков: нас
+            // среди них нет и быть не может. К тому же игра выдаёт своему
+            // персонажу новый дескриптор после каждой смерти, и запомненный
+            // однажды устарел бы в первом же бою.
+            if (self != shared::kInvalidPlayerId && id == static_cast<std::int32_t>(self)) {
+                return player_.ped();
+            }
+
+            return remotePlayers_.handleFor(static_cast<shared::PlayerId>(id));
+        };
+
+        hooks.entities.playerAt = [this](std::int32_t ped) -> std::int32_t {
+            if (ped == 0) {
+                return -1;
+            }
+
+            const shared::PlayerId self = status_.snapshot().playerId;
+
+            if (self != shared::kInvalidPlayerId && ped == player_.ped()) {
+                return static_cast<std::int32_t>(self);
+            }
+
+            const shared::PlayerId owner = remotePlayers_.ownerOf(ped);
+
+            return owner == shared::kInvalidPlayerId ? -1 : static_cast<std::int32_t>(owner);
+        };
+
+        hooks.entities.carOf = [this](std::int32_t id) {
+            return vehicles_.handleFor(static_cast<shared::VehicleId>(id));
+        };
+
+        hooks.entities.vehicleAt = [this](std::int32_t car) -> std::int32_t {
+            const shared::VehicleId id = vehicles_.idOf(car);
+
+            return id == shared::kInvalidVehicleId ? -1 : static_cast<std::int32_t>(id);
+        };
+
+        hooks.entities.nameOf = [this](std::int32_t id) -> std::string {
+            const shared::PlayerId self = status_.snapshot().playerId;
+
+            if (self != shared::kInvalidPlayerId && id == static_cast<std::int32_t>(self)) {
+                return settings_.nickname;
+            }
+
+            for (const RemoteView& player : roster_.snapshot()) {
+                if (static_cast<std::int32_t>(player.id) == id) {
+                    return player.nickname;
+                }
+            }
+
+            return {};
+        };
+
         // Мостик к слою интерфейса берётся один раз: слой живёт до конца
         // процесса, и спрашивать о нём заново на каждое окно незачем.
         const SessionMail::ViewBridge views = mail_.viewBridge();

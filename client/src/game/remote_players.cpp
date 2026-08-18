@@ -783,6 +783,11 @@ std::optional<shared::Vec3> RemotePlayers::positionOf(shared::PlayerId player) c
                         context.result<float>(2)};
 }
 
+int RemotePlayers::handleFor(shared::PlayerId player) const {
+    const auto known = puppets_.find(player);
+    return known == puppets_.end() ? 0 : known->second.ped;
+}
+
 shared::PlayerId RemotePlayers::ownerOf(int ped) const {
     if (ped == 0) {
         return shared::kInvalidPlayerId;

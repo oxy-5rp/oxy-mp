@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace oxymp::client::js {
@@ -77,6 +78,122 @@ void emitServer(const v8::FunctionCallbackInfo<v8::Value>& info) {
     host.emitServer(host.context, toAbi(name),
                     OxympJsBytes{reinterpret_cast<const std::uint8_t*>(payload.data()),
                                  static_cast<std::uint32_t>(payload.size())});
+}
+
+// --- Сущности сессии --------------------------------------------------------
+
+/// Сколько сущностей помещается в буфер без обращения к куче.
+///
+/// Столько игроков в сессии не бывает почти никогда, а если бывает — список
+/// спрашивается заново, с буфером по размеру. Молчаливого обрезания здесь нет:
+/// обрезанный список выглядит как полный.
+constexpr std::uint32_t kEntitiesOnStack = 256;
+
+/// Род сущности, названный первым доводом.
+[[nodiscard]] OxympJsEntityKind kindOf(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    double asNumber = 0.0;
+
+    if (info.Length() >= 1) {
+        (void)info[0]->NumberValue(info.GetIsolate()->GetCurrentContext()).To(&asNumber);
+    }
+
+    return static_cast<int>(asNumber) == kOxympJsEntityVehicle ? kOxympJsEntityVehicle
+                                                               : kOxympJsEntityPlayer;
+}
+
+/// Целое, названное доводом под этим номером.
+[[nodiscard]] std::int32_t numberAt(const v8::FunctionCallbackInfo<v8::Value>& info, int index) {
+    double asNumber = 0.0;
+
+    if (info.Length() > index) {
+        (void)info[index]->NumberValue(info.GetIsolate()->GetCurrentContext()).To(&asNumber);
+    }
+
+    return static_cast<std::int32_t>(asNumber);
+}
+
+/// Сущности сессии этого рода — плоским списком «номер, тело, номер, тело».
+///
+/// Плоским, а не набором объектов, и это не скупость. Список этот ресурс
+/// спрашивает каждый кадр, обходя игроков; набор из сотни маленьких объектов
+/// означал бы сотню выделений в кадр, которые тут же станут мусором. Собрать
+/// из плоского то, что нужно, — забота слоя на JavaScript, и он делает это
+/// один раз на сущность, а не на каждый её опрос.
+void sessionEntities(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const OxympJsHost& host = resourceOf(isolate).host();
+
+    if (host.listEntities == nullptr) {
+        info.GetReturnValue().Set(v8::Array::New(isolate, 0));
+        return;
+    }
+
+    const OxympJsEntityKind kind = kindOf(info);
+
+    std::array<OxympJsEntity, kEntitiesOnStack> room{};
+    std::vector<OxympJsEntity> spare;
+
+    OxympJsEntity* entities = room.data();
+    std::uint32_t capacity = kEntitiesOnStack;
+    std::uint32_t total = host.listEntities(host.context, kind, entities, capacity);
+
+    // Не влезло — спрашиваем заново, теперь по размеру. Второй ответ может
+    // оказаться и короче первого: сессия живёт между вызовами, и кто-то мог
+    // выйти. Поэтому дальше берётся меньшее из двух.
+    if (total > capacity) {
+        spare.resize(total);
+        entities = spare.data();
+        capacity = total;
+        total = host.listEntities(host.context, kind, entities, capacity);
+    }
+
+    const std::uint32_t shown = total < capacity ? total : capacity;
+
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(shown) * 2);
+
+    for (std::uint32_t i = 0; i < shown; ++i) {
+        (void)list->Set(context, i * 2, v8::Integer::New(isolate, entities[i].id));
+        (void)list->Set(context, i * 2 + 1, v8::Integer::New(isolate, entities[i].handle));
+    }
+
+    info.GetReturnValue().Set(list);
+}
+
+/// Дескриптор игры по номеру сессии.
+void sessionHandle(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const OxympJsHost& host = resourceOf(info.GetIsolate()).host();
+
+    info.GetReturnValue().Set(host.entityHandle == nullptr
+                                  ? 0
+                                  : host.entityHandle(host.context, kindOf(info),
+                                                      numberAt(info, 1)));
+}
+
+/// Номер сессии по дескриптору игры.
+void sessionId(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const OxympJsHost& host = resourceOf(info.GetIsolate()).host();
+
+    info.GetReturnValue().Set(host.entityId == nullptr
+                                  ? -1
+                                  : host.entityId(host.context, kindOf(info), numberAt(info, 1)));
+}
+
+/// Имя игрока сессии.
+void playerName(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const OxympJsHost& host = resourceOf(isolate).host();
+
+    if (host.playerName == nullptr) {
+        info.GetReturnValue().Set(toJs(isolate, std::string_view{}));
+        return;
+    }
+
+    // Строка принадлежит клиенту и жива до следующего вызова — поэтому она
+    // копируется в V8 здесь же, а не запоминается указателем.
+    const OxympJsText name = host.playerName(host.context, numberAt(info, 0));
+
+    info.GetReturnValue().Set(toJs(isolate, fromAbi(name)));
 }
 
 // --- Окна интерфейса --------------------------------------------------------
@@ -183,6 +300,11 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
                                       ? -1
                                       : host.localPlayerId(host.context));
     });
+
+    addFunction(context, native, "sessionEntities", sessionEntities);
+    addFunction(context, native, "sessionHandle", sessionHandle);
+    addFunction(context, native, "sessionId", sessionId);
+    addFunction(context, native, "playerName", playerName);
 
     addFunction(context, native, "createWebView", createWebView);
     addFunction(context, native, "destroyWebView", destroyWebView);

@@ -14,7 +14,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -37,6 +39,21 @@ struct Recorder {
 
     /// Каким номером клиент отвечает на вопрос машины.
     std::int32_t selfId = -1;
+
+    /// Сущности сессии, какими их видит подставной клиент: номер и тело.
+    ///
+    /// Тем же порядком, что и настоящий клиент: сперва мы сами, потом
+    /// остальные. Ноль телом означает «в сессии есть, а здесь его ещё нет» — на
+    /// этом и проверяется разница между `all` и `streamedIn`.
+    std::vector<std::pair<std::int32_t, std::int32_t>> players;
+    std::vector<std::pair<std::int32_t, std::int32_t>> vehicles;
+
+    /// Имена игроков сессии по их номеру.
+    std::map<std::int32_t, std::string> names;
+
+    /// Строка, отданная границе последней. Граница обещает, что она жива до
+    /// следующего вызова, — значит, хранить её обязан клиент, а не вызов.
+    std::string lastName;
 };
 
 Recorder& recorder() {
@@ -81,6 +98,56 @@ std::int32_t onLocalPlayerId(void*) {
 
 OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
     return OxympJsBytes{nullptr, 0};
+}
+
+const std::vector<std::pair<std::int32_t, std::int32_t>>& listFor(OxympJsEntityKind kind) {
+    return kind == kOxympJsEntityVehicle ? recorder().vehicles : recorder().players;
+}
+
+std::uint32_t onListEntities(void*, OxympJsEntityKind kind, OxympJsEntity* entities,
+                             std::uint32_t capacity) {
+    const auto& source = listFor(kind);
+
+    for (std::size_t i = 0; i < source.size() && i < capacity; ++i) {
+        entities[i] = OxympJsEntity{.id = source[i].first, .handle = source[i].second};
+    }
+
+    // Сколько есть, а не сколько влезло: обрезать молча нельзя.
+    return static_cast<std::uint32_t>(source.size());
+}
+
+std::int32_t onEntityHandle(void*, OxympJsEntityKind kind, std::int32_t id) {
+    for (const auto& [number, handle] : listFor(kind)) {
+        if (number == id) {
+            return handle;
+        }
+    }
+
+    return 0;
+}
+
+std::int32_t onEntityId(void*, OxympJsEntityKind kind, std::int32_t handle) {
+    if (handle == 0) {
+        return -1;
+    }
+
+    for (const auto& [number, body] : listFor(kind)) {
+        if (body == handle) {
+            return number;
+        }
+    }
+
+    return -1;
+}
+
+OxympJsText onPlayerName(void*, std::int32_t id) {
+    Recorder& kept = recorder();
+
+    const auto found = kept.names.find(id);
+    kept.lastName = found == kept.names.end() ? std::string{} : found->second;
+
+    return OxympJsText{kept.lastName.data(),
+                       static_cast<std::uint32_t>(kept.lastName.size())};
 }
 
 std::uint32_t onCreateWebView(void*, OxympJsText, OxympJsText url) {
@@ -130,6 +197,10 @@ private:
         host_.callNative = &onCallNative;
         host_.localPlayerId = &onLocalPlayerId;
         host_.readResourceFile = &onReadResourceFile;
+        host_.listEntities = &onListEntities;
+        host_.entityHandle = &onEntityHandle;
+        host_.entityId = &onEntityId;
+        host_.playerName = &onPlayerName;
         host_.createWebView = &onCreateWebView;
         host_.destroyWebView = &onDestroyWebView;
         host_.emitWebView = &onEmitWebView;
@@ -392,6 +463,132 @@ TEST_CASE("an unresolved native answers nothing instead of zero", "[client][js]"
 }
 
 
+TEST_CASE("the client knows every player of the session, not only itself", "[client][js]") {
+    // То самое, чего недоставало: клиент видел вокруг себя одного — себя.
+    Recorder& kept = recorder();
+    kept.selfId = 7;
+    kept.players = {{7, 111}, {9, 222}};
+    kept.names = {{7, "oxy"}, {9, "сосед"}};
+
+    REQUIRE(run("roster", "const alt = require('alt-client');\n"
+                          "alt.log('всего ' + alt.Player.all.length);\n"
+                          "const кто = alt.Player.getByID(9);\n"
+                          "alt.log('рядом ' + кто.id + ' ' + кто.name);\n"
+                          "alt.log('я ' + alt.Player.local.id);\n"));
+
+    CHECK(said("всего 2"));
+    CHECK(said("рядом 9 сосед"));
+    CHECK(said("я 7"));
+}
+
+TEST_CASE("a player of the session without a body is still in the list", "[client][js]") {
+    // Игрок в сессии есть, а тела у него здесь ещё нет: он далеко или его модель
+    // грузится. У alt:V такой игрок тоже есть — с нулевым scriptID, — и списки
+    // разведены ровно поэтому.
+    Recorder& kept = recorder();
+    kept.selfId = 1;
+    kept.players = {{1, 100}, {2, 0}};
+    kept.names = {{1, "я"}, {2, "далёкий"}};
+
+    REQUIRE(run("streamed", "const alt = require('alt-client');\n"
+                            "alt.log('всех ' + alt.Player.all.length +\n"
+                            "    ', рядом ' + alt.Player.streamedIn.length);\n"
+                            "alt.log('зовётся ' + alt.Player.getByID(2).name);\n"));
+
+    CHECK(said("всех 2, рядом 1"));
+    CHECK(said("зовётся далёкий"));
+}
+
+TEST_CASE("the same player of the session is the same object twice", "[client][js]") {
+    // Тождество здесь не удобство: режимы сравнивают сущности через === и кладут
+    // их ключами в Map. Две обёртки на одного человека означали бы «меня в
+    // списке нет» — и ни одной жалобы.
+    Recorder& kept = recorder();
+    kept.selfId = 3;
+    kept.players = {{3, 300}, {4, 400}};
+    kept.names = {{3, "я"}, {4, "он"}};
+
+    REQUIRE(run("identity", "const alt = require('alt-client');\n"
+                            "const первый = alt.Player.getByID(4);\n"
+                            "const второй = alt.Player.all.find((кто) => кто.id === 4);\n"
+                            "alt.log('он тот же: ' + (первый === второй));\n"
+                            "alt.log('я тот же: ' +\n"
+                            "    (alt.Player.all.find((кто) => кто.id === 3) ===\n"
+                            "     alt.Player.local));\n"));
+
+    CHECK(said("он тот же: true"));
+    CHECK(said("я тот же: true"));
+}
+
+TEST_CASE("a synced meta of another player is readable", "[client][js]") {
+    // Раньше отказывало вслух: номера чужой сущности клиент не знал, а сервер
+    // рассылает метаданные именно по номерам.
+    Recorder& kept = recorder();
+    kept.selfId = 5;
+    kept.players = {{5, 500}, {6, 600}};
+    kept.names = {{5, "я"}, {6, "он"}};
+
+    REQUIRE(run("othermeta", "const alt = require('alt-client');\n"
+                             "alt.onServer('готово', () => {\n"
+                             "    const он = alt.Player.getByID(6);\n"
+                             "    alt.log('организация: ' + он.getSyncedMeta('org'));\n"
+                             "});\n"));
+
+    // Служебное имя то же, что и на сервере (alt_server.js, kSyncedMetaEvent).
+    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
+                                            bytes(R"(["player",6,"org","мафия"])"));
+    Engine::instance()->dispatchServerEvent(text("готово"), bytes("[]"));
+
+    CHECK(said("организация: мафия"));
+}
+
+TEST_CASE("a game handle resolves back to the session entity", "[client][js]") {
+    // Обратный перевод: луч, попавший в машину, отдаёт дескриптор, и без него
+    // ресурс не узнал бы, во что попал.
+    Recorder& kept = recorder();
+    kept.selfId = 8;
+    kept.players = {{8, 800}};
+    kept.names = {{8, "я"}};
+    kept.vehicles = {{31, 3100}};
+
+    // Подставной клиент отвечает на всякий натив одним и тем же — в том числе
+    // «сущность есть» и «это машина». Больше здесь от нативов ничего и не нужно:
+    // проверяется перевод, а не игра.
+    kept.nativeKnown = true;
+    kept.nativeAnswer = 1;
+
+    REQUIRE(run("reverse", "const alt = require('alt-client');\n"
+                           "const машина = alt.fromScriptID(3100);\n"
+                           "alt.log('машина ' + машина.id +\n"
+                           "    ', она же: ' + (машина === alt.Vehicle.getByID(31)));\n"
+                           "alt.log('машин ' + alt.Vehicle.all.length);\n"));
+
+    CHECK(said("машина 31, она же: true"));
+    CHECK(said("машин 1"));
+}
+
+TEST_CASE("an entity of the game alone has no session number", "[client][js]") {
+    // Случайный прохожий принадлежит игре, а не серверу. Ноль здесь был бы
+    // ложью: ноль — законный номер, и отправленный на сервер он указал бы на
+    // живого человека.
+    Recorder& kept = recorder();
+    kept.selfId = 2;
+    kept.players = {{2, 200}};
+    kept.vehicles = {};
+    kept.nativeKnown = true;
+    kept.nativeAnswer = 1;
+
+    REQUIRE(run("stranger", "const alt = require('alt-client');\n"
+                            "const прохожий = alt.fromScriptID(999);\n"
+                            "try {\n"
+                            "    прохожий.id;\n"
+                            "    alt.log('номер выдан — так быть не должно');\n"
+                            "} catch (отказ) {\n"
+                            "    alt.log('отказ: ' + отказ.message);\n"
+                            "}\n"));
+
+    CHECK(said("отказ: entity.id"));
+}
 TEST_CASE("a broken resource does not take the process down", "[client][js]") {
     // Процесс здесь — сама игра, и уронить её ошибкой в чужом ресурсе нельзя.
     CHECK_FALSE(run("broken", "это не JavaScript ((((\n"));
@@ -543,12 +740,17 @@ TEST_CASE("the local player reads its own synced meta", "[client][js]") {
 TEST_CASE("meta of an entity without a number refuses out loud", "[client][js]") {
     // undefined выглядело бы как «ключа нет», и режим искал бы ошибку на
     // сервере, где её нет.
+    //
+    // Отказ этот остался и после того, как переводчик сущностей появился, — но
+    // значит теперь другое. Раньше он значил «клиент не знает номеров вовсе»;
+    // теперь — «у этой сущности номера нет и быть не может»: прохожий с улицы
+    // принадлежит игре, а не серверу.
     REQUIRE(run("metaentity", "const alt = require('alt-client');\n"
                               "const чужой = new alt.Ped(123);\n"
                               "try { чужой.getSyncedMeta('x'); }\n"
                               "catch (e) { alt.log('отказ meta: ' + e.message); }\n"));
 
-    CHECK(said("отказ meta: entity.getSyncedMeta: номер этой сущности клиенту неизвестен"));
+    CHECK(said("отказ meta: entity.getSyncedMeta: у этой сущности нет номера"));
 }
 
 TEST_CASE("a resource written as an ES module runs", "[client][js]") {

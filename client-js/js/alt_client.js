@@ -613,35 +613,45 @@
         WebView,
         isKeyDown,
 
-        // Сущности: то, что стоит в мире. Собраны поверх нативов.
+        // Сущности: то, что стоит в мире. Собраны поверх нативов, а их номера
+        // в сессии — поверх переводчика, который держит клиент.
         WorldObject: entities.WorldObject,
         Entity: entities.Entity,
         Ped: entities.Ped,
         LocalPlayer: entities.LocalPlayer,
 
-        /// `alt.Player.local` — свой персонаж. Так его и зовут ресурсы alt:V.
+        /// Игроки сессии — все, о ком сказал сервер.
         ///
-        /// `all` при этом отдаёт одного — себя. Это не упрощение, а правда:
-        /// чужих игроков клиент видит болванчиками игры, а какому номеру сессии
-        /// какой болванчик отвечает, ему не сказано — канала синхронизации
-        /// сущностей ещё нет. Пустой список был бы неверен (себя-то он знает),
-        /// а отказ сломал бы всякий обход `for (const p of alt.Player.all)`,
-        /// который режимы делают каждый кадр.
-        Player: Object.defineProperties(entities.LocalPlayer, {
+        /// `all` и `streamedIn` разведены так же, как в alt:V, и разница между
+        /// ними существенная. `all` — это все игроки сессии, включая тех, до
+        /// кого отсюда километр: у них есть номер, имя и метаданные, и список
+        /// игроков рисуется по ним. `streamedIn` — только те, кому здесь нашлось
+        /// тело; всё, что рисуется над головой или считает расстояние, обязано
+        /// брать этот список, а не первый.
+        ///
+        /// Себя `all` отдаёт тем же объектом, что и `local`: режимы сравнивают
+        /// найденного в списке с `alt.Player.local` через `===`.
+        Player: Object.defineProperties(entities.Player, {
             local: { get: () => entities.local, configurable: true },
-            all: { get: () => [entities.local], configurable: true },
-            count: { get: () => 1, configurable: true },
-            getByID: {
-                value: (id) => (id === alt.selfId() ? entities.local : null),
-                configurable: true,
-            },
+            all: { get: () => entities.players(), configurable: true },
+            streamedIn: { get: () => entities.players(true), configurable: true },
+            count: { get: () => entities.players().length, configurable: true },
+            getByID: { value: (id) => entities.playerById(id), configurable: true },
+            getByRemoteID: { value: (id) => entities.playerById(id), configurable: true },
         }),
 
-        /// Тех же правил список машин: клиент знает только те, что видит игра.
+        /// Машины сессии — тех же правил.
+        ///
+        /// Здесь `all` и `streamedIn` расходятся ещё заметнее, чем у игроков:
+        /// машины сервер держит все разом, а заводит их клиент по мере
+        /// подгрузки моделей, и в первые секунды после входа тела нет почти ни у
+        /// одной.
         Vehicle: Object.defineProperties(entities.Vehicle, {
-            all: { get: () => [], configurable: true },
-            count: { get: () => 0, configurable: true },
-            getByID: { value: () => null, configurable: true },
+            all: { get: () => entities.vehicles(), configurable: true },
+            streamedIn: { get: () => entities.vehicles(true), configurable: true },
+            count: { get: () => entities.vehicles().length, configurable: true },
+            getByID: { value: (id) => entities.vehicleById(id), configurable: true },
+            getByRemoteID: { value: (id) => entities.vehicleById(id), configurable: true },
         }),
 
         /// Сущность по дескриптору игры: нативы отдают именно их.

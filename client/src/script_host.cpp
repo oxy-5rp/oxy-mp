@@ -11,6 +11,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace oxymp::client {
 namespace {
@@ -53,6 +54,13 @@ struct ScriptHost::State {
     const OxympJsEngine* engine = nullptr;
     OxympJsHost host{};
     Hooks hooks;
+
+    /// Имя игрока, отданное машине последним.
+    ///
+    /// Живёт здесь, а не во временной строке, потому что через границу уходит
+    /// указатель: отдай мы его на временную, машина прочла бы освобождённую
+    /// память. Граница обещает ровно это — строка жива до следующего вызова.
+    std::string lastName;
 };
 
 namespace {
@@ -151,6 +159,73 @@ OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
     return OxympJsBytes{nullptr, 0};
 }
 
+/// Список сущностей сессии этого рода.
+///
+/// Заполняет сколько влезло, возвращает сколько есть. Обрезать молча нельзя:
+/// обрезанный список выглядит как полный, и искать потом «пропавшего игрока»
+/// пришлось бы в самом ресурсе, где всё верно.
+std::uint32_t onListEntities(void*, OxympJsEntityKind kind, OxympJsEntity* entities,
+                             std::uint32_t capacity) {
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr) {
+        return 0;
+    }
+
+    const auto& source = kind == kOxympJsEntityVehicle ? state->hooks.entities.vehicles
+                                                       : state->hooks.entities.players;
+
+    if (!source) {
+        return 0;
+    }
+
+    const std::vector<ScriptHost::Hooks::Entity> found = source();
+
+    for (std::size_t i = 0; i < found.size() && i < capacity; ++i) {
+        entities[i] = OxympJsEntity{.id = found[i].id, .handle = found[i].handle};
+    }
+
+    return static_cast<std::uint32_t>(found.size());
+}
+
+std::int32_t onEntityHandle(void*, OxympJsEntityKind kind, std::int32_t id) {
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr) {
+        return 0;
+    }
+
+    const auto& resolve = kind == kOxympJsEntityVehicle ? state->hooks.entities.carOf
+                                                        : state->hooks.entities.pedOf;
+
+    return resolve ? resolve(id) : 0;
+}
+
+std::int32_t onEntityId(void*, OxympJsEntityKind kind, std::int32_t handle) {
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr) {
+        return -1;
+    }
+
+    const auto& resolve = kind == kOxympJsEntityVehicle ? state->hooks.entities.vehicleAt
+                                                        : state->hooks.entities.playerAt;
+
+    return resolve ? resolve(handle) : -1;
+}
+
+OxympJsText onPlayerName(void*, std::int32_t id) {
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr || !state->hooks.entities.nameOf) {
+        return OxympJsText{nullptr, 0};
+    }
+
+    state->lastName = state->hooks.entities.nameOf(id);
+
+    return text(state->lastName);
+}
+
 std::uint32_t onCreateWebView(void*, OxympJsText resource, OxympJsText url) {
     ScriptHost::State* const state = current();
 
@@ -244,6 +319,10 @@ std::unique_ptr<ScriptHost> ScriptHost::load(const std::filesystem::path& client
     state->host.callNative = &onCallNative;
     state->host.localPlayerId = &onLocalPlayerId;
     state->host.readResourceFile = &onReadResourceFile;
+    state->host.listEntities = &onListEntities;
+    state->host.entityHandle = &onEntityHandle;
+    state->host.entityId = &onEntityId;
+    state->host.playerName = &onPlayerName;
     state->host.createWebView = &onCreateWebView;
     state->host.destroyWebView = &onDestroyWebView;
     state->host.emitWebView = &onEmitWebView;

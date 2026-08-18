@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace oxymp::client {
 
@@ -42,6 +43,44 @@ public:
         /// Обработчиком, а не числом: номер меняется при переподключении, а
         /// машина спрашивает его тогда, когда он ей понадобился.
         std::function<std::int32_t()> localPlayerId;
+
+        /// Сущность сессии: чем её зовёт сервер и чем её зовёт игра.
+        struct Entity {
+            std::int32_t id = -1;
+
+            /// Ноль — сущность в сессии есть, а тела у неё здесь ещё нет.
+            std::int32_t handle = 0;
+        };
+
+        /// Переводчик между номерами сессии и дескрипторами игры.
+        ///
+        /// Одной связкой, а не россыпью полей: половина перевода была бы хуже
+        /// его отсутствия — ресурс получил бы сущность, у которой есть тело, но
+        /// нет номера, и отправил бы серверу дескриптор своей игры.
+        ///
+        /// Спрашивается, а не присылается. Связь эта у каждого игрока своя:
+        /// сервер называет всех своими номерами, а тела раздаёт игра, и раздаёт
+        /// по-разному — у одного персонаж уже создан, у другого модель ещё
+        /// грузится. Присылать её с сервера нечего, потому что сервер её не
+        /// знает.
+        struct Entities {
+            /// Все игроки сессии, включая нас. Без тела — с нулём в handle.
+            std::function<std::vector<Entity>()> players;
+
+            /// Все машины сессии.
+            std::function<std::vector<Entity>()> vehicles;
+
+            /// Тело по номеру и номер по телу, в обе стороны и для обоих родов.
+            std::function<std::int32_t(std::int32_t id)> pedOf;
+            std::function<std::int32_t(std::int32_t ped)> playerAt;
+            std::function<std::int32_t(std::int32_t id)> carOf;
+            std::function<std::int32_t(std::int32_t car)> vehicleAt;
+
+            /// Имя игрока сессии. Пусто — такого игрока нет.
+            std::function<std::string(std::int32_t id)> nameOf;
+        };
+
+        Entities entities;
 
         /// Завести окно интерфейса. Ноль — отказ.
         std::function<std::uint32_t(std::string_view resource, std::string_view url)> createView;
