@@ -21,6 +21,35 @@
         };
     }
 
+    /// О чём уже говорили. По поводу, а не по вызову.
+    const warned = new Set();
+
+    function warnOnce(what, why) {
+        if (warned.has(what)) {
+            return;
+        }
+
+        warned.add(what);
+        native.logWarning(`${what}: ${why}`);
+    }
+
+    /// Распоряжение, которого мы не умеем исполнить.
+    ///
+    /// Говорит один раз и возвращается, а не бросает. Разница с `absent` не в
+    /// громкости, а в цене: распоряжение стоит посреди чужого обработчика — в
+    /// такте, в обработчике клавиши, — и брошенное отсюда исключение уносит с
+    /// собой всё, что шло следом. Вопросов это не касается: у вопроса без ответа
+    /// тишина — ложь, и для них `absent` остаётся.
+    ///
+    /// answer — что вернуть вместо ответа. Пустая строка и false выбраны так,
+    /// чтобы зовущий увидел «не вышло», а не принял ложь за правду.
+    function unperformed(what, why, answer) {
+        return function () {
+            warnOnce(what, why);
+            return answer;
+        };
+    }
+
     // --- События -------------------------------------------------------------
 
     /// Подписки ресурса, по имени.
@@ -715,9 +744,38 @@
         WebSocketClient: absent('alt.WebSocketClient'),
         RmlDocument: absent('alt.RmlDocument'),
         Discord: absent('alt.Discord'),
-        loadModel: absent('alt.loadModel'),
-        requestIpl: absent('alt.requestIpl'),
-        setWeatherCycle: absent('alt.setWeatherCycle'),
+        // Распоряжения, которых мы не умеем исполнить: говорят один раз и не
+        // бросают. Стоят они посреди чужих обработчиков, и брошенное отсюда
+        // исключение унесло бы с собой всё, что идёт следом.
+        loadModel: unperformed('alt.loadModel',
+                               'модель подгружается нативом requestModel'),
+        requestIpl: unperformed('alt.requestIpl',
+                                'куски мира по слову ресурса не подгружаются'),
+        setWeatherCycle: unperformed('alt.setWeatherCycle',
+                                     'круг погоды ведёт сервер, а не ресурс'),
+
+        /// Заморозка камеры. Своего натива у игры для этого нет: alt:V делает
+        /// это внутри своего ядра, куда нам хода нет.
+        setCamFrozen: unperformed('alt.setCamFrozen',
+                                  'камера по слову ресурса не замирает'),
+
+        /// Снимок кадра. Возвращает обещание — как в alt:V, — но пустое: отдать
+        /// картинку нам неоткуда, а бросить нельзя, зовут это из обработчика.
+        takeScreenshotGameOnly: () => {
+            warnOnce('alt.takeScreenshotGameOnly', 'снимок кадра не снимается');
+            return Promise.resolve('');
+        },
+
+        takeScreenshot: () => {
+            warnOnce('alt.takeScreenshot', 'снимок кадра не снимается');
+            return Promise.resolve('');
+        },
+
+        /// Обращение к разметке радара. false — «не начали»: так зовущий и
+        /// узнает, что дальше звать нечего.
+        beginScaleformMovieMethodMinimap: unperformed(
+            'alt.beginScaleformMovieMethodMinimap',
+            'разметка радара ресурсу недоступна', false),
     };
 
     alt.client = client;

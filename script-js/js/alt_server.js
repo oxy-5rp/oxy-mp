@@ -33,6 +33,22 @@
     /// Но для того, что исполняется наполовину и стоит посреди чужого
     /// обработчика, бросок уносит с собой всё, что шло следом, — и вместо одной
     /// незакрытой мелочи ресурс теряет половину своего входа.
+    /// Распоряжение, которого мы не умеем исполнить.
+    ///
+    /// Не бросает — говорит один раз и возвращается. Разница с `absent` не в
+    /// громкости, а в цене: распоряжение стоит посреди чужого обработчика, и
+    /// брошенное отсюда исключение уносит с собой всё, что шло следом. Так уже
+    /// было дважды: `player.model` унёс показ интерфейса при входе, а
+    /// `vehicle.repair` — работу починки машин целиком.
+    ///
+    /// Вопросы этим не покрываются и покрываться не должны: у вопроса без
+    /// ответа тишина — это ложь, и `absent` для них остаётся.
+    function unperformed(what, why) {
+        return function () {
+            warnOnce(what, why);
+        };
+    }
+
     function warnOnce(what, why) {
         if (warned.has(what)) {
             return;
@@ -586,17 +602,17 @@
                          'сервер клиенту пока не шлёт');
             },
         },
-        setClothes: { value: absent('player.setClothes') },
-        setDlcClothes: { value: absent('player.setDlcClothes') },
-        setProp: { value: absent('player.setProp') },
-        clearProp: { value: absent('player.clearProp') },
-        setWeather: { value: absent('player.setWeather') },
-        setDateTime: { value: absent('player.setDateTime') },
-        removeWeapon: { value: absent('player.removeWeapon') },
-        setIntoVehicle: { value: absent('player.setIntoVehicle') },
-        addWeaponComponent: { value: absent('player.addWeaponComponent') },
-        playAnimation: { value: absent('player.playAnimation') },
-        attachTo: { value: absent('player.attachTo') },
+        setClothes: { value: unperformed('player.setClothes', 'одежда игрока сервером не меняется') },
+        setDlcClothes: { value: unperformed('player.setDlcClothes', 'одежда игрока сервером не меняется') },
+        setProp: { value: unperformed('player.setProp', 'надетое на игрока сервером не меняется') },
+        clearProp: { value: unperformed('player.clearProp', 'надетое на игрока сервером не меняется') },
+        setWeather: { value: unperformed('player.setWeather', 'погода у нас общая на сессию — см. alt.setWeather') },
+        setDateTime: { value: unperformed('player.setDateTime', 'часы у нас общие на сессию — см. alt.setTime') },
+        removeWeapon: { value: unperformed('player.removeWeapon', 'отобрать одно оружие нельзя, можно всё — clearWeapons') },
+        setIntoVehicle: { value: unperformed('player.setIntoVehicle', 'посадить игрока в машину сервер пока не умеет') },
+        addWeaponComponent: { value: unperformed('player.addWeaponComponent', 'обвесы оружия не передаются') },
+        playAnimation: { value: unperformed('player.playAnimation', 'движения по слову сервера не проигрываются') },
+        attachTo: { value: unperformed('player.attachTo', 'привязка сущностей друг к другу не передаётся') },
     });
 
     Object.defineProperties(Player, {
@@ -632,8 +648,8 @@
         toString: {
             value() { return `Vehicle{ id: ${this.id} }`; },
         },
-        setMod: { value: absent('vehicle.setMod') },
-        repair: { value: absent('vehicle.repair') },
+        setMod: { value: unperformed('vehicle.setMod', 'обвесы машины сервером не меняются') },
+        repair: { value: unperformed('vehicle.repair', 'починка машины сервером не выполняется') },
     });
 
     Object.defineProperties(Vehicle, {
