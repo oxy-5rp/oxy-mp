@@ -12,6 +12,10 @@
         'alt-client': alt.client,
         'alt-shared': alt.shared,
         'alt': alt.client,
+
+        // Нативы отдельным модулем — так их и тянет всякий клиентский ресурс
+        // alt:V: `import * as natives from 'natives'`.
+        'natives': alt.natives,
     };
 
     // Перехват Module._load, а не подмена глобального require, — по той же

@@ -325,34 +325,63 @@ TEST_CASE("an event from a web view reaches its own handler", "[client][js]") {
     CHECK(said("страница: кнопку"));
 }
 
-TEST_CASE("a native is called through the boundary", "[client][js]") {
+TEST_CASE("a native is called by name from the generated table", "[client][js]") {
+    // Так его и зовёт всякий клиентский ресурс alt:V.
     recorder().nativeKnown = true;
-    recorder().nativeAnswer = 42;
+    recorder().nativeAnswer = 4242;
 
-    REQUIRE(run("native", "const alt = require('alt-client');\n"
-                          "const ячейки = __oxympAlt.native.callNative(0x1234n, [7n, 9n]);\n"
-                          "alt.log('ответ ' + ячейки[0]);\n"));
+    REQUIRE(run("native", "const natives = require('natives');\n"
+                          "require('alt-client').log('время ' + natives.getGameTimer());\n"));
 
-    CHECK(recorder().nativeHash == 0x1234ULL);
-    REQUIRE(recorder().nativeArguments.size() == 2);
-    CHECK(recorder().nativeArguments[0] == 7ULL);
-    CHECK(said("ответ 42"));
+    // GET_GAME_TIMER: хеш выверен по живой игре (client/src/game/native_hashes.hpp).
+    CHECK(recorder().nativeHash == 0x1DD05E817C89C737ULL);
+    CHECK(said("время 4242"));
 }
 
-TEST_CASE("an unknown native answers nothing instead of zero", "[client][js]") {
+TEST_CASE("native arguments are laid out by the signature", "[client][js]") {
+    // Дробное кладётся своими битами, а не значением: игра читает ячейку как
+    // float. Положи мы туда единицу целым — натив прочёл бы 1.4e-45.
+    recorder().nativeKnown = true;
+
+    REQUIRE(run("nativeargs",
+                "const natives = require('natives');\n"
+                "natives.setEntityCoords(7, 1.5, 0, 0, false, false, false, true);\n"));
+
+    REQUIRE(recorder().nativeArguments.size() == 8);
+    CHECK(recorder().nativeArguments[0] == 7ULL);
+
+    // Полтора в битах float — 0x3FC00000.
+    CHECK(recorder().nativeArguments[1] == 0x3FC00000ULL);
+    CHECK(recorder().nativeArguments[4] == 0ULL);
+    CHECK(recorder().nativeArguments[7] == 1ULL);
+}
+
+TEST_CASE("a native missing from this build is simply absent", "[client][js]") {
+    // Нативам, которых нет в нашей сборке игры, хеш не выдумывается: неверный
+    // даёт не строку в журнале, а вылет игры в мгновение вызова.
+    REQUIRE(run("nonative", "const natives = require('natives');\n"
+                            "require('alt-client').log('нет такого: ' +\n"
+                            "    (natives.такогоНативаНет === undefined));\n"));
+
+    CHECK(said("нет такого: true"));
+}
+
+TEST_CASE("an unresolved native answers nothing instead of zero", "[client][js]") {
     // Ноль отличается от «натив вернул ноль» именно тем, что при отказе
     // результат не трогается: выдать одно за другое значило бы прятать
     // неразрешённый хеш.
     recorder().nativeKnown = false;
 
-    REQUIRE(run("nonative", "const alt = require('alt-client');\n"
-                            "const ответ = __oxympAlt.native.callNative(0x5678n, []);\n"
-                            "alt.log('ответ ' + (ответ === null ? 'пусто' : ответ[0]));\n"));
+    REQUIRE(run("unresolved", "const natives = require('natives');\n"
+                              "const ответ = natives.getGameTimer();\n"
+                              "require('alt-client').log('ответ ' +\n"
+                              "    (ответ === null ? 'пусто' : ответ));\n"));
 
     CHECK(said("ответ пусто"));
 
     recorder().nativeKnown = true;
 }
+
 
 TEST_CASE("a broken resource does not take the process down", "[client][js]") {
     // Процесс здесь — сама игра, и уронить её ошибкой в чужом ресурсе нельзя.

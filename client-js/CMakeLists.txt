@@ -20,6 +20,7 @@ add_library(oxymp_client_js SHARED
     src/bindings.cpp
     src/convert.cpp
     src/module.cpp
+    src/natives.cpp
     src/node_library.cpp
     src/resource.cpp
 )
@@ -54,6 +55,10 @@ oxymp_embed_text(oxymp_client_js ../script-js/js/alt_enums.js
                  altEnums oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js ../script-js/js/alt_shared.js
                  altShared oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_natives_table.js
+                 altNativesTable oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_natives.js
+                 altNatives oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client.js
                  altClient oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client_bootstrap.js
