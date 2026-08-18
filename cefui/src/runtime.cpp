@@ -94,6 +94,11 @@ bool startRuntime(const std::wstring& root, std::string page, std::string& error
     // меню.
     registerUiScheme(std::move(page), directory.parent_path() / "ui");
 
+    // Страницы игровых режимов лежат в кеше, рядом со всем, что клиент скачал у
+    // сервера. Каталог тот же, что знает ResourceCache: разъедутся — и ни одна
+    // страница режима не откроется.
+    registerResourceScheme(directory.parent_path() / "cache" / "resources");
+
     spdlog::debug("CEF поднят: {}", directory.string());
     return true;
 }

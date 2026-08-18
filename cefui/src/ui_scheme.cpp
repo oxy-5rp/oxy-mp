@@ -151,4 +151,16 @@ void registerUiScheme(std::string page, const std::filesystem::path& directory) 
     }
 }
 
+void registerResourceScheme(const std::filesystem::path& directory) {
+    // Тот же обработчик, что и у меню, но без встроенной страницы: здесь всё
+    // приходит с диска, из того, что клиент скачал у сервера.
+    if (!CefRegisterSchemeHandlerFactory("http", "resource",
+                                         new UiSchemeFactory{std::string{}, directory})) {
+        spdlog::error("не удалось завести схему http://resource — страницы режимов не откроются");
+        return;
+    }
+
+    spdlog::info("страницы ресурсов берутся из {}", directory.string());
+}
+
 } // namespace oxymp::cefui

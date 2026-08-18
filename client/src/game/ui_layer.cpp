@@ -207,6 +207,170 @@ struct UiLayer::State {
     /// страницы, и ставит перехват первым же кадром, когда окно нашлось.
     std::unique_ptr<MenuInput> input;
 
+    // --- Окна ресурсов --------------------------------------------------------
+
+    /// Одно окно игрового режима.
+    ///
+    /// Своя страница и своя поверхность у каждого: два окна ресурса — это две
+    /// независимые страницы, и складывать их в одну значило бы решать за режим,
+    /// какая из них поверх.
+    struct ResourceView {
+        std::uint32_t id = 0;
+        std::string url;
+        Surface surface;
+
+        /// Показывать ли. Заведённое окно показывается сразу — так же ведёт себя
+        /// и alt:V: `new alt.WebView(...)` появляется на экране без просьбы.
+        bool visible = true;
+
+        /// Берёт ли оно ввод. По умолчанию нет: страница, молча забравшая
+        /// клавиатуру, оставила бы игрока без управления и без объяснения.
+        bool focused = false;
+    };
+
+    /// Просьба, отложенная до потока, ведущего страницы.
+    ///
+    /// Просьбы копятся, а не исполняются на месте, и это не усложнение ради
+    /// стройности. Зовут их из игрового потока — оттуда, где идёт кадр, — а
+    /// заводить браузер CEF означает дождаться чужого процесса. Кадр игры не
+    /// имеет права ждать: он длится шестнадцать миллисекунд.
+    struct ViewRequest {
+        enum class Kind { Create, Destroy, Emit, Show, Focus } kind = Kind::Create;
+
+        std::uint32_t view = 0;
+        std::string first;
+        std::string second;
+        bool flag = false;
+    };
+
+    std::mutex viewsMutex;
+    std::vector<ViewRequest> viewRequests;
+
+    /// Живые окна. Трогает их только поток, ведущий страницы, и поток отрисовки
+    /// — последний лишь читает, под той же блокировкой.
+    std::vector<std::unique_ptr<ResourceView>> views;
+
+    /// Номера выдаются подряд и не переиспользуются: ресурс мог запомнить номер
+    /// закрытого окна, и выданный заново он показал бы ему чужую страницу.
+    std::atomic<std::uint32_t> nextViewId{1};
+
+    ViewEventHandler onViewEvent;
+
+    /// Находит окно по номеру. Зовётся под viewsMutex.
+    [[nodiscard]] ResourceView* findView(std::uint32_t id) {
+        for (const std::unique_ptr<ResourceView>& each : views) {
+            if (each->id == id) {
+                return each.get();
+            }
+        }
+
+        return nullptr;
+    }
+
+    /// Исполняет накопленные просьбы. Только из потока, ведущего страницы.
+    void serveViewRequests() {
+        std::vector<ViewRequest> batch;
+
+        {
+            const std::lock_guard guard{viewsMutex};
+            batch.swap(viewRequests);
+        }
+
+        for (ViewRequest& request : batch) {
+            switch (request.kind) {
+            case ViewRequest::Kind::Create: {
+                auto view = std::make_unique<ResourceView>();
+                view->id = request.view;
+                view->url = std::move(request.first);
+
+                std::string error;
+                view->surface.browser = oxymp::cefui::Browser::create(
+                    width, height,
+                    [kept = view.get()](const std::uint8_t* pixels, int w, int h) {
+                        kept->surface.accept(pixels, w, h);
+                    },
+                    error);
+
+                if (view->surface.browser == nullptr) {
+                    spdlog::error("окно ресурса \"{}\" не завелось: {}", view->url, error);
+                    break;
+                }
+
+                // Событие от страницы уходит наверх вместе с номером окна: два
+                // окна одного ресурса иначе не различить.
+                view->surface.browser->onEvent(
+                    [this, id = view->id](std::string_view name, std::string_view arguments) {
+                        if (onViewEvent) {
+                            onViewEvent(id, name, arguments);
+                        }
+                    });
+
+                view->surface.browser->open(view->url);
+
+                spdlog::info("окно ресурса открыто: {}", view->url);
+
+                const std::lock_guard guard{viewsMutex};
+                views.push_back(std::move(view));
+                break;
+            }
+
+            case ViewRequest::Kind::Destroy: {
+                const std::lock_guard guard{viewsMutex};
+
+                std::erase_if(views, [&](const std::unique_ptr<ResourceView>& each) {
+                    return each->id == request.view;
+                });
+                break;
+            }
+
+            case ViewRequest::Kind::Emit: {
+                const std::lock_guard guard{viewsMutex};
+
+                if (ResourceView* const view = findView(request.view);
+                    view != nullptr && view->surface.browser != nullptr) {
+                    view->surface.browser->emit(request.first, request.second);
+                }
+                break;
+            }
+
+            case ViewRequest::Kind::Show: {
+                const std::lock_guard guard{viewsMutex};
+
+                if (ResourceView* const view = findView(request.view); view != nullptr) {
+                    view->visible = request.flag;
+                }
+                break;
+            }
+
+            case ViewRequest::Kind::Focus: {
+                const std::lock_guard guard{viewsMutex};
+
+                if (ResourceView* const view = findView(request.view); view != nullptr) {
+                    view->focused = request.flag;
+
+                    if (view->surface.browser != nullptr) {
+                        view->surface.browser->setFocus(request.flag);
+                    }
+                }
+                break;
+            }
+            }
+        }
+    }
+
+    /// Просит ли ввод хоть одно окно ресурса.
+    [[nodiscard]] bool viewWantsInput() {
+        const std::lock_guard guard{viewsMutex};
+
+        for (const std::unique_ptr<ResourceView>& each : views) {
+            if (each->focused) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// Размер, под который подогнаны страницы.
     int width = kInitialWidth;
     int height = kInitialHeight;
@@ -319,6 +483,7 @@ struct UiLayer::State {
         while (!stopped.load()) {
             fitToWindow();
             catchInput();
+            serveViewRequests();
 
             // Про открытое меню знают все, кому это важно: свой слой по нему
             // прячется, игровая сессия по нему отбирает у игры ввод.
@@ -429,8 +594,23 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
                 state.overlay.draw(swapchain);
             }
 
-            // Меню рисуется вторым, то есть поверх: открытое, оно закрывает
-            // собой всё.
+            // Окна ресурсов — поверх своего слоя, но под меню.
+            //
+            // Порядок именно такой: меню принадлежит клиенту и обязано открыться
+            // поверх чего угодно, что нарисовал режим. Иначе страница режима,
+            // занявшая весь кадр, лишила бы игрока возможности отключиться.
+            {
+                const std::lock_guard guard{state.viewsMutex};
+
+                for (const std::unique_ptr<State::ResourceView>& view : state.views) {
+                    if (view->visible) {
+                        view->surface.draw(swapchain);
+                    }
+                }
+            }
+
+            // Меню рисуется последним, то есть поверх всего: открытое, оно
+            // закрывает собой всё.
             if (state.menuSurface.browser != nullptr) {
                 state.menuSurface.draw(swapchain);
             }
@@ -438,6 +618,15 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
         [&state] {
             state.overlay.renderer.releaseFrameResources();
             state.menuSurface.renderer.releaseFrameResources();
+
+            // Окна ресурсов держат такие же текстуры, и пережить пересоздание
+            // цепочки показа они не могут: собранная из освобождённой памяти,
+            // она даёт вылет на первом же кадре.
+            const std::lock_guard guard{state.viewsMutex};
+
+            for (const std::unique_ptr<State::ResourceView>& view : state.views) {
+                view->surface.renderer.releaseFrameResources();
+            }
         },
         error);
 
@@ -454,6 +643,75 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
 
 Menu* UiLayer::menu() const noexcept {
     return state_ == nullptr ? nullptr : state_->menu.get();
+}
+
+std::uint32_t UiLayer::createView(std::string url) {
+    if (state_ == nullptr) {
+        return 0;
+    }
+
+    // Номер выдаётся здесь и сразу, а окно заводится потом: ресурс подписывается
+    // на события окна той же строкой, которой его завёл, и ждать ему нечего.
+    const std::uint32_t id = state_->nextViewId.fetch_add(1);
+
+    const std::lock_guard guard{state_->viewsMutex};
+
+    state_->viewRequests.push_back(State::ViewRequest{
+        .kind = State::ViewRequest::Kind::Create, .view = id, .first = std::move(url)});
+
+    return id;
+}
+
+void UiLayer::destroyView(std::uint32_t view) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const std::lock_guard guard{state_->viewsMutex};
+
+    state_->viewRequests.push_back(
+        State::ViewRequest{.kind = State::ViewRequest::Kind::Destroy, .view = view});
+}
+
+void UiLayer::emitView(std::uint32_t view, std::string name, std::string arguments) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const std::lock_guard guard{state_->viewsMutex};
+
+    state_->viewRequests.push_back(State::ViewRequest{.kind = State::ViewRequest::Kind::Emit,
+                                                      .view = view,
+                                                      .first = std::move(name),
+                                                      .second = std::move(arguments)});
+}
+
+void UiLayer::showView(std::uint32_t view, bool visible) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const std::lock_guard guard{state_->viewsMutex};
+
+    state_->viewRequests.push_back(State::ViewRequest{
+        .kind = State::ViewRequest::Kind::Show, .view = view, .flag = visible});
+}
+
+void UiLayer::focusView(std::uint32_t view, bool focused) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    const std::lock_guard guard{state_->viewsMutex};
+
+    state_->viewRequests.push_back(State::ViewRequest{
+        .kind = State::ViewRequest::Kind::Focus, .view = view, .flag = focused});
+}
+
+void UiLayer::onViewEvent(ViewEventHandler handler) {
+    if (state_ != nullptr) {
+        state_->onViewEvent = std::move(handler);
+    }
 }
 
 UiLayer::~UiLayer() {
@@ -479,6 +737,13 @@ UiLayer::~UiLayer() {
     // страницу меню, и на само меню, и работает в потоке окна игры — то есть в
     // чужом, который о нашем разрушении не знает.
     state_->input.reset();
+
+    // Окна ресурсов уходят первыми: их страницы завёл поднявшийся ресурс, и
+    // пережить его им незачем.
+    {
+        const std::lock_guard guard{state_->viewsMutex};
+        state_->views.clear();
+    }
 
     // Меню уходит раньше своей страницы: оно на неё ссылается.
     state_->menu.reset();

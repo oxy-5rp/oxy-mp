@@ -52,6 +52,13 @@ std::wstring widen(const std::string& text) {
 }
 
 bool writeFile(const std::filesystem::path& path, std::span<const std::uint8_t> data) {
+    // Каталоги по пути заводятся сами, и это не удобство, а необходимость.
+    // Файлы ресурса ложатся деревом — `cache/resources/main/client/ui/app.js`, —
+    // и ни одного из этих каталогов заранее нет. Без этой строки сохранение
+    // молча отказывало на каждом файле ресурса: ofstream не заводит каталогов.
+    std::error_code failure;
+    std::filesystem::create_directories(path.parent_path(), failure);
+
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file) {
         return false;

@@ -671,6 +671,37 @@ void GameSession::applyServerEvents(int ped) {
     }
 }
 
+namespace {
+
+/// Приставка, которой alt:V помечает файлы своего ресурса.
+constexpr std::string_view kResourceScheme = "http://resource/";
+
+/// Превращает адрес ресурса в тот, который поймёт схема клиента.
+///
+/// Ресурс пишет `http://resource/client/ui/index.html`, подразумевая **свой**
+/// каталог: у alt:V имя узла означает «тот ресурс, который завёл это окно».
+/// Схема же клиента отдаёт весь кеш разом, и без имени ресурса два режима с
+/// одинаково названными страницами показали бы друг другу чужое.
+///
+/// Поэтому имя вставляется здесь: `http://resource/main/client/ui/index.html`.
+/// Ресурс об этом не знает и знать не должен — он писался под alt:V.
+[[nodiscard]] std::string resolveViewUrl(std::string_view resource, std::string_view url) {
+    if (!url.starts_with(kResourceScheme)) {
+        // Обычная ссылка — наружу или на данные. Отдаётся как есть: запрещать
+        // режиму открыть свою страницу в сети незачем, он и так пришёл оттуда.
+        return std::string{url};
+    }
+
+    std::string resolved{kResourceScheme};
+    resolved += resource;
+    resolved += '/';
+    resolved += url.substr(kResourceScheme.size());
+
+    return resolved;
+}
+
+} // namespace
+
 void GameSession::runScripts() {
     // Машина поднимается один раз и по требованию: до появления ресурсов она не
     // нужна, а сто сорок мегабайт движка при входе в сессию стоят заметного
@@ -687,6 +718,28 @@ void GameSession::runScripts() {
         hooks.emitServer = [this](std::string_view name, std::string_view payload) {
             mail_.postEvent(std::string{name}, std::string{payload});
         };
+
+        // Мостик к слою интерфейса берётся один раз: слой живёт до конца
+        // процесса, и спрашивать о нём заново на каждое окно незачем.
+        const SessionMail::ViewBridge views = mail_.viewBridge();
+
+        if (views.create) {
+            hooks.createView = [views](std::string_view resource, std::string_view url) {
+                return views.create(resolveViewUrl(resource, url));
+            };
+
+            hooks.destroyView = views.destroy;
+
+            hooks.emitView = [views](std::uint32_t view, std::string_view name,
+                                     std::string_view payload) {
+                views.emit(view, std::string{name}, std::string{payload});
+            };
+
+            hooks.showView = views.show;
+            hooks.focusView = views.focus;
+        } else {
+            spdlog::warn("слоя интерфейса нет — окна ресурсов заводиться не будут");
+        }
 
         std::string error;
         scripts_ = ScriptHost::load(game::clientDirectory(), std::move(hooks), error);
@@ -707,6 +760,17 @@ void GameSession::runScripts() {
         } else {
             spdlog::error("клиентский ресурс \"{}\" не поднялся", resource.name);
         }
+    }
+
+    // Сказать серверу, что мы готовы, нужно и когда ни один ресурс не поднялся:
+    // иначе сервер ждал бы нас вечно, и режим не получил бы события входа вовсе.
+    if (!waiting.empty()) {
+        mail_.postEvent(std::string{shared::kClientReadyEvent}, {});
+    }
+
+    // Событие от страницы уходит тому ресурсу, который эту страницу завёл.
+    for (const SessionMail::ViewEvent& event : mail_.takeViewEvents()) {
+        scripts_->viewEvent(event.view, event.name, event.arguments);
     }
 
     // Прокрутка раз в кадр: без неё не сработает ни один таймер и не разрешится

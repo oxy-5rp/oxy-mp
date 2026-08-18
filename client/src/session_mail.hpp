@@ -2,7 +2,9 @@
 
 #include <oxymp/shared/protocol/messages.hpp>
 
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -204,6 +206,52 @@ public:
         return std::exchange(clientResources_, {});
     }
 
+    // --- Окна интерфейса, которыми распоряжается ресурс ------------------------
+
+    /// Чем игровой поток дотягивается до слоя интерфейса.
+    ///
+    /// Через почту, а не прямой ссылкой, потому что живут они в разных местах и
+    /// заводятся в разном порядке: слой поднимается вместе с кадром игры, сессия
+    /// — вместе с соединением. Кто из них раньше, зависит от того, как быстро
+    /// игрок выбрал сервер.
+    ///
+    /// Пустые обработчики означают «слоя ещё нет»: окно тогда не заведётся, и
+    /// ресурс получит честный отказ вместо тишины.
+    struct ViewBridge {
+        std::function<std::uint32_t(std::string url)> create;
+        std::function<void(std::uint32_t view)> destroy;
+        std::function<void(std::uint32_t view, std::string name, std::string arguments)> emit;
+        std::function<void(std::uint32_t view, bool visible)> show;
+        std::function<void(std::uint32_t view, bool focused)> focus;
+    };
+
+    void setViewBridge(ViewBridge bridge) {
+        const std::lock_guard guard{mutex_};
+        viewBridge_ = std::move(bridge);
+    }
+
+    [[nodiscard]] ViewBridge viewBridge() const {
+        const std::lock_guard guard{mutex_};
+        return viewBridge_;
+    }
+
+    /// Событие от страницы ресурса. Кладёт поток CEF, забирает игровой.
+    void deliverViewEvent(std::uint32_t view, std::string name, std::string arguments) {
+        const std::lock_guard guard{mutex_};
+        viewEvents_.push_back(ViewEvent{view, std::move(name), std::move(arguments)});
+    }
+
+    struct ViewEvent {
+        std::uint32_t view = 0;
+        std::string name;
+        std::string arguments;
+    };
+
+    [[nodiscard]] std::vector<ViewEvent> takeViewEvents() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(viewEvents_, {});
+    }
+
     void deliverObjects(std::vector<shared::ObjectAdded> added,
                         std::vector<shared::ObjectId> removed) {
         if (added.empty() && removed.empty()) {
@@ -304,6 +352,8 @@ private:
     std::vector<shared::DamageTaken> incomingDamage_;
     std::vector<shared::ServerEvent> incomingEvents_;
     std::vector<ClientResource> clientResources_;
+    std::vector<ViewEvent> viewEvents_;
+    ViewBridge viewBridge_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;

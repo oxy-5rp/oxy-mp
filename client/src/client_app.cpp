@@ -1168,6 +1168,30 @@ void run() {
         ui = game::UiLayer::create(feed, std::move(actions), uiError);
         if (ui == nullptr) {
             spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
+        } else {
+            // Слой поднялся — значит окна ресурсов теперь есть кому заводить.
+            game::UiLayer* const layer = ui.get();
+
+            mail.setViewBridge(SessionMail::ViewBridge{
+                .create = [layer](std::string url) { return layer->createView(std::move(url)); },
+                .destroy = [layer](std::uint32_t view) { layer->destroyView(view); },
+                .emit = [layer](std::uint32_t view, std::string name, std::string arguments) {
+                    layer->emitView(view, std::move(name), std::move(arguments));
+                },
+                .show = [layer](std::uint32_t view, bool visible) {
+                    layer->showView(view, visible);
+                },
+                .focus = [layer](std::uint32_t view, bool focused) {
+                    layer->focusView(view, focused);
+                }});
+
+            // Событие от страницы кладётся в почту, а исполняет его игровой
+            // поток: зовут этот обработчик из потока CEF, и трогать оттуда
+            // скриптовую машину нельзя.
+            layer->onViewEvent([&mail](std::uint32_t view, std::string_view name,
+                                       std::string_view arguments) {
+                mail.deliverViewEvent(view, std::string{name}, std::string{arguments});
+            });
         }
     }
 
@@ -1416,7 +1440,14 @@ void run() {
                     .entry = entry.name.substr(slash + 1)});
             }
 
-            mail.deliverClientResources(std::move(startable));
+            if (startable.empty()) {
+                // Клиентских половин нет вовсе — ждать нечего, и сервер об этом
+                // нужно известить сразу. Иначе он держал бы событие входа до
+                // конца сессии, и режим без клиентской части не работал бы вовсе.
+                mail.postEvent(std::string{shared::kClientReadyEvent}, {});
+            } else {
+                mail.deliverClientResources(std::move(startable));
+            }
 
             // Разложенное сервер теперь запускает — об этом странице и говорим.
             if (menu != nullptr) {

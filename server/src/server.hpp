@@ -55,6 +55,14 @@ private:
 
     void handleHello(net::PeerId peer, const shared::ClientHello& hello);
 
+    /// Объявляет скриптам вход игрока — когда его клиент к этому готов.
+    ///
+    /// Отдельно от самого входа: соединение установилось раньше, чем на той
+    /// стороне поднялись ресурсы, и объявленный сразу вход застал бы клиента
+    /// глухим.
+    void announcePlayerReady(Player& player);
+
+
     /// Принимает объявленную игроком внешность и пересказывает её остальным.
     void handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance);
 
