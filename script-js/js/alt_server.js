@@ -556,7 +556,7 @@
         },
         dimension: {
             get() { return 0; },
-            set: absent('player.dimension'),
+            set: unperformed('player.dimension', 'измерений в oxyMP нет'),
         },
         /// Как игрока зовут. У alt:V это `name`, и оно уже есть в ядре.
         ip: { get: absent('player.ip') },
@@ -628,11 +628,11 @@
     Object.defineProperties(Vehicle.prototype, {
         pos: {
             get() { return new shared.Vector3(this.position); },
-            set: absent('vehicle.pos'),
+            set: unperformed('vehicle.pos', 'переставить машину сервер пока не умеет'),
         },
         rot: {
             get() { return new shared.Vector3(this.rotation); },
-            set: absent('vehicle.rot'),
+            set: unperformed('vehicle.rot', 'повернуть машину сервер пока не умеет'),
         },
         /// Кто за рулём. У alt:V это `driver`, у ядра — `owner` (ведущий).
         ///
@@ -643,7 +643,7 @@
         driver: { get() { return this.owner; } },
         dimension: {
             get() { return 0; },
-            set: absent('vehicle.dimension'),
+            set: unperformed('vehicle.dimension', 'измерений в oxyMP нет'),
         },
         toString: {
             value() { return `Vehicle{ id: ${this.id} }`; },
