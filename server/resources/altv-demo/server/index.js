@@ -9,6 +9,18 @@ const alt = require('alt-server');
 
 alt.log('показательный режим поднят');
 
+// Ресурс знает про себя и про соседей: имя, корень, тип. Дальше этого не
+// заглянуть — у каждого ресурса свой изолят, и значение одного в чужом не
+// живёт вовсе.
+alt.log(`я ресурс «${alt.Resource.current.name}» (${alt.Resource.current.type})`);
+
+// Список соседей спрашивается позже, а не из точки входа: поднимаются ресурсы
+// по очереди, и тот, кто спрашивает первым, ещё никого не застаёт.
+alt.setTimeout(() => {
+    alt.log(`поднято ресурсов ${alt.Resource.all.length}: ` +
+            alt.Resource.all.map((each) => each.name).join(', '));
+}, 500);
+
 alt.on('playerConnect', (player) => {
     alt.log(`вошёл ${player.name} с адреса ${player.ip}`);
 

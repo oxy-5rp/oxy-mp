@@ -58,6 +58,66 @@
         native.logWarning(`${what}: ${why}`);
     }
 
+    // --- Ресурсы -------------------------------------------------------------
+
+    /// Поднятый ресурс, каким его видит скрипт.
+    ///
+    /// Назван ScriptResource, а не Resource: наружу он уходит именем
+    /// `alt.Resource`, но внутри этого файла `Resource` уже занят классом
+    /// движка, и одноимённые встречались бы в одном месте.
+    class ScriptResource {
+        constructor(name, path) {
+            this.name = name;
+            this.path = path;
+
+            // Тип у нас один: движок здесь только для JavaScript. Врать про
+            // остальные незачем — их нет.
+            this.type = 'js';
+            this.isStarted = true;
+        }
+
+        /// Настройки ресурса из его resource.toml.
+        ///
+        /// Пустой объект, и это честнее отказа: у alt:V сюда попадает то, что
+        /// хозяин дописал в описание сверх обязательного, и обычно там пусто.
+        /// Отказ же бросал бы посреди чужого обработчика на ровном месте.
+        get config() {
+            return {};
+        }
+
+        /// То, чем ресурсы alt:V делятся друг с другом.
+        ///
+        /// Отказывает вслух, и это не пробел, а следствие устройства. У alt:V
+        /// все ресурсы живут в одном изоляте, и функция одного в другом
+        /// работает; здесь у каждого свой — уронивший свою кучу не должен
+        /// уносить чужие, — и значение из одного изолята в другом не живёт
+        /// вовсе. Отдать копию значило бы отдать не то, что просили: изменения
+        /// в неё не вернутся, а функции в ней не будет.
+        ///
+        /// Чем это заменяется: `alt.emit` — его слышат все поднятые ресурсы, и
+        /// доводы через него ходят по-настоящему.
+        get exports() {
+            throw new Error('resource.exports: у каждого ресурса свой изолят, ' +
+                            'и значение одного в чужом не живёт — пользуйтесь alt.emit');
+        }
+
+        static get current() {
+            return new ScriptResource(native.resourceName, native.resourcePath);
+        }
+
+        static get all() {
+            return native.resources().map((each) => new ScriptResource(each.name, each.path));
+        }
+
+        static get(name) {
+            return ScriptResource.all.find((each) => each.name === String(name)) ?? null;
+        }
+
+        static exists(name) {
+            return ScriptResource.get(name) !== null;
+        }
+    }
+
     // --- События -------------------------------------------------------------
 
     /// Подписки, заведённые ресурсом.
@@ -1557,7 +1617,7 @@
         // доступен весь Node: `fetch`, `http`, `ws` и что угодно из npm.
         HttpClient: absent('alt.HttpClient (он клиентский; на сервере есть fetch)'),
         WebSocketClient: absent('alt.WebSocketClient (он клиентский)'),
-        Resource: absent('alt.Resource'),
+        Resource: ScriptResource,
         restartResource: absent('alt.restartResource'),
         startResource: absent('alt.startResource'),
         stopResource: absent('alt.stopResource'),

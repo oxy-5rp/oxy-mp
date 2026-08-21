@@ -1597,6 +1597,33 @@ void removeCheckpoint(const v8::FunctionCallbackInfo<v8::Value>& info) {
         resourceOf(isolate).core().removeCheckpoint(static_cast<shared::CheckpointId>(*id)));
 }
 
+// --- Ресурсы ----------------------------------------------------------------
+
+/// Кто ещё поднят: список объектов с именем и корнем.
+///
+/// Только это и отдаётся, и не по бедности. Всё прочее, что alt:V показывает у
+/// чужого ресурса, живёт в его изоляте — а изолят у каждого свой, и заглянуть в
+/// соседний нельзя ни отсюда, ни откуда бы то ни было. Разделение это не наша
+/// прихоть, а условие: уронивший свою кучу не должен уносить чужие.
+void listResources(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const auto everyone = resourceOf(isolate).roster();
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(everyone.size()));
+
+    for (std::size_t index = 0; index < everyone.size(); ++index) {
+        const v8::Local<v8::Object> each = v8::Object::New(isolate);
+
+        (void)each->Set(context, toJs(isolate, "name"), toJs(isolate, everyone[index].first));
+        (void)each->Set(context, toJs(isolate, "path"), toJs(isolate, everyone[index].second));
+
+        (void)list->Set(context, static_cast<std::uint32_t>(index), each);
+    }
+
+    info.GetReturnValue().Set(list);
+}
+
 // --- Объект oxymp -----------------------------------------------------------
 
 void onEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -2114,6 +2141,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     // Имя ресурса — чтобы он мог собрать путь к своим файлам и назвать себя в
     // событии клиенту.
     (void)oxymp->Set(context, toJs(isolate, "resourceName"), toJs(isolate, resource.name()));
+
+    addFunction(context, oxymp, "resources", listResources);
 
     // Корень ресурса: слою alt:V он нужен, чтобы отдать `alt.Resource.path`, а
     // ресурсу — чтобы дотянуться до своих файлов, не гадая о рабочем каталоге

@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace oxymp::script::js {
@@ -193,6 +194,22 @@ public:
         }
 
         auto resource = std::make_unique<Resource>(key, root, *core_, *process().platform);
+
+        // Список соседей ставится до запуска, а не после: ресурс вправе
+        // спросить о них прямо из точки входа, и ответить ему к тому мгновению
+        // уже должно быть чем. Себя он в этом списке не увидит — его туда ещё
+        // не положили, — и это верно: спрашивают о соседях, а про себя есть
+        // `Resource.current`.
+        resource->onRoster([this] {
+            std::vector<std::pair<std::string, std::string>> everyone;
+            everyone.reserve(resources_.size());
+
+            for (const auto& [key, each] : resources_) {
+                everyone.emplace_back(key, each->root().string());
+            }
+
+            return everyone;
+        });
 
         if (!resource->start(entry, error)) {
             return false;

@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -76,6 +77,20 @@ public:
         if (announce_) {
             announce_(name, payload);
         }
+    }
+
+    /// Кто ещё поднят: имя и корень каждого.
+    ///
+    /// Ставит движок, по той же причине, что и Announce: про остальные ресурсы
+    /// знает только он. Ресурс же спрашивает — и получает список, а не доступ:
+    /// чужой изолят ему по-прежнему недоступен, и это не ограничение, а
+    /// устройство. Значение из одного изолята в другом не живёт вовсе.
+    using Roster = std::function<std::vector<std::pair<std::string, std::string>>()>;
+
+    void onRoster(Roster roster) { roster_ = std::move(roster); }
+
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> roster() const {
+        return roster_ ? roster_() : std::vector<std::pair<std::string, std::string>>{};
     }
 
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
@@ -146,6 +161,7 @@ private:
     std::unordered_map<std::string, std::vector<v8::Global<v8::Function>>> handlers_;
 
     Announce announce_;
+    Roster roster_;
 
     v8::Global<v8::FunctionTemplate> playerShape_;
     v8::Global<v8::FunctionTemplate> vehicleShape_;
