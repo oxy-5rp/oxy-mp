@@ -150,6 +150,58 @@ bool ServerCore::clearWeapons(shared::PlayerId id) {
     return true;
 }
 
+/// Внешность игрока, заведённая при надобности.
+///
+/// Её может не быть вовсе: игрок объявляет свою не сразу, а сервер вправе
+/// одеть его хоть в обработчике входа — то есть раньше. Тогда она заводится
+/// здесь пустой, а остальное игрок допишет своим объявлением.
+namespace {
+
+[[nodiscard]] shared::PlayerAppearance& appearanceOf(Player& player) {
+    if (!player.appearance) {
+        player.appearance.emplace();
+        player.appearance->playerId = player.id;
+    }
+
+    return *player.appearance;
+}
+
+} // namespace
+
+bool ServerCore::setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
+                            std::uint8_t texture, std::uint8_t palette) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || component >= shared::kPedComponentCount) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    look.components[component] = shared::PedComponent{
+        .drawable = drawable,
+        .texture = texture,
+        .palette = palette,
+    };
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
+                         std::int8_t texture) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || index >= shared::kPedPropCount) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    look.props[index] = shared::PedProp{.drawable = drawable, .texture = texture};
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
 bool ServerCore::setDimension(shared::PlayerId id, std::int32_t dimension) {
     Player* const player = players_->findById(id);
     if (player == nullptr) {

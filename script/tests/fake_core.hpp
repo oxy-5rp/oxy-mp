@@ -75,6 +75,27 @@ public:
         return true;
     }
 
+    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
+                    std::uint8_t texture, std::uint8_t palette) override {
+        if (!player(id) || component >= shared::kPedComponentCount) {
+            return false;
+        }
+
+        said.push_back(
+            std::format("clothes {} {} {} {} {}", id, component, drawable, texture, palette));
+        return true;
+    }
+
+    bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
+                 std::int8_t texture) override {
+        if (!player(id) || index >= shared::kPedPropCount) {
+            return false;
+        }
+
+        said.push_back(std::format("prop {} {} {} {}", id, index, drawable, texture));
+        return true;
+    }
+
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override {
         const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
         if (it == playerList.end()) {

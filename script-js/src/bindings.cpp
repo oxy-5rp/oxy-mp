@@ -190,6 +190,92 @@ void setPlayerArmour(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                          static_cast<std::uint16_t>(std::clamp<std::int64_t>(*armour, 0, 100)));
 }
 
+/// Число из довода по месту. Пусто — довода нет или он не число.
+[[nodiscard]] std::optional<std::int64_t> argAt(const v8::FunctionCallbackInfo<v8::Value>& info,
+                                                int index) {
+    if (info.Length() <= index) {
+        return std::nullopt;
+    }
+
+    return intFromJs(info.GetIsolate()->GetCurrentContext(), info[index]);
+}
+
+/// Одевает игрока: слот, вещь, расцветка, набор цветов.
+void playerSetClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> component = argAt(info, 0);
+    const std::optional<std::int64_t> drawable = argAt(info, 1);
+
+    if (!component || !drawable) {
+        fail(isolate, "setClothes ждёт слот и вещь числами");
+        return;
+    }
+
+    // Расцветка и набор цветов необязательны: у alt:V они с умолчаниями, и
+    // ресурсы почти всегда зовут это двумя доводами.
+    const std::int64_t texture = argAt(info, 2).value_or(0);
+    const std::int64_t palette = argAt(info, 3).value_or(0);
+
+    const bool done = resourceOf(isolate).core().setClothes(
+        *id, static_cast<std::uint8_t>(*component), static_cast<std::uint8_t>(*drawable),
+        static_cast<std::uint8_t>(texture), static_cast<std::uint8_t>(palette));
+
+    info.GetReturnValue().Set(done);
+}
+
+/// Надевает аксессуар: шляпу, очки, серьги, часы, браслет.
+void playerSetProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> index = argAt(info, 0);
+    const std::optional<std::int64_t> drawable = argAt(info, 1);
+
+    if (!index || !drawable) {
+        fail(isolate, "setProp ждёт место и вещь числами");
+        return;
+    }
+
+    const std::int64_t texture = argAt(info, 2).value_or(0);
+
+    const bool done = resourceOf(isolate).core().setProp(
+        *id, static_cast<std::uint8_t>(*index), static_cast<std::int8_t>(*drawable),
+        static_cast<std::int8_t>(texture));
+
+    info.GetReturnValue().Set(done);
+}
+
+/// Снимает аксессуар. Минус единица — то, чем «ничего не надето» зовётся у игры.
+void playerClearProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> index = argAt(info, 0);
+    if (!index) {
+        fail(isolate, "clearProp ждёт место числом");
+        return;
+    }
+
+    const bool done =
+        resourceOf(isolate).core().setProp(*id, static_cast<std::uint8_t>(*index), -1, 0);
+
+    info.GetReturnValue().Set(done);
+}
+
 /// В каком слое мира игрок. Ставится числом; всё, что не число, пропускается.
 void setPlayerDimension(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                         const v8::PropertyCallbackInfo<void>& info) {
@@ -683,6 +769,9 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "teleport", playerTeleport);
     addMethod(isolate, shape, "giveWeapon", playerGiveWeapon);
     addMethod(isolate, shape, "clearWeapons", playerClearWeapons);
+    addMethod(isolate, shape, "setClothes", playerSetClothes);
+    addMethod(isolate, shape, "setProp", playerSetProp);
+    addMethod(isolate, shape, "clearProp", playerClearProp);
     addMethod(isolate, shape, "emit", playerEmit);
     addMethod(isolate, shape, "tell", playerTell);
     addMethod(isolate, shape, "kick", playerKick);

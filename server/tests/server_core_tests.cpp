@@ -478,3 +478,52 @@ TEST_CASE("a dimension named for a vehicle that is gone changes nothing", "[serv
 
     CHECK_FALSE(session.core.setVehicleDimension(1, 1));
 }
+
+TEST_CASE("clothes named by a script reach everyone, the owner included", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Внешности у него ещё нет вовсе: свою он объявляет не сразу, а сервер
+    // вправе одеть его хоть в обработчике входа — то есть раньше.
+    REQUIRE_FALSE(player.appearance.has_value());
+
+    // Одиннадцатый слот — верх, и это нумерация игры, а не наша.
+    REQUIRE(session.core.setClothes(player.id, 11, 15, 2, 0));
+
+    REQUIRE(player.appearance.has_value());
+    CHECK(player.appearance->components[11].drawable == 15);
+    CHECK(player.appearance->components[11].texture == 2);
+    CHECK(player.appearance->playerId == player.id);
+
+    CHECK(session.sink.sent.back().starts_with("appearance 0"));
+}
+
+TEST_CASE("a clothing slot outside the ones the game has is refused", "[server][script]") {
+    // Молча проглоченный слот выглядел бы как надетое, но невидимое, — и
+    // искали бы его в одежде, а не в номере.
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    CHECK_FALSE(session.core.setClothes(player.id, shared::kPedComponentCount, 1, 0, 0));
+    CHECK_FALSE(player.appearance.has_value());
+}
+
+TEST_CASE("an accessory is put on and taken off by the same call", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setProp(player.id, 0, 5, 1));
+    CHECK(player.appearance->props[0].drawable == 5);
+    CHECK(player.appearance->props[0].texture == 1);
+
+    // Минус единица — то, чем «ничего не надето» зовётся у самой игры.
+    REQUIRE(session.core.setProp(player.id, 0, -1, 0));
+    CHECK(player.appearance->props[0].drawable == -1);
+}
+
+TEST_CASE("clothes named for nobody change nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.setClothes(7, 11, 1, 0, 0));
+    CHECK_FALSE(session.core.setProp(7, 0, 1, 0));
+}

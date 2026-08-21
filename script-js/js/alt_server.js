@@ -671,10 +671,17 @@
                          'сервер клиенту пока не шлёт');
             },
         },
-        setClothes: { value: unperformed('player.setClothes', 'одежда игрока сервером не меняется') },
-        setDlcClothes: { value: unperformed('player.setDlcClothes', 'одежда игрока сервером не меняется') },
-        setProp: { value: unperformed('player.setProp', 'надетое на игрока сервером не меняется') },
-        clearProp: { value: unperformed('player.clearProp', 'надетое на игрока сервером не меняется') },
+        /// Одежда и аксессуары есть у ядра и работают: `setClothes`, `setProp`
+        /// и `clearProp` приходят прямо оттуда.
+        ///
+        /// А вот `setDlcClothes` — нет, и разница не в лени. У alt:V она берёт
+        /// вещь из набора DLC, названного хешем, и вещи эти лежат в других
+        /// файлах игры; наш протокол внешности такого поля не знает вовсе.
+        /// Промолчать было бы хуже: ресурс решил бы, что одел человека.
+        setDlcClothes: {
+            value: unperformed('player.setDlcClothes',
+                               'одежда из наборов DLC протоколом внешности не описана'),
+        },
         setWeather: { value: unperformed('player.setWeather', 'погода у нас общая на сессию — см. alt.setWeather') },
         setDateTime: { value: unperformed('player.setDateTime', 'часы у нас общие на сессию — см. alt.setTime') },
         removeWeapon: { value: unperformed('player.removeWeapon', 'отобрать одно оружие нельзя, можно всё — clearWeapons') },

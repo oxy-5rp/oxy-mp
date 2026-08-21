@@ -104,6 +104,10 @@ public:
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
     bool setModel(shared::PlayerId id, std::uint32_t model) override;
+    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
+                    std::uint8_t texture, std::uint8_t palette) override;
+    bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
+                 std::int8_t texture) override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;
