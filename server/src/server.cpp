@@ -631,26 +631,59 @@ void Server::broadcastStates() {
 
     ++tick_;
 
-    for (const auto& [peer, listener] : players_) {
-        shared::PlayerStates bundle;
+    // Первый проход: выжимка из реестра и снимки, записанные подряд.
+    //
+    // Снимок каждого пишется в байты ровно один раз за такт. Прежде он
+    // собирался заново для каждого, кто его увидит, — то есть столько раз,
+    // сколько у человека соседей. При тысяче игроков и сотне соседей у каждого
+    // это сто тысяч сборок за такт вместо тысячи.
+    slots_.clear();
+    slots_.reserve(players_.size());
+    blob_.clear();
 
-        for (const auto& [otherPeer, other] : players_) {
-            if (otherPeer == peer) {
-                continue;
-            }
+    for (const auto& [peer, player] : players_) {
+        StateSlot slot;
+        slot.peer = peer;
+        slot.id = player.id;
+        slot.position = player.position;
 
-            // Молчащего пересылать незачем: получатель держит его на месте сам.
-            // Раз в секунду — всё же пересылаем: подошедший рядом со стоящим
-            // иначе не увидел бы его вовсе.
-            const bool stale = now - other.stateSentAt >= kStateKeepalive;
-            if (!other.stateFresh && !stale) {
+        // Молчащего писать незачем: получатель держит его на месте сам. Раз в
+        // секунду — всё же пишем: подошедший рядом со стоящим иначе не увидел
+        // бы его вовсе.
+        const bool stale = now - player.stateSentAt >= kStateKeepalive;
+
+        if (player.stateFresh || stale) {
+            const std::size_t before = blob_.bytes().size();
+            player.state.write(blob_);
+
+            slot.offset = static_cast<std::uint32_t>(before);
+            slot.length = static_cast<std::uint32_t>(blob_.bytes().size() - before);
+        }
+
+        slots_.push_back(slot);
+    }
+
+    const std::vector<std::uint8_t>& blob = blob_.bytes();
+
+    // Второй проход: каждому получателю — его связка.
+    for (const StateSlot& listener : slots_) {
+        const auto send = [this, &listener](shared::ByteView bundle) {
+            // Ненадёжным каналом, как и прежде: потерянная связка дешевле
+            // заменяется следующей, чем переотправляется устаревшей.
+            host_->send(listener.peer, shared::Channel::State, bundle);
+        };
+
+        bundler_.reset();
+
+        for (const StateSlot& other : slots_) {
+            if (other.peer == listener.peer || other.length == 0) {
                 continue;
             }
 
             // Только тем, кто рядом. Игроку незачем знать, как бежит человек за
             // полкилометра: он его всё равно не увидит, а снимков это половина
             // всего, что ходит по сети.
-            const float distance = shared::distanceSquared(listener.position, other.state.position);
+            const float distance = shared::distanceSquared(listener.position, other.position);
             if (distance > reach) {
                 continue;
             }
@@ -674,19 +707,10 @@ void Server::broadcastStates() {
                 continue;
             }
 
-            if (bundle.players.size() >= shared::kMaxStatesInBundle) {
-                break;
-            }
-
-            bundle.players.push_back(other.state);
+            bundler_.add(shared::ByteView{blob.data() + other.offset, other.length}, send);
         }
 
-        if (!bundle.players.empty()) {
-            // Ненадёжным каналом, как и прежде: потерянная связка дешевле
-            // заменяется следующей, чем переотправляется устаревшей.
-            const auto packet = shared::encode(bundle);
-            host_->send(peer, shared::Channel::State, shared::ByteView{packet});
-        }
+        bundler_.finish(send);
     }
 
     // Отметки снимаются после всех связок, а не по ходу: снимок одного игрока

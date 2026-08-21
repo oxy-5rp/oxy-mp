@@ -76,6 +76,17 @@ std::unique_ptr<Host> Host::listen(std::uint16_t port, std::size_t maxPeers, std
         return nullptr;
     }
 
+    // Сверка стоит здесь, а не у того, кто зовёт: потолок принадлежит транспорту,
+    // и знать о нём должно ровно это место. Без неё библиотека отказывает молча,
+    // и отказ этот неотличим от занятого порта.
+    static_assert(kMaxPeers == ENET_PROTOCOL_MAXIMUM_PEER_ID,
+                  "потолок соединений разошёлся с тем, что заложен в ENet");
+
+    if (maxPeers > kMaxPeers) {
+        error = "мест больше, чем транспорт умеет держать соединений";
+        return nullptr;
+    }
+
     ENetAddress address{};
     address.host = ENET_HOST_ANY;
     address.port = port;
