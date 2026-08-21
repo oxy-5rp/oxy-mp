@@ -388,6 +388,16 @@ void VehicleAppearance::write(ByteWriter& writer) const {
     writer.writeU8(neonBlue);
 
     writer.writeU16(extras);
+
+    writer.writeU8(customPrimary ? 1 : 0);
+    writer.writeU8(customPrimaryRed);
+    writer.writeU8(customPrimaryGreen);
+    writer.writeU8(customPrimaryBlue);
+
+    writer.writeU8(customSecondary ? 1 : 0);
+    writer.writeU8(customSecondaryRed);
+    writer.writeU8(customSecondaryGreen);
+    writer.writeU8(customSecondaryBlue);
 }
 
 VehicleAppearance VehicleAppearance::read(ByteReader& reader) {
@@ -422,6 +432,16 @@ VehicleAppearance VehicleAppearance::read(ByteReader& reader) {
     message.neonBlue = reader.readU8();
 
     message.extras = reader.readU16();
+
+    message.customPrimary = reader.readU8() != 0;
+    message.customPrimaryRed = reader.readU8();
+    message.customPrimaryGreen = reader.readU8();
+    message.customPrimaryBlue = reader.readU8();
+
+    message.customSecondary = reader.readU8() != 0;
+    message.customSecondaryRed = reader.readU8();
+    message.customSecondaryGreen = reader.readU8();
+    message.customSecondaryBlue = reader.readU8();
 
     if (message.plate.size() > kMaxPlateLength) {
         message.plate.resize(kMaxPlateLength);

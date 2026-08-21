@@ -140,6 +140,10 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       fixTyre_(table.handlerFor(natives::kSetVehicleTyreFixed)),
       getColours_(table.handlerFor(natives::kGetVehicleColours)),
       setColours_(table.handlerFor(natives::kSetVehicleColours)),
+      setCustomPrimary_(table.handlerFor(natives::kSetVehicleCustomPrimaryColour)),
+      setCustomSecondary_(table.handlerFor(natives::kSetVehicleCustomSecondaryColour)),
+      clearCustomPrimary_(table.handlerFor(natives::kClearVehicleCustomPrimaryColour)),
+      clearCustomSecondary_(table.handlerFor(natives::kClearVehicleCustomSecondaryColour)),
       getExtraColours_(table.handlerFor(natives::kGetVehicleExtraColours)),
       setExtraColours_(table.handlerFor(natives::kSetVehicleExtraColours)),
       getPlate_(table.handlerFor(natives::kGetVehicleNumberPlateText)),
@@ -633,6 +637,31 @@ void VehicleSnapshot::applyAppearance(int vehicle,
         invokeNative<void>(setExtraColours_, vehicle,
                            static_cast<int>(appearance.pearlescentColour),
                            static_cast<int>(appearance.wheelColour));
+    }
+
+    // Своя краска ставится после номера цвета и перекрывает его — так у игры.
+    // Снятие тоже обязательно: перекрасив машину номером, но не сняв краску, мы
+    // получили бы машину, которая не слушается палитры вовсе.
+    if (appearance.customPrimary) {
+        if (setCustomPrimary_ != nullptr) {
+            invokeNative<void>(setCustomPrimary_, vehicle,
+                               static_cast<int>(appearance.customPrimaryRed),
+                               static_cast<int>(appearance.customPrimaryGreen),
+                               static_cast<int>(appearance.customPrimaryBlue));
+        }
+    } else if (clearCustomPrimary_ != nullptr) {
+        invokeNative<void>(clearCustomPrimary_, vehicle);
+    }
+
+    if (appearance.customSecondary) {
+        if (setCustomSecondary_ != nullptr) {
+            invokeNative<void>(setCustomSecondary_, vehicle,
+                               static_cast<int>(appearance.customSecondaryRed),
+                               static_cast<int>(appearance.customSecondaryGreen),
+                               static_cast<int>(appearance.customSecondaryBlue));
+        }
+    } else if (clearCustomSecondary_ != nullptr) {
+        invokeNative<void>(clearCustomSecondary_, vehicle);
     }
 
     if (setPlate_ != nullptr && !appearance.plate.empty()) {

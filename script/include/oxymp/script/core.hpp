@@ -101,6 +101,18 @@ struct VehicleAppearanceInfo {
     std::uint8_t pearlescentColour = 0;
     std::uint8_t wheelColour = 0;
 
+    /// Своя краска поверх номера палитры. Признак нужен затем, что чёрная
+    /// краска осмысленна, а «краски нет» — отдельное состояние.
+    bool customPrimary = false;
+    std::uint8_t customPrimaryRed = 0;
+    std::uint8_t customPrimaryGreen = 0;
+    std::uint8_t customPrimaryBlue = 0;
+
+    bool customSecondary = false;
+    std::uint8_t customSecondaryRed = 0;
+    std::uint8_t customSecondaryGreen = 0;
+    std::uint8_t customSecondaryBlue = 0;
+
     /// Что написано на номерном знаке и какого он вида.
     std::string plate;
     std::uint8_t plateStyle = 0;

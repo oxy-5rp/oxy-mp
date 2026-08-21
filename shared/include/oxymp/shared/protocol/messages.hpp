@@ -700,6 +700,25 @@ struct VehicleAppearance {
     std::uint8_t pearlescentColour = 0;
     std::uint8_t wheelColour = 0;
 
+    /// Свои цвета — не из палитры игры, а красками.
+    ///
+    /// Отдельно от палитры, а не вместо неё, потому что игра держит их
+    /// отдельно: у машины есть номер цвета из её списка и есть своя краска, и
+    /// вторая перекрывает первый. Снимается краска отдельным вызовом — оттого
+    /// здесь и признак, а не «чёрный значит нет»: чёрная краска осмысленна, и
+    /// отличить её от снятой иначе нечем.
+    ///
+    /// Задаёт их всякий тюнинг-режим: палитры в полторы сотни цветов ему мало.
+    bool customPrimary = false;
+    std::uint8_t customPrimaryRed = 0;
+    std::uint8_t customPrimaryGreen = 0;
+    std::uint8_t customPrimaryBlue = 0;
+
+    bool customSecondary = false;
+    std::uint8_t customSecondaryRed = 0;
+    std::uint8_t customSecondaryGreen = 0;
+    std::uint8_t customSecondaryBlue = 0;
+
     /// Что написано на номерном знаке и какого он вида.
     std::string plate;
     std::uint8_t plateStyle = 0;

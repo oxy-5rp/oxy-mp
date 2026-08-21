@@ -1023,4 +1023,22 @@ inline constexpr std::uint64_t kRemoveWeaponComponentFromPed = 0X80E6FC2ACEAF8AA
 /// SET_PED_WEAPON_TINT_INDEX, канонический хеш 0X50969B9B89ED5738.
 inline constexpr std::uint64_t kSetPedWeaponTintIndex = 0XC37D2709B04BD397;
 
+// --- Свои цвета машины --------------------------------------------------------
+//
+// Не из палитры, а красками. Игра держит их отдельно от номера цвета: краска
+// перекрывает номер, и снимается она своим вызовом — оттого здесь и «снять», а
+// не «покрасить в никакой».
+
+/// SET_VEHICLE_CUSTOM_PRIMARY_COLOUR, канонический хеш 0X7141766F91D15BEA.
+inline constexpr std::uint64_t kSetVehicleCustomPrimaryColour = 0X84F5FD9CD27457EE;
+
+/// SET_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X36CED73BFED89754.
+inline constexpr std::uint64_t kSetVehicleCustomSecondaryColour = 0X593A3115B8AE759B;
+
+/// CLEAR_VEHICLE_CUSTOM_PRIMARY_COLOUR, канонический хеш 0X55E1D2758F34E437.
+inline constexpr std::uint64_t kClearVehicleCustomPrimaryColour = 0X963D9A7202C06F65;
+
+/// CLEAR_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X5FFBDEEC3E8E2009.
+inline constexpr std::uint64_t kClearVehicleCustomSecondaryColour = 0X588D8FDC61F7CFAD;
+
 } // namespace oxymp::client::game::natives

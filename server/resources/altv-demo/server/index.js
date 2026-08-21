@@ -84,6 +84,10 @@ const машина = alt.createVehicle('adder', new alt.Vector3(-1025.0, ДОР�
 машина.setMod(12, 2); // тормоза
 машина.setMod(18, 1); // турбина — место-переключатель, а не выбор из списка
 
+// Своя краска поверх номера палитры: у палитры полторы сотни цветов, а тут
+// любой. Снимается присваиванием null — тогда снова действует номер.
+машина.customPrimaryColor = new alt.RGBA(0, 255, 120, 255);
+
 машина.neon = { left: true, right: true, front: false, back: false };
 машина.neonColor = new alt.RGBA(0, 160, 255, 255);
 

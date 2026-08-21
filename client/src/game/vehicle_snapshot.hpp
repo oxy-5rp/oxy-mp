@@ -114,6 +114,10 @@ private:
 
     NativeHandler getColours_ = nullptr;
     NativeHandler setColours_ = nullptr;
+    NativeHandler setCustomPrimary_ = nullptr;
+    NativeHandler setCustomSecondary_ = nullptr;
+    NativeHandler clearCustomPrimary_ = nullptr;
+    NativeHandler clearCustomSecondary_ = nullptr;
     NativeHandler getExtraColours_ = nullptr;
     NativeHandler setExtraColours_ = nullptr;
     NativeHandler getPlate_ = nullptr;

@@ -952,6 +952,18 @@ void clearTasks(const v8::FunctionCallbackInfo<v8::Value>& info) {
     (void)object->Set(context, toJs(isolate, "customTyres"),
                       v8::Boolean::New(isolate, look.customTyres));
 
+    put("customPrimaryRed", look.customPrimaryRed);
+    put("customPrimaryGreen", look.customPrimaryGreen);
+    put("customPrimaryBlue", look.customPrimaryBlue);
+    put("customSecondaryRed", look.customSecondaryRed);
+    put("customSecondaryGreen", look.customSecondaryGreen);
+    put("customSecondaryBlue", look.customSecondaryBlue);
+
+    (void)object->Set(context, toJs(isolate, "customPrimary"),
+                      v8::Boolean::New(isolate, look.customPrimary));
+    (void)object->Set(context, toJs(isolate, "customSecondary"),
+                      v8::Boolean::New(isolate, look.customSecondary));
+
     const v8::Local<v8::Array> mods =
         v8::Array::New(isolate, static_cast<int>(look.mods.size()));
 
@@ -993,6 +1005,16 @@ void clearTasks(const v8::FunctionCallbackInfo<v8::Value>& info) {
     look.neonGreen = fields->byte("neonGreen", 255);
     look.neonBlue = fields->byte("neonBlue", 255);
     look.extras = static_cast<std::uint16_t>(fields->number("extras", 0.0));
+
+    look.customPrimary = fields->flag("customPrimary");
+    look.customPrimaryRed = fields->byte("customPrimaryRed", 0);
+    look.customPrimaryGreen = fields->byte("customPrimaryGreen", 0);
+    look.customPrimaryBlue = fields->byte("customPrimaryBlue", 0);
+
+    look.customSecondary = fields->flag("customSecondary");
+    look.customSecondaryRed = fields->byte("customSecondaryRed", 0);
+    look.customSecondaryGreen = fields->byte("customSecondaryGreen", 0);
+    look.customSecondaryBlue = fields->byte("customSecondaryBlue", 0);
 
     // Набор мест тюнинга короче нашего — остальные остаются заводскими; длиннее —
     // лишнее отбрасывается. Отказать было бы неверно: длина набора задана

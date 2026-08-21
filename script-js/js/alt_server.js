@@ -988,6 +988,41 @@
         };
     }
 
+    /// Своя краска машины: три байта плюс признак «покрашена».
+    ///
+    /// Признак нужен затем, что чёрная краска осмысленна, а «нет краски» —
+    /// отдельное состояние: игра снимает её своим вызовом. Отличить одно от
+    /// другого по цвету нельзя, оттого и поле.
+    ///
+    /// Присваивание null снимает краску — так же, как у alt:V.
+    function painted(prefix) {
+        return {
+            get() {
+                const worn = look(this);
+
+                if (!worn[prefix]) {
+                    return null;
+                }
+
+                return new shared.RGBA(worn[`${prefix}Red`] ?? 0, worn[`${prefix}Green`] ?? 0,
+                                       worn[`${prefix}Blue`] ?? 0, 255);
+            },
+            set(value) {
+                reshape(this, (worn) => {
+                    if (value === null || value === undefined) {
+                        worn[prefix] = false;
+                        return;
+                    }
+
+                    worn[prefix] = true;
+                    worn[`${prefix}Red`] = Number(value?.r) || 0;
+                    worn[`${prefix}Green`] = Number(value?.g) || 0;
+                    worn[`${prefix}Blue`] = Number(value?.b) || 0;
+                });
+            },
+        };
+    }
+
     Object.defineProperties(Vehicle.prototype, {
         pos: {
             get() { return new shared.Vector3(this.position); },
@@ -1169,6 +1204,10 @@
             },
         },
 
+        // Своя краска — поверх номера палитры, и снимается присваиванием null.
+        customPrimaryColor: painted('customPrimary'),
+        customSecondaryColor: painted('customSecondary'),
+
         // Того, чего в протоколе внешности нет вовсе. Вопросы отказывают вслух,
         // распоряжения говорят о себе один раз: см. absent и unperformed.
         //
@@ -1176,16 +1215,6 @@
         // забывчивости: нативов, которыми их читают, нет в открытой базе имён, а
         // подставлять хеш по памяти — верный способ уронить игру. Появятся в базе
         // — появятся и здесь.
-        customPrimaryColor: {
-            get: absent('vehicle.customPrimaryColor'),
-            set: unperformed('vehicle.customPrimaryColor',
-                             'цвет машины ходит числом палитры игры, а не тремя байтами'),
-        },
-        customSecondaryColor: {
-            get: absent('vehicle.customSecondaryColor'),
-            set: unperformed('vehicle.customSecondaryColor',
-                             'цвет машины ходит числом палитры игры, а не тремя байтами'),
-        },
         interiorColor: {
             get: absent('vehicle.interiorColor'),
             set: unperformed('vehicle.interiorColor', 'цвет салона не передаётся'),

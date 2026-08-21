@@ -1291,3 +1291,39 @@ TEST_CASE("a weapon takes no more components than it can hold", "[messages]") {
     REQUIRE(got->weapons.size() == 1);
     CHECK(got->weapons[0].components.size() == kMaxWeaponComponents);
 }
+
+// Своя краска отличается от «краски нет», и отличается признаком, а не цветом:
+// чёрная краска осмысленна, и по трём нулям её от снятой не отличить.
+TEST_CASE("a custom paint keeps itself apart from no paint at all", "[messages]") {
+    VehicleAppearance painted;
+    painted.id = 3;
+    painted.customPrimary = true;
+    painted.customPrimaryRed = 0;
+    painted.customPrimaryGreen = 0;
+    painted.customPrimaryBlue = 0;
+    painted.customSecondary = true;
+    painted.customSecondaryRed = 10;
+    painted.customSecondaryGreen = 20;
+    painted.customSecondaryBlue = 30;
+
+    const auto got = decode<VehicleAppearance>(encode(painted));
+
+    REQUIRE(got);
+    CHECK(got->customPrimary);
+    CHECK(got->customPrimaryRed == 0);
+    CHECK(got->customSecondary);
+    CHECK(got->customSecondaryGreen == 20);
+
+    VehicleAppearance bare;
+    bare.id = 3;
+
+    const auto plain = decode<VehicleAppearance>(encode(bare));
+
+    REQUIRE(plain);
+    CHECK_FALSE(plain->customPrimary);
+    CHECK_FALSE(plain->customSecondary);
+
+    // И сравнение их различает: внешность уходит только при изменении, и
+    // неразличённая краска не уехала бы вовсе.
+    CHECK_FALSE(*got == *plain);
+}

@@ -57,6 +57,14 @@ namespace {
         .secondaryColour = look.secondaryColour,
         .pearlescentColour = look.pearlescentColour,
         .wheelColour = look.wheelColour,
+        .customPrimary = look.customPrimary,
+        .customPrimaryRed = look.customPrimaryRed,
+        .customPrimaryGreen = look.customPrimaryGreen,
+        .customPrimaryBlue = look.customPrimaryBlue,
+        .customSecondary = look.customSecondary,
+        .customSecondaryRed = look.customSecondaryRed,
+        .customSecondaryGreen = look.customSecondaryGreen,
+        .customSecondaryBlue = look.customSecondaryBlue,
         .plate = look.plate,
         .plateStyle = look.plateStyle,
         .livery = look.livery,
@@ -105,6 +113,16 @@ namespace {
     appearance.neonGreen = look.neonGreen;
     appearance.neonBlue = look.neonBlue;
     appearance.extras = look.extras;
+
+    appearance.customPrimary = look.customPrimary;
+    appearance.customPrimaryRed = look.customPrimaryRed;
+    appearance.customPrimaryGreen = look.customPrimaryGreen;
+    appearance.customPrimaryBlue = look.customPrimaryBlue;
+
+    appearance.customSecondary = look.customSecondary;
+    appearance.customSecondaryRed = look.customSecondaryRed;
+    appearance.customSecondaryGreen = look.customSecondaryGreen;
+    appearance.customSecondaryBlue = look.customSecondaryBlue;
 
     // Номер обрезается здесь, хотя его обрежет и читающий: длинный, он остался
     // бы у сервера длинным, а у всех остальных — коротким, и скрипт, спросивший
