@@ -439,14 +439,15 @@ int main(int argc, char** argv) {
 
                 // Куда бот смотрит. Заполнять обязательно: незаполненная точка
                 // уходит нулевой, и кукла бота уставилась бы в начало
-                // координат — то есть в море под Лос-Сантосом. Смотрит он туда
-                // же, куда идёт: своей камеры у него нет.
-                constexpr float kLookAhead = 20.0F;
-
-                state.aimAt = oxymp::shared::Vec3{
-                    state.position.x - std::sin(angle + 3.14159265F / 2.0F) * kLookAhead,
-                    state.position.y + std::cos(angle + 3.14159265F / 2.0F) * kLookAhead,
-                    state.position.z};
+                // координат — то есть в море под Лос-Сантосом.
+                //
+                // Смотрит он в середину своего круга, а не перед собой, и это
+                // не прихоть: перед собой смотрит и без того всякий идущий, и
+                // по такому взгляду не отличить работающий поворот головы от
+                // неработающего. А обходя круг с повёрнутой к середине головой,
+                // кукла показывает это сразу.
+                state.aimAt = oxymp::shared::Vec3{bot.centre.x, bot.centre.y,
+                                                  bot.centre.z + oxymp::shared::kLookHeight};
 
                 connection.setLocalState(state);
             }
