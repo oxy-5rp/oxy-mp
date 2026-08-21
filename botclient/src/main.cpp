@@ -94,11 +94,26 @@ struct Drawn {
     std::size_t appearances = 0;
     std::size_t tuned = 0;
 
+    /// Сколько привязок сервер объявил и сколько из них — отвязки.
+    ///
+    /// Отвязка приходит тем же сообщением с пустой целью: получателю важно не
+    /// «убери привязку», а «вот как эта сущность привязана теперь».
+    std::size_t attachments = 0;
+    std::size_t detachments = 0;
+
     void collect(oxymp::client::Connection& connection) {
         blips += connection.takeBlips().size();
         markers += connection.takeMarkers().size();
         checkpoints += connection.takeCheckpoints().size();
         animations += connection.takeAnimations().size();
+
+        for (const auto& attachment : connection.takeAttachments()) {
+            ++attachments;
+
+            if (attachment.targetKind == oxymp::shared::EntityKind::None) {
+                ++detachments;
+            }
+        }
 
         for (const auto& appearance : connection.takeVehicleAppearances()) {
             ++appearances;
@@ -424,6 +439,9 @@ int main(int argc, char** argv) {
 
                 spdlog::info("  внешностей машин {}, из них с тюнингом {}", drawn.appearances,
                              drawn.tuned);
+
+                spdlog::info("  привязок {}, из них отвязок {}", drawn.attachments,
+                             drawn.detachments);
 
                 // Главное доказательство работы мультиплеера: мы видим, где
                 // сейчас находятся другие игроки, и их положение меняется.

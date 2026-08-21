@@ -618,6 +618,103 @@
         return new shared.Vector3(0, 0, heading * (Math.PI / 180));
     }
 
+    // --- Привязка сущностей --------------------------------------------------
+
+    /// Род сущности словом — так его понимает мост.
+    ///
+    /// По `instanceof`, а не по спрятанному полю, и это работает даже через
+    /// посредника: `alt.Vehicle` — Proxy над классом ядра, а `instanceof` идёт по
+    /// цепочке прототипов, до которой посреднику дела нет.
+    function kindOf(entity) {
+        if (entity instanceof Player) {
+            return 'player';
+        }
+        if (entity instanceof Vehicle) {
+            return 'vehicle';
+        }
+        if (entity instanceof WorldObject) {
+            return 'object';
+        }
+
+        return '';
+    }
+
+    /// Кость: у alt:V она либо номер, либо имя. Имя переводит игра — номера
+    /// костей свои у каждой модели, и сервер их не знает.
+    function boneOf(bone) {
+        if (typeof bone === 'string') {
+            return { bone: -1, boneName: bone };
+        }
+
+        // Не названная кость — минус единица: «к самой сущности, а не к кости».
+        // Ноль здесь означал бы первую кость модели, а это совсем другое место.
+        const index = Number(bone);
+        return { bone: Number.isFinite(index) ? index : -1, boneName: '' };
+    }
+
+    /// Названа ли своя кость.
+    ///
+    /// Своей кости у нас нет: натива, привязывающего кость к кости, в нашей
+    /// сборке игры не нашлось. Привязка от этого не отменяется — она делается по
+    /// кости цели, — но промолчать нельзя: ресурс, назвавший обе, получит не то,
+    /// что просил, и искать причину будет в игре.
+    function ownBoneNamed(bone) {
+        if (typeof bone === 'string') {
+            return bone !== '';
+        }
+
+        return bone !== undefined && bone !== null && Number(bone) > 0;
+    }
+
+    /// Примешивает привязку классу сущности.
+    ///
+    /// Тем же приёмом, что и метаданные: род известен здесь и попадает в замыкание,
+    /// а сущность о нём ничего не знает и знать не должна.
+    function addAttach(target, kind) {
+        Object.assign(target.prototype, {
+            attachTo(entity, entityBone, ownBone, pos, rot, enableCollisions, noFixedRotation) {
+                const targetKind = kindOf(entity);
+
+                if (targetKind === '') {
+                    throw new Error(`${kind}.attachTo: первым доводом нужна сущность сессии`);
+                }
+
+                if (ownBoneNamed(ownBone)) {
+                    warnOnce(`${kind}.attachTo`,
+                             'своя кость не передаётся — привязываем по кости цели');
+                }
+
+                const where = boneOf(entityBone);
+                const turn = new shared.Vector3(rot ?? { x: 0, y: 0, z: 0 });
+
+                return native.attachEntity(kind, this.id, {
+                    targetKind,
+                    target: entity.id,
+                    bone: where.bone,
+                    boneName: where.boneName,
+                    position: new shared.Vector3(pos ?? { x: 0, y: 0, z: 0 }),
+
+                    // Поворот у alt:V в радианах, у нас в градусах. Единицы здесь
+                    // теряются молча: ресурс получил бы поворот в шестьдесят раз
+                    // меньше нужного и искал бы причину в игре.
+                    rotation: new shared.Vector3(turn.x * (180 / Math.PI),
+                                                 turn.y * (180 / Math.PI),
+                                                 turn.z * (180 / Math.PI)),
+
+                    collision: Boolean(enableCollisions),
+
+                    // У alt:V довод назван наоборот — `noFixedRotation`, — и это
+                    // сказано в его же описании: «если false, поворот закреплён».
+                    fixedRotation: !noFixedRotation,
+                });
+            },
+
+            detach() {
+                return native.detachEntity(kind, this.id);
+            },
+        });
+    }
+
     Object.defineProperties(Player.prototype, {
         /// Позиция. Присваивание переносит игрока — так же, как в alt:V.
         pos: {
@@ -723,7 +820,6 @@
                 return native.clearTasks(this.id);
             },
         },
-        attachTo: { value: unperformed('player.attachTo', 'привязка сущностей друг к другу не передаётся') },
     });
 
     Object.defineProperties(Player, {
@@ -1052,6 +1148,14 @@
 
     addMeta(Player, 'player');
     addMeta(Vehicle, 'vehicle');
+
+    // Привязка — всем трём родам: у alt:V она объявлена у Entity, а Entity здесь
+    // нет вовсе. Общего предка у наших классов не завести: они приходят из ядра
+    // порознь, и связать их одним прототипом значило бы подменить чужие классы
+    // своими.
+    addAttach(Player, 'player');
+    addAttach(Vehicle, 'vehicle');
+    addAttach(WorldObject, 'object');
 
     // Метаданные вышедшего игрока убираются последним подписчиком, а не первым:
     // событие объявляется до уборки нарочно (см. CLAUDE.md), и ресурс вправе

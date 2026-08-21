@@ -267,6 +267,12 @@ public:
     ///
     /// Расстоянием их не отбирает сервер: у обоих своё поле видимости, и
     /// считает его тот, кто рисует.
+    /// Привязки сущностей, присланные сервером.
+    ///
+    /// Состояние, а не события, но забираются они списком: за один такт может
+    /// прийти и десяток — при входе сервер пересказывает вошедшему все разом.
+    [[nodiscard]] std::vector<shared::EntityAttachment> takeAttachments();
+
     [[nodiscard]] std::vector<shared::MarkerState> takeMarkers();
     [[nodiscard]] std::vector<shared::MarkerId> takeRemovedMarkers();
 
@@ -421,6 +427,7 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::EntityAttachment> attachments_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;
     std::vector<shared::CheckpointState> checkpoints_;

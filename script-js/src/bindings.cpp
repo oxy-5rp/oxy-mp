@@ -971,6 +971,96 @@ void vehicleSetAppearance(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().setVehicleAppearance(*id, *look));
 }
 
+// --- Привязка сущностей -----------------------------------------------------
+//
+// Мост плоский, как и у картинок: род и номер отдельными доводами, остальное —
+// описанием. Род словом, а не числом, по той же причине, по какой словом ходят
+// рода в метаданных: в журнале ресурса «object» читается, а «3» — нет.
+
+/// Род сущности по слову. None — слово не то.
+[[nodiscard]] shared::EntityKind kindFromJs(std::string_view word) {
+    if (word == "player") {
+        return shared::EntityKind::Player;
+    }
+    if (word == "vehicle") {
+        return shared::EntityKind::Vehicle;
+    }
+    if (word == "object") {
+        return shared::EntityKind::Object;
+    }
+
+    return shared::EntityKind::None;
+}
+
+/// Род и номер сущности из пары доводов. Пусто — доводы не те.
+[[nodiscard]] std::optional<EntityRef> entityFromJs(const v8::FunctionCallbackInfo<v8::Value>& info,
+                                                    int first) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    if (info.Length() <= first + 1) {
+        return std::nullopt;
+    }
+
+    const shared::EntityKind kind = kindFromJs(fromJs(isolate, info[first]));
+    const std::optional<std::int64_t> id =
+        intFromJs(isolate->GetCurrentContext(), info[first + 1]);
+
+    if (kind == shared::EntityKind::None || !id) {
+        return std::nullopt;
+    }
+
+    return EntityRef{.kind = kind, .id = static_cast<std::uint32_t>(*id)};
+}
+
+void attachEntity(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<EntityRef> entity = entityFromJs(info, 0);
+    const std::optional<Fields> fields =
+        info.Length() >= 3 ? fieldsOf(context, info[2]) : std::nullopt;
+
+    if (!entity || !fields) {
+        fail(isolate, "attachEntity ждёт род, номер и описание привязки объектом");
+        return;
+    }
+
+    AttachmentInfo attachment;
+    attachment.target = EntityRef{
+        .kind = kindFromJs(fields->text("targetKind")),
+        .id = static_cast<std::uint32_t>(fields->number("target", 0.0)),
+    };
+
+    attachment.bone = static_cast<std::int32_t>(fields->number("bone", -1.0));
+    attachment.boneName = fields->text("boneName");
+    attachment.position = fields->point("position", {});
+    attachment.rotation = fields->point("rotation", {});
+    attachment.collision = fields->flag("collision");
+
+    // Держать поворот намертво — по умолчанию: у alt:V довод назван наоборот, и
+    // ресурс, не назвавший его, ждёт именно закреплённого поворота.
+    attachment.fixedRotation = fields->flagOr("fixedRotation", true);
+
+    if (attachment.target.kind == shared::EntityKind::None) {
+        fail(isolate, "attachEntity ждёт род цели: player, vehicle или object");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().attachEntity(*entity, attachment));
+}
+
+void detachEntity(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<EntityRef> entity = entityFromJs(info, 0);
+    if (!entity) {
+        fail(isolate, "detachEntity ждёт род и номер сущности");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().detachEntity(*entity));
+}
+
 // --- Метка на карте ---------------------------------------------------------
 //
 // Мост нарочно плоский: метка приходит и уходит объектом с полями, а не
@@ -1683,6 +1773,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createObject", createObject);
     addFunction(context, oxymp, "playAnimation", playAnimation);
     addFunction(context, oxymp, "clearTasks", clearTasks);
+    addFunction(context, oxymp, "attachEntity", attachEntity);
+    addFunction(context, oxymp, "detachEntity", detachEntity);
     addFunction(context, oxymp, "createBlip", createBlip);
     addFunction(context, oxymp, "updateBlip", updateBlip);
     addFunction(context, oxymp, "removeBlip", removeBlip);

@@ -241,6 +241,21 @@ public:
     ///
     /// Тем же порядком, что и метки: пришедшее либо заводится, либо
     /// поправляется, а убранное приходит отдельным списком.
+    void deliverAttachments(std::vector<shared::EntityAttachment> attachments) {
+        if (attachments.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        attachments_.insert(attachments_.end(), std::make_move_iterator(attachments.begin()),
+                            std::make_move_iterator(attachments.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::EntityAttachment> takeAttachments() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(attachments_, {});
+    }
+
     void deliverMarkers(std::vector<shared::MarkerState> markers) {
         if (markers.empty()) {
             return;
@@ -520,6 +535,7 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::EntityAttachment> attachments_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;
     std::vector<shared::CheckpointState> checkpoints_;

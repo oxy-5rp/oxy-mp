@@ -475,6 +475,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::EntityAttachment:
+        if (auto attachment = shared::decode<shared::EntityAttachment>(packet)) {
+            attachments_.push_back(std::move(*attachment));
+        }
+        return;
+
     case shared::MessageId::MarkerState:
         if (const auto marker = shared::decode<shared::MarkerState>(packet)) {
             markers_.push_back(*marker);
@@ -808,6 +814,10 @@ std::vector<shared::PlayerAnimation> Connection::takeAnimations() {
     return std::exchange(animations_, {});
 }
 
+std::vector<shared::EntityAttachment> Connection::takeAttachments() {
+    return std::exchange(attachments_, {});
+}
+
 std::vector<shared::MarkerState> Connection::takeMarkers() {
     return std::exchange(markers_, {});
 }
@@ -972,6 +982,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     blips_.clear();
     removedBlips_.clear();
     animations_.clear();
+    attachments_.clear();
     seats_.clear();
     loadout_.reset();
     health_.reset();

@@ -34,6 +34,7 @@ if(WIN32)
         src/server_history.cpp
         src/ui_feed.cpp
         src/game/appearance.cpp
+        src/game/attachments.cpp
         src/game/bink_sound.cpp
         src/game/blips.cpp
         src/game/checkpoints.cpp

@@ -57,6 +57,15 @@ inline constexpr std::uint64_t kFreezeEntityPosition = 0X5D7CD709B34C90F0;
 /// SET_ENTITY_VISIBLE, канонический хеш 0XEA1C610A04DB6BBB.
 inline constexpr std::uint64_t kSetEntityVisible = 0X4285E11B28063EE0;
 
+/// ATTACH_ENTITY_TO_ENTITY, канонический хеш 0X6B9BBD38AB0796DF.
+inline constexpr std::uint64_t kAttachEntityToEntity = 0X4D306DD94DD6FDBA;
+
+/// DETACH_ENTITY, канонический хеш 0X961AC54BF0613F5D.
+inline constexpr std::uint64_t kDetachEntity = 0X837D67618BF89034;
+
+/// GET_ENTITY_BONE_INDEX_BY_NAME, канонический хеш 0XFB71170B7E76ACBA.
+inline constexpr std::uint64_t kGetEntityBoneIndexByName = 0X365DC1E8054AF31A;
+
 /// SHUTDOWN_LOADING_SCREEN, канонический хеш 0X078EBE9809CCD637.
 inline constexpr std::uint64_t kShutdownLoadingScreen = 0XCD17096A98584C2B;
 

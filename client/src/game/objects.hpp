@@ -52,6 +52,12 @@ public:
     /// Убирает все предметы. Нужно при выходе.
     void clear();
 
+    /// Номер предмета в игре. Ноль — предмета здесь нет: модель ещё грузится
+    /// либо о нём не объявляли вовсе.
+    ///
+    /// Нужен привязке: она связывает две сущности, а игра знает их описателями.
+    [[nodiscard]] int handleFor(shared::ObjectId id) const;
+
     [[nodiscard]] std::size_t shown() const noexcept { return objects_.size(); }
 
 private:

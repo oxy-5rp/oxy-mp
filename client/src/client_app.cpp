@@ -1665,6 +1665,7 @@ void run() {
         mail.deliverBlips(connection->takeBlips());
         mail.deliverRemovedBlips(connection->takeRemovedBlips());
         mail.deliverAnimations(connection->takeAnimations());
+        mail.deliverAttachments(connection->takeAttachments());
         mail.deliverMarkers(connection->takeMarkers());
         mail.deliverRemovedMarkers(connection->takeRemovedMarkers());
         mail.deliverCheckpoints(connection->takeCheckpoints());

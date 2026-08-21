@@ -130,6 +130,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       blips_(table),
       markers_(table),
       checkpoints_(table),
+      attachments_(table),
       files_(files),
       streamed_(streamed),
       described_(described),
@@ -769,6 +770,11 @@ void GameSession::forgetDrawnOnLeaving() {
     blips_.clear();
     markers_.clear();
     checkpoints_.clear();
+
+    // Привязки — по той же причине: они тоже состояние, приходящее событием.
+    // Отвязывать при этом нечего: тела, к которым они вели, к этому мгновению
+    // уже разобраны вместе с сессией.
+    attachments_.clear();
 }
 
 /// Сколько ждать движение, прежде чем забыть его.
@@ -812,6 +818,29 @@ void GameSession::applyAnimations(int ped) {
         }
 
         return now - pending.since >= kAnimationPatience;
+    });
+}
+
+void GameSession::applyAttachments(int ped) {
+    const shared::PlayerId self = status_.snapshot().playerId;
+
+    // Тела ищутся по роду и номеру. Своё — отдельной веткой: наш персонаж живёт
+    // не в списке кукол, а в самой игре, и RemotePlayers его не касается вовсе.
+    attachments_.sync([&](shared::EntityKind kind, std::uint32_t id) -> int {
+        switch (kind) {
+        case shared::EntityKind::Player:
+            return id == self && self != shared::kInvalidPlayerId
+                       ? ped
+                       : remotePlayers_.handleFor(id);
+        case shared::EntityKind::Vehicle:
+            return vehicles_.handleFor(id);
+        case shared::EntityKind::Object:
+            return objects_.handleFor(id);
+        case shared::EntityKind::None:
+            break;
+        }
+
+        return 0;
     });
 }
 
@@ -869,6 +898,15 @@ void GameSession::applyServerEvents(int ped) {
     for (const shared::CheckpointState& checkpoint : mail_.takeCheckpoints()) {
         checkpoints_.apply(checkpoint);
     }
+
+    // Привязки: запоминаются здесь, накладываются ниже. Разделено потому, что
+    // накладывать их приходится не тогда, когда о них сказали: тел может не быть
+    // ни одного — машина ещё не доехала, модель предмета грузится.
+    for (const shared::EntityAttachment& attachment : mail_.takeAttachments()) {
+        attachments_.apply(attachment);
+    }
+
+    applyAttachments(ped);
 
     // Распоряжения о машинах исполняет тоже игра, и тоже потому, что больше
     // некому: машина живёт здесь, у своего ведущего. Забирать их из почты нужно

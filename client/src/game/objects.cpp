@@ -152,6 +152,11 @@ void Objects::sync() {
     }
 }
 
+int Objects::handleFor(shared::ObjectId id) const {
+    const auto found = objects_.find(id);
+    return found == objects_.end() ? 0 : found->second.handle;
+}
+
 void Objects::clear() {
     if (!ready()) {
         return;
