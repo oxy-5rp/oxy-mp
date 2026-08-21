@@ -63,6 +63,16 @@ public:
     /// поторопить.
     virtual void vehicleAdded(shared::VehicleId id) = 0;
 
+    /// Машину следует переставить: просьба её ведущему.
+    ///
+    /// Отдельно от самой машины и только ему: остальные узнают о новом месте
+    /// обычным снимком — тем, который ведущий пришлёт следующим тактом.
+    virtual void vehicleTeleported(shared::VehicleId id, const shared::Vec3& position,
+                                   float heading) = 0;
+
+    /// Машину следует починить: просьба её ведущему.
+    virtual void vehicleRepaired(shared::VehicleId id) = 0;
+
     /// Машины больше нет. Об этом, в отличие от появления, нужно сказать сразу и
     /// всем: клиент, у которого она заведена, иначе оставит её стоять навсегда.
     virtual void vehicleRemoved(shared::VehicleId id) = 0;
@@ -124,6 +134,9 @@ public:
 
     bool removeVehicle(shared::VehicleId id) override;
     bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override;
+    bool teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
+                         float heading) override;
+    bool repairVehicle(shared::VehicleId id) override;
 
     // --- Предметы --------------------------------------------------------------
 

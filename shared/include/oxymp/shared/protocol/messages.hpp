@@ -378,6 +378,13 @@ inline constexpr std::int8_t kNoSeat = -2;
 /// не уберёт, и вошедшему он пересказывает всё, что в сессии уже есть. Кто
 /// именно считает физику машины — вопрос отдельный: это ведущий, и назначает
 /// его тоже сервер (см. VehicleAuthority).
+/// Целая прочность машины в нумерации игры.
+///
+/// Тысяча — столько игра ставит новой машине и столько же считает пределом.
+/// Названо здесь, а не написано числом по местам: чинит машину сервер, а
+/// заводит её он же, и разойтись этим двум местам нельзя.
+inline constexpr std::uint16_t kFullVehicleHealth = 1000;
+
 using VehicleId = std::uint32_t;
 
 /// Машины нет. Ноль занят намеренно: счётчик сервера начинается с единицы.
@@ -629,10 +636,10 @@ struct VehicleState {
     float throttle = 0.0F;
     float brake = 0.0F;
 
-    /// Прочности: кузова, двигателя и бака. Тысяча — целое.
-    std::uint16_t bodyHealth = 1000;
-    std::uint16_t engineHealth = 1000;
-    std::uint16_t tankHealth = 1000;
+    /// Прочности: кузова, двигателя и бака. Целое — kFullVehicleHealth.
+    std::uint16_t bodyHealth = kFullVehicleHealth;
+    std::uint16_t engineHealth = kFullVehicleHealth;
+    std::uint16_t tankHealth = kFullVehicleHealth;
 
     /// Набор VehicleFlag.
     std::uint16_t flags = 0;
@@ -1144,6 +1151,36 @@ struct ResourceList {
 
     void write(ByteWriter& writer) const;
     [[nodiscard]] static ResourceList read(ByteReader& reader);
+};
+
+/// Переставить машину. Только от сервера и только её ведущему.
+///
+/// Ведущему, а не всем: машина живёт в игре у него, и переставить её может
+/// только она. Остальные узнают о новом месте обычным снимком — тем самым,
+/// который ведущий пришлёт следующим тактом.
+struct VehicleTeleport {
+    static constexpr MessageId kId = MessageId::VehicleTeleport;
+
+    VehicleId id = kInvalidVehicleId;
+
+    Vec3 position;
+
+    /// Куда её развернуть, в градусах. Только по вертикальной оси: ставить
+    /// машину набок распоряжением незачем, а перевернувшуюся поднимет физика.
+    float heading = 0.0F;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleTeleport read(ByteReader& reader);
+};
+
+/// Починить машину. Только от сервера и только её ведущему.
+struct VehicleRepair {
+    static constexpr MessageId kId = MessageId::VehicleRepair;
+
+    VehicleId id = kInvalidVehicleId;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleRepair read(ByteReader& reader);
 };
 
 // --- Упаковка сообщений в пакеты ----------------------------------------------

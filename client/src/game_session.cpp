@@ -753,6 +753,24 @@ void GameSession::applyServerEvents(int ped) {
         }
     }
 
+    // Распоряжения о машинах исполняет тоже игра, и тоже потому, что больше
+    // некому: машина живёт здесь, у своего ведущего. Забирать их из почты нужно
+    // безусловно — даже если машины у нас уже нет: иначе они копились бы там до
+    // конца сессии.
+    for (const shared::VehicleTeleport& command : mail_.takeVehicleTeleports()) {
+        if (!vehicles_.place(command.id, command.position, command.heading)) {
+            // Машины здесь нет — обычное дело: ведущего у неё могли сменить
+            // между отправкой распоряжения и его приходом.
+            spdlog::debug("переставить машину {} нечем: её здесь нет", command.id);
+        }
+    }
+
+    for (const shared::VehicleRepair& command : mail_.takeVehicleRepairs()) {
+        if (!vehicles_.repair(command.id)) {
+            spdlog::debug("починить машину {} нечем: её здесь нет", command.id);
+        }
+    }
+
     // Именованные события уходят клиентским половинам ресурсов.
     //
     // Толковать их здесь не будет никто и никогда. Что значит имя и что значит

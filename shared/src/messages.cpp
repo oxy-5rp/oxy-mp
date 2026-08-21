@@ -708,6 +708,30 @@ ResourceList ResourceList::read(ByteReader& reader) {
     return message;
 }
 
+void VehicleTeleport::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeVec3(position);
+    writer.writeAngle(heading);
+}
+
+VehicleTeleport VehicleTeleport::read(ByteReader& reader) {
+    VehicleTeleport message;
+    message.id = reader.readU32();
+    message.position = reader.readVec3();
+    message.heading = reader.readAngle();
+    return message;
+}
+
+void VehicleRepair::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+}
+
+VehicleRepair VehicleRepair::read(ByteReader& reader) {
+    VehicleRepair message;
+    message.id = reader.readU32();
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -743,6 +767,8 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::ServerEvent:
     case MessageId::PlayerAppearance:
     case MessageId::PlayerStates:
+    case MessageId::VehicleTeleport:
+    case MessageId::VehicleRepair:
         return static_cast<MessageId>(packet.front());
     }
 

@@ -1254,6 +1254,46 @@ void Server::vehicleAdded(shared::VehicleId /*id*/) {
     reassignedAt_ = {};
 }
 
+/// Кому адресовать просьбу о машине: её ведущему.
+///
+/// Пусто — вести машину некому, и просить не о чем: сервер уже поправил её у
+/// себя, а спорить с этим некому.
+net::PeerId Server::ownerPeerOf(shared::VehicleId id) const {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_.find(id);
+    if (vehicle == nullptr || vehicle->owner == shared::kInvalidPlayerId) {
+        return net::kInvalidPeerId;
+    }
+
+    const Player* const owner = players_.findById(vehicle->owner);
+    return owner == nullptr ? net::kInvalidPeerId : owner->peer;
+}
+
+void Server::vehicleTeleported(shared::VehicleId id, const shared::Vec3& position, float heading) {
+    const net::PeerId peer = ownerPeerOf(id);
+    if (peer == net::kInvalidPeerId) {
+        return;
+    }
+
+    shared::VehicleTeleport message;
+    message.id = id;
+    message.position = position;
+    message.heading = heading;
+
+    sendTo(peer, message);
+}
+
+void Server::vehicleRepaired(shared::VehicleId id) {
+    const net::PeerId peer = ownerPeerOf(id);
+    if (peer == net::kInvalidPeerId) {
+        return;
+    }
+
+    shared::VehicleRepair message;
+    message.id = id;
+
+    sendTo(peer, message);
+}
+
 void Server::vehicleRemoved(shared::VehicleId id) {
     shared::VehicleRemoved removed;
     removed.id = id;

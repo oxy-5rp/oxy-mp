@@ -892,3 +892,41 @@ TEST_CASE("a resource list of a real game mode survives a round trip", "[message
     CHECK(restored.entries.front().page);
     CHECK(restored.entries.back().name == "main/client/ui/file1878.js");
 }
+
+TEST_CASE("a vehicle teleport survives the round trip", "[messages]") {
+    VehicleTeleport sent;
+    sent.id = 0x00010007;
+    sent.position = Vec3{.x = -1037.7F, .y = -2738.0F, .z = 20.2F};
+    sent.heading = 328.0F;
+
+    const auto packet = encode(sent);
+    const auto got = decode<VehicleTeleport>(packet);
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+    CHECK(got->position.x == Catch::Approx(sent.position.x));
+    CHECK(got->position.y == Catch::Approx(sent.position.y));
+    CHECK(got->position.z == Catch::Approx(sent.position.z));
+
+    // Угол квантован шестью тысячными градуса — так он и ходит по сети.
+    CHECK(got->heading == Catch::Approx(sent.heading).margin(0.01));
+}
+
+TEST_CASE("a vehicle repair survives the round trip", "[messages]") {
+    VehicleRepair sent;
+    sent.id = 0x00020003;
+
+    const auto packet = encode(sent);
+    const auto got = decode<VehicleRepair>(packet);
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+}
+
+TEST_CASE("a vehicle command is recognised by its first byte", "[messages]") {
+    const auto teleport = encode(VehicleTeleport{});
+    const auto repair = encode(VehicleRepair{});
+
+    CHECK(peekMessageId(teleport) == MessageId::VehicleTeleport);
+    CHECK(peekMessageId(repair) == MessageId::VehicleRepair);
+}

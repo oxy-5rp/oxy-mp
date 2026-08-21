@@ -1660,6 +1660,8 @@ void run() {
         // незачем.
         mail.deliverDamage(connection->takeDamage());
         mail.deliverTeleports(connection->takeTeleports());
+        mail.deliverVehicleTeleports(connection->takeVehicleTeleports());
+        mail.deliverVehicleRepairs(connection->takeVehicleRepairs());
         mail.deliverServerEvents(connection->takeServerEvents());
         mail.deliverVehicleAppearances(connection->takeVehicleAppearances());
         mail.deliverPlayerAppearances(connection->takePlayerAppearances());

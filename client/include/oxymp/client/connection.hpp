@@ -249,6 +249,13 @@ public:
     /// Забирает точки, в которые сервер велел перенести игрока.
     [[nodiscard]] std::vector<shared::Vec3> takeTeleports();
 
+    /// Распоряжения о машинах: переставить и починить.
+    ///
+    /// Приходят только ведущему: машина живёт в игре у него, и сделать с ней
+    /// что-либо может только она.
+    [[nodiscard]] std::vector<shared::VehicleTeleport> takeVehicleTeleports();
+    [[nodiscard]] std::vector<shared::VehicleRepair> takeVehicleRepairs();
+
     /// Забирает пришедшие от сервера именованные события.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь
@@ -383,6 +390,8 @@ private:
     std::vector<shared::ChatLine> chatLines_;
     std::vector<shared::DamageTaken> damage_;
     std::vector<shared::Vec3> teleports_;
+    std::vector<shared::VehicleTeleport> vehicleTeleports_;
+    std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::ServerEvent> serverEvents_;
     std::vector<shared::VehicleAppearance> vehicleAppearances_;
 

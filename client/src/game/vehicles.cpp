@@ -40,7 +40,12 @@ Vehicles::Vehicles(const NativeTable& table) noexcept
       vehiclePedIsIn_(table.handlerFor(natives::kGetVehiclePedIsIn)),
       pedInSeat_(table.handlerFor(natives::kGetPedInVehicleSeat)),
       maxPassengers_(table.handlerFor(natives::kGetVehicleMaxNumberOfPassengers)),
-      gameTimer_(table.handlerFor(natives::kGetGameTimer)) {}
+      gameTimer_(table.handlerFor(natives::kGetGameTimer)),
+      setCoords_(table.handlerFor(natives::kSetEntityCoords)),
+      setHeading_(table.handlerFor(natives::kSetEntityHeading)),
+      setVelocity_(table.handlerFor(natives::kSetEntityVelocity)),
+      fix_(table.handlerFor(natives::kSetVehicleFixed)),
+      fixDeformation_(table.handlerFor(natives::kSetVehicleDeformationFixed)) {}
 
 Vehicles::~Vehicles() {
     // Машины здесь уже не убрать: разрушение приходится на выгрузку модуля, а
@@ -264,6 +269,56 @@ void Vehicles::dress(shared::VehicleId id, Entry& entry) {
 
     snapshot_.applyAppearance(entry.vehicle, known->second);
     entry.dressed = true;
+}
+
+bool Vehicles::place(shared::VehicleId id, const shared::Vec3& position, float heading) {
+    const int vehicle = handleFor(id);
+    if (vehicle == 0 || setCoords_ == nullptr) {
+        return false;
+    }
+
+    // Скорость гасится раньше места, а не после: машина, переставленная на
+    // ходу, приехала бы на новом месте туда, куда ехала на старом.
+    if (setVelocity_ != nullptr) {
+        invokeNative<void>(setVelocity_, vehicle, 0.0F, 0.0F, 0.0F);
+    }
+
+    // Последние признаки — те же, что игра ставит сама: не сбивать прохожих, не
+    // трогать чужие сущности, поставить на землю. Передаются явно, чтобы не
+    // полагаться на то, что игра прочтёт ноль из необъявленной ячейки нашего же
+    // контекста.
+    invokeNative<void>(setCoords_, vehicle, position.x, position.y, position.z, false, false,
+                       false, true);
+
+    if (setHeading_ != nullptr) {
+        invokeNative<void>(setHeading_, vehicle, heading);
+    }
+
+    if (onGroundProperly_ != nullptr) {
+        invokeNative<bool>(onGroundProperly_, vehicle);
+    }
+
+    spdlog::debug("машина {} переставлена в {:.1f} {:.1f} {:.1f}", id, position.x, position.y,
+                  position.z);
+    return true;
+}
+
+bool Vehicles::repair(shared::VehicleId id) {
+    const int vehicle = handleFor(id);
+    if (vehicle == 0 || fix_ == nullptr) {
+        return false;
+    }
+
+    invokeNative<void>(fix_, vehicle);
+
+    // Вмятины — отдельным вызовом, и без него починка выглядит наполовину: сам
+    // fix возвращает прочности и стёкла, но смятое крыло оставляет как было.
+    if (fixDeformation_ != nullptr) {
+        invokeNative<void>(fixDeformation_, vehicle);
+    }
+
+    spdlog::debug("машина {} починена", id);
+    return true;
 }
 
 void Vehicles::applyAppearance(const shared::VehicleAppearance& appearance) {

@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <format>
 #include <string>
 #include <vector>
@@ -35,6 +36,16 @@ public:
     void teleported(const Player& player, const shared::Vec3& position) override {
         sent.push_back(std::format("teleport {} {:.1f} {:.1f} {:.1f}", player.id, position.x,
                                    position.y, position.z));
+    }
+
+    void vehicleTeleported(shared::VehicleId id, const shared::Vec3& position,
+                           float heading) override {
+        sent.push_back(std::format("vehicle teleport {} {:.1f} {:.1f} {:.1f} {:.0f}", id,
+                                   position.x, position.y, position.z, heading));
+    }
+
+    void vehicleRepaired(shared::VehicleId id) override {
+        sent.push_back(std::format("vehicle repair {}", id));
     }
 
     void kicked(const Player& player, std::string_view reason) override {
@@ -526,4 +537,40 @@ TEST_CASE("clothes named for nobody change nothing", "[server][script]") {
 
     CHECK_FALSE(session.core.setClothes(7, 11, 1, 0, 0));
     CHECK_FALSE(session.core.setProp(7, 0, 1, 0));
+}
+
+TEST_CASE("a vehicle teleport is a request to whoever leads it", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+    player.position = shared::Vec3{.x = 0.0F, .y = 0.0F, .z = 0.0F};
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    // Ведущего у машины ещё нет: пересмотр ведущих идёт своим чередом, а
+    // здесь его никто не звал. Значит и просить некого — сервер ставит её у
+    // себя и молчит.
+    REQUIRE(session.core.teleportVehicle(id, shared::Vec3{.x = 5.0F, .y = 6.0F, .z = 7.0F}, 90.0F));
+
+    CHECK(session.core.vehicle(id)->position.x == 5.0F);
+    CHECK(session.core.vehicle(id)->rotation.z == 90.0F);
+    CHECK(std::ranges::none_of(session.sink.sent, [](const std::string& line) {
+        return line.starts_with("vehicle teleport");
+    }));
+}
+
+TEST_CASE("a repaired vehicle gets its health and glass back", "[server][script]") {
+    Session session;
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    REQUIRE(session.core.repairVehicle(id));
+}
+
+TEST_CASE("a command for a vehicle that is gone changes nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.teleportVehicle(1, shared::Vec3{}, 0.0F));
+    CHECK_FALSE(session.core.repairVehicle(1));
 }

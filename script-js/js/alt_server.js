@@ -704,7 +704,7 @@
     Object.defineProperties(Vehicle.prototype, {
         pos: {
             get() { return new shared.Vector3(this.position); },
-            set: unperformed('vehicle.pos', 'переставить машину сервер пока не умеет'),
+            set(value) { this.teleport(new shared.Vector3(value)); },
         },
         rot: {
             get() { return new shared.Vector3(this.rotation); },
@@ -722,7 +722,7 @@
             value() { return `Vehicle{ id: ${this.id} }`; },
         },
         setMod: { value: unperformed('vehicle.setMod', 'обвесы машины сервером не меняются') },
-        repair: { value: unperformed('vehicle.repair', 'починка машины сервером не выполняется') },
+
     });
 
     Object.defineProperties(Vehicle, {

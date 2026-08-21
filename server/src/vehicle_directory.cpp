@@ -50,6 +50,49 @@ shared::VehicleId VehicleDirectory::add(std::uint32_t model, const shared::Vec3&
     return id;
 }
 
+bool VehicleDirectory::place(shared::VehicleId id, const shared::Vec3& position,
+                             float heading) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    shared::VehicleState& state = found->second.state;
+
+    state.position = position;
+
+    // Только по вертикальной оси: ставить машину набок распоряжением незачем, а
+    // перевернувшуюся поднимет физика у ведущего.
+    state.rotation = shared::Vec3{.x = 0.0F, .y = 0.0F, .z = heading};
+
+    // Скорость обнуляется вместе с местом, и это не мелочь: переставленная на
+    // ходу машина, сохранив её, поехала бы на новом месте сама.
+    state.velocity = shared::Vec3{};
+    state.angularVelocity = shared::Vec3{};
+
+    return true;
+}
+
+bool VehicleDirectory::repair(shared::VehicleId id) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    shared::VehicleState& state = found->second.state;
+
+    state.bodyHealth = shared::kFullVehicleHealth;
+    state.engineHealth = shared::kFullVehicleHealth;
+    state.tankHealth = shared::kFullVehicleHealth;
+
+    state.doorsOpen = 0;
+    state.doorsBroken = 0;
+    state.windowsBroken = 0;
+    state.tyresBurst = 0;
+
+    return true;
+}
+
 bool VehicleDirectory::setDimension(shared::VehicleId id, std::int32_t dimension) {
     const auto found = vehicles_.find(id);
     if (found == vehicles_.end()) {

@@ -173,6 +173,30 @@ public:
                }) != 0;
     }
 
+    bool teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
+                         float heading) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+        if (it == vehicleList.end()) {
+            return false;
+        }
+
+        it->position = position;
+        it->rotation = shared::Vec3{.x = 0.0F, .y = 0.0F, .z = heading};
+
+        said.push_back(std::format("vehicle teleport {} {:.1f} {:.1f} {:.1f}", id, position.x,
+                                   position.y, position.z));
+        return true;
+    }
+
+    bool repairVehicle(shared::VehicleId id) override {
+        if (std::ranges::find(vehicleList, id, &VehicleInfo::id) == vehicleList.end()) {
+            return false;
+        }
+
+        said.push_back(std::format("vehicle repair {}", id));
+        return true;
+    }
+
     bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override {
         const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
         if (it == vehicleList.end()) {

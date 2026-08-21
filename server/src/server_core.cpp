@@ -323,6 +323,46 @@ shared::VehicleId ServerCore::createVehicle(std::uint32_t model, const shared::V
     return id;
 }
 
+bool ServerCore::teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
+                                 float heading) {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_->find(id);
+    if (vehicle == nullptr) {
+        return false;
+    }
+
+    // У себя — всегда: этим состоянием сервер отвечает вошедшим и оживляет
+    // машину без ведущего. Не поставь мы его, вошедший увидел бы машину на
+    // прежнем месте до первого снимка.
+    const bool led = vehicle->owner != shared::kInvalidPlayerId;
+
+    (void)vehicles_->place(id, position, heading);
+
+    // Ведущему — просьбой. Машина живёт в игре у него, и переставить её может
+    // только она; поставленное у себя он вернул бы обратно ближайшим снимком.
+    if (led) {
+        sink_->vehicleTeleported(id, position, heading);
+    }
+
+    return true;
+}
+
+bool ServerCore::repairVehicle(shared::VehicleId id) {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_->find(id);
+    if (vehicle == nullptr) {
+        return false;
+    }
+
+    const bool led = vehicle->owner != shared::kInvalidPlayerId;
+
+    (void)vehicles_->repair(id);
+
+    if (led) {
+        sink_->vehicleRepaired(id);
+    }
+
+    return true;
+}
+
 bool ServerCore::setVehicleDimension(shared::VehicleId id, std::int32_t dimension) {
     return vehicles_->setDimension(id, dimension);
 }

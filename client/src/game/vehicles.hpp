@@ -131,6 +131,20 @@ public:
     /// запоминается независимо от того, есть ли, к чему её приложить.
     void applyAppearance(const shared::VehicleAppearance& appearance);
 
+    /// Ставит машину, которую мы ведём, в назначенную сервером точку.
+    ///
+    /// Только ведомую нами: чужую переставит её собственный ведущий, получив то
+    /// же распоряжение. false — такой машины здесь нет.
+    bool place(shared::VehicleId id, const shared::Vec3& position, float heading);
+
+    /// Чинит машину, которую мы ведём: кузов, двигатель, стёкла, двери, колёса
+    /// и вмятины.
+    ///
+    /// Вмятины — то, чего сервер не хранит и хранить не может: их форма
+    /// нативами не читается вовсе. Снять их может только игра, и снимает она их
+    /// здесь, заодно со всем остальным.
+    bool repair(shared::VehicleId id);
+
     /// Номер в игре у машины с этим номером в сессии.
     ///
     /// Ноль означает «ещё нет»: модель могла не успеть загрузиться. Сажать
@@ -240,6 +254,12 @@ private:
     NativeHandler pedInSeat_ = nullptr;
     NativeHandler maxPassengers_ = nullptr;
     NativeHandler gameTimer_ = nullptr;
+
+    NativeHandler setCoords_ = nullptr;
+    NativeHandler setHeading_ = nullptr;
+    NativeHandler setVelocity_ = nullptr;
+    NativeHandler fix_ = nullptr;
+    NativeHandler fixDeformation_ = nullptr;
 
     /// Когда шёл прошлый кадр, по игровому времени.
     ///

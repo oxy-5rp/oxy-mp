@@ -107,6 +107,12 @@ private:
     void loadoutChanged(const Player& player, bool replace) override;
     void vehicleAdded(shared::VehicleId id) override;
     void vehicleRemoved(shared::VehicleId id) override;
+    /// Соединение ведущего машины. kInvalidPeerId — вести её некому.
+    [[nodiscard]] net::PeerId ownerPeerOf(shared::VehicleId id) const;
+
+    void vehicleTeleported(shared::VehicleId id, const shared::Vec3& position,
+                           float heading) override;
+    void vehicleRepaired(shared::VehicleId id) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
     void worldChanged() override;

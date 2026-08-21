@@ -276,6 +276,53 @@ void playerClearProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(done);
 }
 
+/// Переставляет машину: точка и, необязательно, поворот.
+void vehicleTeleport(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        fail(isolate, "teleport зовётся у машины");
+        return;
+    }
+
+    const std::optional<shared::Vec3> position =
+        info.Length() >= 1 ? vec3FromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!position) {
+        fail(isolate, "teleport ждёт точку первым доводом");
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    // Поворот необязателен: чаще машину просто переставляют. Не названный, он
+    // берётся у неё же — иначе всякая перестановка разворачивала бы машину на
+    // север, о чём просивший не подозревал бы.
+    const std::optional<VehicleInfo> vehicle = core.vehicle(*id);
+    double heading = vehicle ? static_cast<double>(vehicle->rotation.z) : 0.0;
+
+    if (info.Length() >= 2) {
+        (void)info[1]->NumberValue(isolate->GetCurrentContext()).To(&heading);
+    }
+
+    info.GetReturnValue().Set(
+        core.teleportVehicle(*id, *position, static_cast<float>(heading)));
+}
+
+/// Чинит машину: кузов, двигатель, стёкла, двери, колёса и вмятины.
+void vehicleRepair(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        fail(isolate, "repair зовётся у машины");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().repairVehicle(*id));
+}
+
 /// В каком слое мира игрок. Ставится числом; всё, что не число, пропускается.
 void setPlayerDimension(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                         const v8::PropertyCallbackInfo<void>& info) {
@@ -793,6 +840,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "valid", vehicleValid);
 
     addMethod(isolate, shape, "destroy", vehicleDestroy);
+    addMethod(isolate, shape, "teleport", vehicleTeleport);
+    addMethod(isolate, shape, "repair", vehicleRepair);
 
     return shape;
 }

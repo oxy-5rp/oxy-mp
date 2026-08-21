@@ -551,6 +551,13 @@ inline constexpr std::uint64_t kDoesBlipExist = 0XC450B06E5AAA0985;
 /// SET_VEHICLE_FIXED, канонический хеш 0X115722B1B9C14C1C.
 inline constexpr std::uint64_t kSetVehicleFixed = 0XF698038C13845696;
 
+/// SET_VEHICLE_DEFORMATION_FIXED, канонический хеш 0X953DA1E1B12C0491.
+///
+/// Отдельно от SET_VEHICLE_FIXED, потому что тот вмятин не снимает: прочности
+/// и стёкла возвращает, а смятое крыло оставляет как было. Починка без второго
+/// вызова выглядит наполовину сделанной.
+inline constexpr std::uint64_t kSetVehicleDeformationFixed = 0X1D1124C855316790;
+
 /// SET_VEHICLE_DIRT_LEVEL, канонический хеш 0X79D3B596FE44EE8B.
 inline constexpr std::uint64_t kSetVehicleDirtLevel = 0X9452FE4900245259;
 

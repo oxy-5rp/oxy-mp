@@ -155,6 +155,39 @@ public:
         return std::exchange(teleports_, {});
     }
 
+    /// Распоряжения о машинах: переставить и починить.
+    ///
+    /// Событиями, как и перенос игрока, и по той же причине: это действия, и
+    /// потерять их нельзя. Приходят они только ведущему машины — у остальных
+    /// её всё равно нет во власти.
+    void deliverVehicleTeleports(std::vector<shared::VehicleTeleport> commands) {
+        if (commands.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        vehicleTeleports_.insert(vehicleTeleports_.end(), commands.begin(), commands.end());
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleTeleport> takeVehicleTeleports() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(vehicleTeleports_, {});
+    }
+
+    void deliverVehicleRepairs(std::vector<shared::VehicleRepair> commands) {
+        if (commands.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        vehicleRepairs_.insert(vehicleRepairs_.end(), commands.begin(), commands.end());
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleRepair> takeVehicleRepairs() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(vehicleRepairs_, {});
+    }
+
     /// Именованные события от сервера.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь они
@@ -355,6 +388,8 @@ private:
     std::vector<ViewEvent> viewEvents_;
     ViewBridge viewBridge_;
     std::vector<shared::Vec3> teleports_;
+    std::vector<shared::VehicleTeleport> vehicleTeleports_;
+    std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;
     std::optional<shared::PlayerAppearance> outgoingAppearance_;

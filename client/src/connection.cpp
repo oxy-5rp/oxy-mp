@@ -445,6 +445,18 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::VehicleTeleport:
+        if (const auto teleport = shared::decode<shared::VehicleTeleport>(packet)) {
+            vehicleTeleports_.push_back(*teleport);
+        }
+        return;
+
+    case shared::MessageId::VehicleRepair:
+        if (const auto repair = shared::decode<shared::VehicleRepair>(packet)) {
+            vehicleRepairs_.push_back(*repair);
+        }
+        return;
+
     case shared::MessageId::ServerEvent:
         if (auto event = shared::decode<shared::ServerEvent>(packet)) {
             serverEvents_.push_back(std::move(*event));
@@ -728,6 +740,14 @@ std::vector<shared::Vec3> Connection::takeTeleports() {
     return std::exchange(teleports_, {});
 }
 
+std::vector<shared::VehicleTeleport> Connection::takeVehicleTeleports() {
+    return std::exchange(vehicleTeleports_, {});
+}
+
+std::vector<shared::VehicleRepair> Connection::takeVehicleRepairs() {
+    return std::exchange(vehicleRepairs_, {});
+}
+
 std::vector<shared::ServerEvent> Connection::takeServerEvents() {
     return std::exchange(serverEvents_, {});
 }
@@ -867,6 +887,8 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     // принадлежит серверу, и после переподключения он расскажет о них заново.
     objects_.clear();
     removedObjects_.clear();
+    vehicleTeleports_.clear();
+    vehicleRepairs_.clear();
     loadout_.reset();
     health_.reset();
     latency_.reset();
