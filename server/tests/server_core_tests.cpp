@@ -49,6 +49,10 @@ public:
         sent.push_back(std::format("vehicle repair {}", id));
     }
 
+    void vehicleAppearanceChanged(shared::VehicleId id) override {
+        sent.push_back(std::format("vehicle look {}", id));
+    }
+
     void seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) override {
         sent.push_back(std::format("seat {} {} {}", player.id, vehicle, seat));
     }
@@ -621,6 +625,67 @@ TEST_CASE("a command for a vehicle that is gone changes nothing", "[server][scri
 
     CHECK_FALSE(session.core.teleportVehicle(1, shared::Vec3{}, 0.0F));
     CHECK_FALSE(session.core.repairVehicle(1));
+    CHECK_FALSE(session.core.setVehicleAppearance(1, {}));
+    CHECK_FALSE(session.core.vehicleAppearance(1).has_value());
+}
+
+TEST_CASE("a vehicle nobody has described looks stock", "[server][script]") {
+    Session session;
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    // Пустота здесь означала бы «нет такой машины», а машина есть. Что о её
+    // внешности пока никто не говорил — не отсутствие ответа, а сам ответ.
+    const std::optional<script::VehicleAppearanceInfo> look = session.core.vehicleAppearance(id);
+    REQUIRE(look.has_value());
+
+    CHECK(look->primaryColour == 0);
+    CHECK(look->mods[11] == shared::kStockMod);
+    CHECK(look->plate.empty());
+}
+
+TEST_CASE("a vehicle wears the mods the script names", "[server][script]") {
+    Session session;
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    script::VehicleAppearanceInfo look;
+    look.primaryColour = 12;
+    look.mods[11] = 3;
+    look.neonSides = shared::NeonSide::Left | shared::NeonSide::Right;
+
+    REQUIRE(session.core.setVehicleAppearance(id, look));
+
+    // Рассказать о ней обязаны всем, кто машину видит: показывает её каждый у
+    // себя сам, и умолчи сервер — перекрашенной она осталась бы только на бумаге.
+    CHECK(std::ranges::count(session.sink.sent, std::format("vehicle look {}", id)) == 1);
+
+    const std::optional<script::VehicleAppearanceInfo> worn = session.core.vehicleAppearance(id);
+    REQUIRE(worn.has_value());
+
+    CHECK(worn->primaryColour == 12);
+    CHECK(worn->mods[11] == 3);
+    CHECK(worn->neonSides == (shared::NeonSide::Left | shared::NeonSide::Right));
+}
+
+TEST_CASE("a number plate longer than the game shows is trimmed at once",
+          "[server][script]") {
+    Session session;
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    script::VehicleAppearanceInfo look;
+    look.plate = "TOOLONGPLATE";
+
+    REQUIRE(session.core.setVehicleAppearance(id, look));
+
+    // Обрезается на месте, а не у читающего: иначе у сервера номер остался бы
+    // длинным, а у игроков — коротким, и скрипт, спросивший внешность обратно,
+    // получил бы не то, что видно в игре.
+    CHECK(session.core.vehicleAppearance(id)->plate.size() == shared::kMaxPlateLength);
 }
 
 TEST_CASE("a blip is handed a number by the server, not by the script", "[server][script]") {

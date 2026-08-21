@@ -43,6 +43,72 @@ namespace {
     };
 }
 
+/// Внешность машины, какой её знает скрипт.
+[[nodiscard]] script::VehicleAppearanceInfo describe(const shared::VehicleAppearance& look) {
+    return script::VehicleAppearanceInfo{
+        .primaryColour = look.primaryColour,
+        .secondaryColour = look.secondaryColour,
+        .pearlescentColour = look.pearlescentColour,
+        .wheelColour = look.wheelColour,
+        .plate = look.plate,
+        .plateStyle = look.plateStyle,
+        .livery = look.livery,
+        .wheelType = look.wheelType,
+        .windowTint = look.windowTint,
+        .dirtLevel = look.dirtLevel,
+        .mods = look.mods,
+        .toggleMods = look.toggleMods,
+        .customTyres = look.customTyres,
+        .tyreSmokeRed = look.tyreSmokeRed,
+        .tyreSmokeGreen = look.tyreSmokeGreen,
+        .tyreSmokeBlue = look.tyreSmokeBlue,
+        .neonSides = look.neonSides,
+        .neonRed = look.neonRed,
+        .neonGreen = look.neonGreen,
+        .neonBlue = look.neonBlue,
+        .extras = look.extras,
+    };
+}
+
+/// Она же, какой её понимает протокол.
+///
+/// Номер сюда не переносится, потому что его в описании и нет: машину называет
+/// довод. См. script::VehicleAppearanceInfo.
+[[nodiscard]] shared::VehicleAppearance describe(const script::VehicleAppearanceInfo& look) {
+    shared::VehicleAppearance appearance;
+
+    appearance.primaryColour = look.primaryColour;
+    appearance.secondaryColour = look.secondaryColour;
+    appearance.pearlescentColour = look.pearlescentColour;
+    appearance.wheelColour = look.wheelColour;
+    appearance.plate = look.plate;
+    appearance.plateStyle = look.plateStyle;
+    appearance.livery = look.livery;
+    appearance.wheelType = look.wheelType;
+    appearance.windowTint = look.windowTint;
+    appearance.dirtLevel = look.dirtLevel;
+    appearance.mods = look.mods;
+    appearance.toggleMods = look.toggleMods;
+    appearance.customTyres = look.customTyres;
+    appearance.tyreSmokeRed = look.tyreSmokeRed;
+    appearance.tyreSmokeGreen = look.tyreSmokeGreen;
+    appearance.tyreSmokeBlue = look.tyreSmokeBlue;
+    appearance.neonSides = look.neonSides;
+    appearance.neonRed = look.neonRed;
+    appearance.neonGreen = look.neonGreen;
+    appearance.neonBlue = look.neonBlue;
+    appearance.extras = look.extras;
+
+    // Номер обрезается здесь, хотя его обрежет и читающий: длинный, он остался
+    // бы у сервера длинным, а у всех остальных — коротким, и скрипт, спросивший
+    // внешность обратно, получил бы не то, что видят игроки.
+    if (appearance.plate.size() > shared::kMaxPlateLength) {
+        appearance.plate.resize(shared::kMaxPlateLength);
+    }
+
+    return appearance;
+}
+
 [[nodiscard]] script::ObjectInfo describe(shared::ObjectId id,
                                           const ObjectDirectory::Object& object) {
     return script::ObjectInfo{
@@ -543,6 +609,30 @@ bool ServerCore::repairVehicle(shared::VehicleId id) {
         sink_->vehicleRepaired(id);
     }
 
+    return true;
+}
+
+std::optional<script::VehicleAppearanceInfo> ServerCore::vehicleAppearance(
+    shared::VehicleId id) const {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_->find(id);
+    if (vehicle == nullptr) {
+        return std::nullopt;
+    }
+
+    // Заводская, если о ней ещё никто не говорил. Пустота здесь означала бы «нет
+    // такой машины», а машина есть — просто выглядит она пока никак, и это
+    // законный ответ, а не отсутствие ответа.
+    return vehicle->appearance ? describe(*vehicle->appearance)
+                               : script::VehicleAppearanceInfo{};
+}
+
+bool ServerCore::setVehicleAppearance(shared::VehicleId id,
+                                      const script::VehicleAppearanceInfo& appearance) {
+    if (!vehicles_->setAppearance(id, describe(appearance))) {
+        return false;
+    }
+
+    sink_->vehicleAppearanceChanged(id);
     return true;
 }
 

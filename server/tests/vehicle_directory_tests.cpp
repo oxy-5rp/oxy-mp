@@ -231,3 +231,39 @@ TEST_CASE("appearance is remembered for those who join later", "[vehicles]") {
     REQUIRE(directory.find(id)->appearance.has_value());
     CHECK(directory.find(id)->appearance->primaryColour == 77);
 }
+
+TEST_CASE("the appearance the server gave beats the one the owner reports", "[vehicles]") {
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 2, 0.0F);
+
+    shared::VehicleAppearance assigned;
+    assigned.primaryColour = 12;
+    assigned.mods[11] = 3;
+
+    REQUIRE(directory.setAppearance(id, assigned));
+
+    // Номер берётся у машины, а не у описания: скрипт его не называет вовсе.
+    CHECK(directory.find(id)->appearance->id == id);
+    CHECK(directory.find(id)->appearance->mods[11] == 3);
+
+    // А теперь ведущий присылает снятое со своей игры — то есть ещё без тюнинга.
+    // Прими мы это, назначенное пропало бы, не успев доехать.
+    shared::VehicleAppearance reported;
+    reported.id = id;
+    reported.primaryColour = 77;
+
+    CHECK_FALSE(directory.applyAppearance(2, reported));
+    CHECK(directory.find(id)->appearance->primaryColour == 12);
+    CHECK(directory.find(id)->appearance->mods[11] == 3);
+}
+
+TEST_CASE("a vehicle that is gone has no appearance to set", "[vehicles]") {
+    VehicleDirectory directory;
+
+    CHECK_FALSE(directory.setAppearance(shared::kInvalidVehicleId, {}));
+
+    const shared::VehicleId id = spawn(directory, 2, 0.0F);
+    REQUIRE(directory.remove(id));
+
+    CHECK_FALSE(directory.setAppearance(id, {}));
+}

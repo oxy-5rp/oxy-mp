@@ -116,6 +116,7 @@ private:
     void vehicleTeleported(shared::VehicleId id, const shared::Vec3& position,
                            float heading) override;
     void vehicleRepaired(shared::VehicleId id) override;
+    void vehicleAppearanceChanged(shared::VehicleId id) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
     /// Рассказывает вошедшему обо всём нарисованном, что ему видно: о метках

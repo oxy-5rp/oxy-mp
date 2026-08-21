@@ -1347,6 +1347,23 @@ void Server::vehicleRepaired(shared::VehicleId id) {
     sendTo(peer, message);
 }
 
+void Server::vehicleAppearanceChanged(shared::VehicleId id) {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_.find(id);
+    if (vehicle == nullptr || !vehicle->appearance) {
+        return;
+    }
+
+    // Всем, кто машину видит, и никого не исключая: наложить внешность обязан
+    // каждый у себя. Ведущий здесь не в особом положении — у него машина живёт
+    // по-настоящему, но перекрашивает её он тем же вызовом, что и остальные.
+    //
+    // Тому, у кого машины ещё нет, она придёт вместе с ней: раздача шлёт
+    // внешность следом за появлением. А тому, кому внешность пришла раньше
+    // машины, клиент запомнит её и наденет, когда машина появится.
+    broadcastNear(vehicle->state.position, shared::Channel::Control, *vehicle->appearance,
+                  vehicle->dimension);
+}
+
 void Server::vehicleRemoved(shared::VehicleId id) {
     shared::VehicleRemoved removed;
     removed.id = id;

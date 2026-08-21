@@ -160,7 +160,33 @@ bool VehicleDirectory::applyAppearance(shared::PlayerId sender,
         return false;
     }
 
+    // Внешность, назначенная сервером, объявлениями ведущего не перебивается.
+    // Порядок здесь такой: сервер назначил тюнинг и разослал его, а ведущий тем
+    // же тактом прислал снятое со своей игры — то есть ещё без тюнинга. Прими мы
+    // это объявление, назначенное пропало бы, не успев доехать, и выглядело бы
+    // это как «setMod не работает через раз».
+    if (it->second.appearanceFromServer) {
+        return false;
+    }
+
     it->second.appearance = appearance;
+    return true;
+}
+
+bool VehicleDirectory::setAppearance(shared::VehicleId id,
+                                     const shared::VehicleAppearance& appearance) {
+    const auto it = vehicles_.find(id);
+    if (it == vehicles_.end()) {
+        return false;
+    }
+
+    it->second.appearance = appearance;
+
+    // Номер берётся у машины, а не у описания: описание пришло из скрипта, и
+    // поверить ему на слово значило бы позволить перекрасить соседнюю машину.
+    it->second.appearance->id = id;
+    it->second.appearanceFromServer = true;
+
     return true;
 }
 

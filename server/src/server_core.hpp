@@ -77,6 +77,15 @@ public:
     /// Машину следует починить: просьба её ведущему.
     virtual void vehicleRepaired(shared::VehicleId id) = 0;
 
+    /// Внешность машины назначена сервером — рассказать о ней всем, кто машину
+    /// видит.
+    ///
+    /// Всем, включая ведущего, и это не то же самое, что с починкой. Починка —
+    /// просьба к тому, у кого машина живёт; внешность же накладывает каждый у
+    /// себя, потому что каждый показывает машину сам. Скажи мы одному ведущему,
+    /// перекрашенную увидел бы он один.
+    virtual void vehicleAppearanceChanged(shared::VehicleId id) = 0;
+
     /// Машины больше нет. Об этом, в отличие от появления, нужно сказать сразу и
     /// всем: клиент, у которого она заведена, иначе оставит её стоять навсегда.
     virtual void vehicleRemoved(shared::VehicleId id) = 0;
@@ -178,6 +187,12 @@ public:
     bool teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
                          float heading) override;
     bool repairVehicle(shared::VehicleId id) override;
+
+    [[nodiscard]] std::optional<script::VehicleAppearanceInfo> vehicleAppearance(
+        shared::VehicleId id) const override;
+
+    bool setVehicleAppearance(shared::VehicleId id,
+                              const script::VehicleAppearanceInfo& appearance) override;
 
     // --- Предметы --------------------------------------------------------------
 

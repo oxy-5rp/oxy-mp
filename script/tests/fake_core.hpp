@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <format>
 #include <string>
+#include <unordered_map>
 
 namespace oxymp::script::testing {
 
@@ -24,6 +25,9 @@ public:
     std::vector<BlipInfo> blipList;
     std::vector<MarkerInfo> markerList;
     std::vector<CheckpointInfo> checkpointList;
+
+    /// Внешности машин. Отдельно от списка машин, как и у настоящего ядра.
+    std::unordered_map<shared::VehicleId, VehicleAppearanceInfo> appearances;
 
     /// Что ядру велели сделать. Проверки смотрят сюда вместо сети.
     std::vector<std::string> said;
@@ -229,6 +233,27 @@ public:
         }
 
         said.push_back(std::format("vehicle repair {}", id));
+        return true;
+    }
+
+    [[nodiscard]] std::optional<VehicleAppearanceInfo> vehicleAppearance(
+        shared::VehicleId id) const override {
+        if (std::ranges::find(vehicleList, id, &VehicleInfo::id) == vehicleList.end()) {
+            return std::nullopt;
+        }
+
+        const auto known = appearances.find(id);
+        return known == appearances.end() ? VehicleAppearanceInfo{} : known->second;
+    }
+
+    bool setVehicleAppearance(shared::VehicleId id,
+                              const VehicleAppearanceInfo& appearance) override {
+        if (std::ranges::find(vehicleList, id, &VehicleInfo::id) == vehicleList.end()) {
+            return false;
+        }
+
+        appearances[id] = appearance;
+        said.push_back(std::format("vehicle look {}", id));
         return true;
     }
 
