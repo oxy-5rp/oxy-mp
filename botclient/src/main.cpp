@@ -8,6 +8,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -68,10 +69,37 @@ void printUsage() {
 /// Круг у каждого свой, и в этом весь смысл разведения. Сбившись в одну точку,
 /// боты показывают худший случай — каждый видит каждого; разойдясь по карте,
 /// показывают обычный, ради которого рассылка и раскладывается по расстояниям.
+/// Что сервер нарисовал этому боту.
+///
+/// Считается, а не показывается: рисовать боту нечем — игры у него нет. Но
+/// узнать, дошло ли нарисованное, можно только здесь: в игре его видно глазами,
+/// а глаз у проверки на регрессии не бывает.
+///
+/// Забирать пришедшее нужно в любом случае, даже не считая: непрочитанное
+/// копится в соединении до конца сессии.
+struct Drawn {
+    std::size_t blips = 0;
+    std::size_t markers = 0;
+    std::size_t checkpoints = 0;
+
+    void collect(oxymp::client::Connection& connection) {
+        blips += connection.takeBlips().size();
+        markers += connection.takeMarkers().size();
+        checkpoints += connection.takeCheckpoints().size();
+
+        // Снятое вычитается: метка, поставленная и убранная, у игрока не
+        // осталась бы, и счётчик, который об этом не знает, врёт.
+        blips -= std::min(blips, connection.takeRemovedBlips().size());
+        markers -= std::min(markers, connection.takeRemovedMarkers().size());
+        checkpoints -= std::min(checkpoints, connection.takeRemovedCheckpoints().size());
+    }
+};
+
 struct Bot {
     std::unique_ptr<oxymp::client::Connection> connection;
     oxymp::shared::Vec3 centre;
     bool everConnected = false;
+    Drawn drawn;
 };
 
 /// Раскладывает номер бота по клеткам квадрата со стороной side.
@@ -306,7 +334,20 @@ int main(int argc, char** argv) {
                 }
             }
 
+            bot.drawn.collect(connection);
+
             if (connection.state() == oxymp::client::ConnectionState::Connected) {
+                if (!bot.everConnected) {
+                    // Клиент говорит серверу, что поднял свою половину ресурсов,
+                    // и до этого слова сервер держит вход: обработчик
+                    // playerConnect не объявляется, метки и фигуры не уходят.
+                    //
+                    // Боту поднимать нечего — игры у него нет, — и потому он
+                    // готов сразу. Без этой строки он был бы игроком наполовину:
+                    // в списке сессии есть, а для режима не входил.
+                    connection.emit(std::string{oxymp::shared::kClientReadyEvent}, {});
+                }
+
                 bot.everConnected = true;
 
                 // Бот ходит по кругу. Движение нужно настоящее: на неподвижном
@@ -349,6 +390,11 @@ int main(int argc, char** argv) {
                              connection.localPlayerId(), connection.remotePlayers().size(),
                              latency ? std::to_string(latency->count()) + " мс"
                                      : std::string{"не измерена"});
+
+                const Drawn& drawn = herd.front().drawn;
+
+                spdlog::info("  сервер нарисовал: меток {}, маркеров {}, точек {}", drawn.blips,
+                             drawn.markers, drawn.checkpoints);
 
                 // Главное доказательство работы мультиплеера: мы видим, где
                 // сейчас находятся другие игроки, и их положение меняется.
