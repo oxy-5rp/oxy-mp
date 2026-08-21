@@ -1,6 +1,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace oxymp::shared {
 namespace {
@@ -221,6 +222,14 @@ void PlayerState::write(ByteWriter& writer) const {
     }
     if (has(flags, PlayerFlag::Aiming) || has(flags, PlayerFlag::Shooting)) {
         present |= kHasAim;
+    } else if (aimAt != Vec3{}) {
+        // Не целится, но куда-то смотрит. Едет это не точкой, а двумя углами:
+        // точка в мире — двенадцать байт, а углы — четыре, и разницу платит
+        // самый частый в сессии человек, идущий безоружным.
+        //
+        // Собрать её обратно можно потому, что оба конца знают одно и то же:
+        // взгляд пущен от головы и уходит ровно на kLookRange.
+        present |= kHasLook;
     }
     if (vehicleId != kInvalidVehicleId) {
         present |= kHasVehicle;
@@ -235,6 +244,22 @@ void PlayerState::write(ByteWriter& writer) const {
 
     if ((present & kHasAim) != 0) {
         writer.writeVec3(aimAt);
+    }
+
+    if ((present & kHasLook) != 0) {
+        const Vec3 head{position.x, position.y, position.z + kLookHeight};
+
+        const float dx = aimAt.x - head.x;
+        const float dy = aimAt.y - head.y;
+        const float dz = aimAt.z - head.z;
+
+        const float flat = std::sqrt((dx * dx) + (dy * dy));
+
+        // Углы в тех же градусах и том же круге, что и всё прочее в снимке:
+        // рыскание отсчитывается от севера против часовой, наклон — от
+        // горизонта вверх.
+        writer.writeAngle(std::atan2(-dx, dy) * kDegrees);
+        writer.writeAngle(std::atan2(dz, flat) * kDegrees);
     }
 
     if ((present & kHasVehicle) != 0) {
@@ -266,6 +291,19 @@ PlayerState PlayerState::read(ByteReader& reader) {
 
     if ((present & kHasAim) != 0) {
         message.aimAt = reader.readVec3();
+    }
+
+    if ((present & kHasLook) != 0) {
+        const float yaw = reader.readAngle() * kRadians;
+        const float pitch = reader.readAngle() * kRadians;
+
+        const float flat = std::cos(pitch);
+
+        message.aimAt = Vec3{
+            message.position.x - (std::sin(yaw) * flat * kLookRange),
+            message.position.y + (std::cos(yaw) * flat * kLookRange),
+            message.position.z + kLookHeight + (std::sin(pitch) * kLookRange),
+        };
     }
 
     if ((present & kHasVehicle) != 0) {

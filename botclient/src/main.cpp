@@ -437,6 +437,17 @@ int main(int argc, char** argv) {
                 state.heading = angle * 180.0F / 3.14159265F;
                 state.health = 200;
 
+                // Куда бот смотрит. Заполнять обязательно: незаполненная точка
+                // уходит нулевой, и кукла бота уставилась бы в начало
+                // координат — то есть в море под Лос-Сантосом. Смотрит он туда
+                // же, куда идёт: своей камеры у него нет.
+                constexpr float kLookAhead = 20.0F;
+
+                state.aimAt = oxymp::shared::Vec3{
+                    state.position.x - std::sin(angle + 3.14159265F / 2.0F) * kLookAhead,
+                    state.position.y + std::cos(angle + 3.14159265F / 2.0F) * kLookAhead,
+                    state.position.z};
+
                 connection.setLocalState(state);
             }
         }
@@ -503,10 +514,19 @@ int main(int argc, char** argv) {
                 // сейчас находятся другие игроки, и их положение меняется.
                 for (const auto& [id, player] : connection.remotePlayers()) {
                     const auto state = player.at(now);
+                    // Расстояние до точки взгляда, а не сама точка: у неё три
+                    // числа и никакого смысла по отдельности, а вот её удаление
+                    // говорит всё сразу. Двадцать метров — взгляд, сто —
+                    // прицел, ноль — клиент точку не заполняет вовсе, и тогда
+                    // кукла уставилась бы в начало координат.
+                    const float looks = std::sqrt(
+                        oxymp::shared::distanceSquared(state.position, state.aimAt));
+
                     spdlog::info(
-                        "  игрок \"{}\" (id {}) в точке {:.1f} {:.1f} {:.1f}, поворот {:.0f}",
+                        "  игрок \"{}\" (id {}) в точке {:.1f} {:.1f} {:.1f}, поворот {:.0f}, "
+                        "смотрит на {:.0f} м",
                         player.nickname.empty() ? "?" : player.nickname, id, state.position.x,
-                        state.position.y, state.position.z, state.heading);
+                        state.position.y, state.position.z, state.heading, looks);
                 }
             } else {
                 // У стаи поимённого пересказа нет: двести строк в секунду не

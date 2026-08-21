@@ -16,22 +16,6 @@ namespace {
 /// то же, что и на пятистах.
 constexpr float kAimDistance = 100.0F;
 
-/// Как далеко ставится точка взгляда, в метрах.
-///
-/// Ближе прицельной нарочно: взгляд у получателя — это поворот головы, и точка
-/// за сто метров разворачивает шею почти так же, как за двадцать, а вот вблизи
-/// разница видна. Двадцать метров — расстояние, на котором игроки друг с другом
-/// разговаривают.
-constexpr float kLookDistance = 20.0F;
-
-/// На какой высоте от подошв находится голова, в метрах.
-///
-/// Взгляд, пущенный от земли, уводит шею вверх тем сильнее, чем ближе цель.
-constexpr float kHeadHeight = 0.65F;
-
-/// Градусы в радианы.
-constexpr float kRadians = 3.14159265F / 180.0F;
-
 /// Порядок поворотов, которым игра описывает всё: сперва наклон, потом крен,
 /// потом рыскание.
 constexpr int kGameRotationOrder = 2;
@@ -215,7 +199,7 @@ shared::Vec3 Player::lookPoint(int ped) const {
 
     // Точка отсчёта — голова, а не подошвы: взгляд, пущенный от земли, уводит
     // шею вверх тем сильнее, чем ближе цель.
-    const shared::Vec3 head{position.x, position.y, position.z + kHeadHeight};
+    const shared::Vec3 head{position.x, position.y, position.z + shared::kLookHeight};
 
     if (camRotation_ == nullptr) {
         return head;
@@ -227,17 +211,17 @@ shared::Vec3 Player::lookPoint(int ped) const {
     context.push(kGameRotationOrder);
     camRotation_(context.address());
 
-    const float pitch = context.result<float>(0) * kRadians;
-    const float yaw = context.result<float>(2) * kRadians;
+    const float pitch = context.result<float>(0) * shared::kRadians;
+    const float yaw = context.result<float>(2) * shared::kRadians;
 
     // Направление взгляда из двух углов. Знак у горизонтали такой, а не иной,
     // потому что у GTA ось Y смотрит на север, а угол растёт против часовой:
     // при нулевом рыскании взгляд направлен на север.
     const float flat = std::cos(pitch);
 
-    return shared::Vec3{head.x - std::sin(yaw) * flat * kLookDistance,
-                        head.y + std::cos(yaw) * flat * kLookDistance,
-                        head.z + std::sin(pitch) * kLookDistance};
+    return shared::Vec3{head.x - std::sin(yaw) * flat * shared::kLookRange,
+                        head.y + std::cos(yaw) * flat * shared::kLookRange,
+                        head.z + std::sin(pitch) * shared::kLookRange};
 }
 
 shared::PlayerState Player::snapshot(int player, int ped, bool dead) {

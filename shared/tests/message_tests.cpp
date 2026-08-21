@@ -1327,3 +1327,66 @@ TEST_CASE("a custom paint keeps itself apart from no paint at all", "[messages]"
     // неразличённая краска не уехала бы вовсе.
     CHECK_FALSE(*got == *plain);
 }
+
+// Точка взгляда едет не точкой, а двумя углами, и собирается обратно из головы
+// отправителя. Проверяется поэтому не совпадение чисел, а то, что взгляд
+// смотрит туда же: направление то же, удаление то же.
+TEST_CASE("a look point survives the round trip as two angles", "[messages]") {
+    PlayerState sent;
+    sent.position = Vec3{.x = 100.0F, .y = -200.0F, .z = 30.0F};
+
+    // Голова смотрит на северо-восток и слегка вверх.
+    const Vec3 head{sent.position.x, sent.position.y, sent.position.z + kLookHeight};
+    sent.aimAt = Vec3{head.x + 14.0F, head.y + 14.0F, head.z + 3.0F};
+
+    const auto got = decode<PlayerState>(encode(sent));
+
+    REQUIRE(got);
+
+    const float dx = got->aimAt.x - head.x;
+    const float dy = got->aimAt.y - head.y;
+    const float dz = got->aimAt.z - head.z;
+
+    // Удаление приводится к общему: отправитель волен ставить точку где угодно,
+    // а по сети едет только направление.
+    CHECK(std::sqrt((dx * dx) + (dy * dy) + (dz * dz)) == Catch::Approx(kLookRange).margin(0.1));
+
+    // Направление то же, что и было: сравниваются доли, а не метры.
+    const float length = std::sqrt(14.0F * 14.0F + 14.0F * 14.0F + 3.0F * 3.0F);
+
+    CHECK(dx / kLookRange == Catch::Approx(14.0F / length).margin(0.01));
+    CHECK(dy / kLookRange == Catch::Approx(14.0F / length).margin(0.01));
+    CHECK(dz / kLookRange == Catch::Approx(3.0F / length).margin(0.01));
+}
+
+// Целящийся возит точку целиком: она в мире, а не в двадцати метрах от головы.
+TEST_CASE("an aiming player still sends the whole point", "[messages]") {
+    PlayerState sent;
+    sent.position = Vec3{.x = 10.0F, .y = 20.0F, .z = 30.0F};
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::Aiming);
+    sent.aimAt = Vec3{.x = 110.0F, .y = 20.0F, .z = 31.0F};
+
+    const auto got = decode<PlayerState>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->aimAt.x == Catch::Approx(sent.aimAt.x));
+    CHECK(got->aimAt.y == Catch::Approx(sent.aimAt.y));
+    CHECK(got->aimAt.z == Catch::Approx(sent.aimAt.z));
+}
+
+// Клиент, точку не заполняющий вовсе, платить за неё не должен — и не платит:
+// нулевая точка признака не поднимает.
+TEST_CASE("a player who looks nowhere pays nothing for it", "[messages]") {
+    PlayerState blind;
+    blind.position = Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+
+    PlayerState looking = blind;
+    looking.aimAt = Vec3{.x = 1.0F, .y = 22.0F, .z = 3.65F};
+
+    CHECK(encode(looking).size() == encode(blind).size() + 4);
+
+    const auto got = decode<PlayerState>(encode(blind));
+
+    REQUIRE(got);
+    CHECK(got->aimAt == Vec3{});
+}
