@@ -27,14 +27,28 @@ set(OXYMP_SIGN_PFX "" CACHE FILEPATH
 set(OXYMP_SIGN_PFX_PASSWORD "" CACHE STRING
     "Пароль к файлу .pfx")
 
-# Отметка времени обязательна и берётся у стороннего сервиса.
+# Отметка времени берётся у стороннего сервиса, и служб здесь несколько.
 #
-# Без неё подпись перестаёт быть годной в тот день, когда истекает сертификат, —
-# и уже розданные бинарники разом становятся «недействительно подписанными».
-# С отметкой подпись остаётся годной навсегда: сервис заверяет, что файл был
-# подписан, пока сертификат ещё действовал.
-set(OXYMP_SIGN_TIMESTAMP_URL "http://timestamp.digicert.com" CACHE STRING
-    "URL службы отметок времени RFC 3161")
+# Без отметки подпись перестаёт быть годной в тот день, когда истекает
+# сертификат, — и уже розданные бинарники разом становятся «недействительно
+# подписанными». С отметкой подпись остаётся годной навсегда: сервис заверяет,
+# что файл был подписан, пока сертификат ещё действовал.
+#
+# Список, а не один адрес, потому что служба чужая и иногда молчит. Молчащий
+# digicert валил выпускную сборку целиком — при том, что код собирался, а
+# подписать было чем. Порядок обхода — порядок списка, и останавливаемся на
+# первой ответившей.
+set(OXYMP_SIGN_TIMESTAMP_URLS
+    "http://timestamp.digicert.com;http://timestamp.sectigo.com;http://timestamp.globalsign.com/tsa/r6advanced1"
+    CACHE STRING "Службы отметок времени RFC 3161, в порядке обхода")
+
+# Считать ли отсутствие отметки ошибкой.
+#
+# Выключено, и это уступка не качеству, а действительности: сборка, упавшая
+# из-за чужого сервера, не годна вовсе, а подпись без отметки годна, пока годен
+# сертификат. Для того, что раздают, включайте — там отметка обязательна.
+option(OXYMP_SIGN_REQUIRE_TIMESTAMP
+       "Считать неудачу службы отметок времени ошибкой сборки" OFF)
 
 set(OXYMP_SIGNTOOL "" CACHE FILEPATH
     "Путь к signtool.exe — если поиск в Windows SDK не нашёл нужный")
@@ -113,7 +127,10 @@ message(STATUS "Подпись: ${signtool}")
 #
 # Хеш файла — SHA-256: SHA-1 давно объявлен негодным, и подпись им современная
 # Windows принимает с предупреждением, а то и не принимает вовсе.
-set(_oxymp_sign_args /fd sha256 /tr "${OXYMP_SIGN_TIMESTAMP_URL}" /td sha256)
+#
+# Отметка времени сюда не входит: её ставит сценарий подписи, обходя службы по
+# списку, и вписать её здесь значило бы лишить его этой возможности.
+set(_oxymp_sign_args /fd sha256)
 
 if(OXYMP_SIGN_THUMBPRINT)
     list(PREPEND _oxymp_sign_args /sha1 "${OXYMP_SIGN_THUMBPRINT}")
@@ -132,9 +149,23 @@ endif()
 # каталога сборки. Раздача подписывала бы только свои копии, а взятый из bin
 # лаунчер оказался бы неподписанным — и SmartScreen встретил бы игрока тем же
 # «неизвестный издатель», от которого всё и затевалось.
+#
+# Через сценарий, а не прямым вызовом signtool: тому нечем повторить попытку,
+# когда служба отметок времени не ответила, — а не отвечает она регулярно.
+# Список служб передаётся через вертикальную черту: точка с запятой внутри
+# -D сама разошлась бы на отдельные доводы.
+string(REPLACE ";" "|" _oxymp_timestamp_urls "${OXYMP_SIGN_TIMESTAMP_URLS}")
+string(JOIN "|" _oxymp_sign_args_line ${_oxymp_sign_args})
+
 function(oxymp_sign target)
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND "${signtool}" sign ${_oxymp_sign_args} "$<TARGET_FILE:${target}>"
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSIGNTOOL=${signtool}"
+                "-DSIGN_ARGS=${_oxymp_sign_args_line}"
+                "-DTIMESTAMP_URLS=${_oxymp_timestamp_urls}"
+                "-DREQUIRE_TIMESTAMP=${OXYMP_SIGN_REQUIRE_TIMESTAMP}"
+                "-DFILE=$<TARGET_FILE:${target}>"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/sign_script.cmake"
         COMMENT "Подпись ${target}"
         VERBATIM)
 endfunction()
