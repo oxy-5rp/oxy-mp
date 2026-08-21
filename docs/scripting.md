@@ -541,14 +541,15 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | Зоны (`Colshape*`), включая многоугольники | **Считаются на сервере целиком** |
 | Измерения (`dimension`) | По ним разложена вся рассылка; числа как у alt:V |
 | Одежда и аксессуары | `setClothes`, `setProp`, `clearProp` |
+| `alt.Object` | Предметы сессии: заводятся, стоят, убираются |
 | `vehicle.pos`, `vehicle.repair` | Просьбой ведущему: машина живёт в игре у него |
 | `player.kick` | Причина уходит игроку до разрыва |
 
 **Есть на сервере, но игрок не видит** (говорится в журнал один раз):
 метки, маркеры, чекпоинты (как фигура; события входа работают), голосовые каналы.
 
-**Отказывает вслух:** `Ped`, `Object`, `NetworkObject`, `VirtualEntity`,
-`HttpClient`, `WebSocketClient`, `alt.Resource`, `player.ip`, `player.ping`.
+**Отказывает вслух:** `Ped`, `NetworkObject`, `VirtualEntity`, `HttpClient`,
+`WebSocketClient`, `alt.Resource`, `player.ip`, `player.ping`.
 
 **Говорит один раз в журнал и не бросает:** обвесы машины, `playAnimation`,
 `attachTo`, `setIntoVehicle`, одежда из наборов DLC.
