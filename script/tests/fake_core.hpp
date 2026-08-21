@@ -29,6 +29,9 @@ public:
     /// Внешности машин. Отдельно от списка машин, как и у настоящего ядра.
     std::unordered_map<shared::VehicleId, VehicleAppearanceInfo> appearances;
 
+    /// Кто к кому привязан. Ключ — род и номер одной строкой.
+    std::unordered_map<std::string, AttachmentInfo> attachments;
+
     /// Что ядру велели сделать. Проверки смотрят сюда вместо сети.
     std::vector<std::string> said;
 
@@ -37,6 +40,28 @@ public:
     shared::BlipId nextBlipId = 1;
     shared::MarkerId nextMarkerId = 1;
     shared::CheckpointId nextCheckpointId = 1;
+
+    /// Род и номер одной строкой — ключ для списка привязок.
+    [[nodiscard]] static std::string nameOf(EntityRef entity) {
+        return std::format("{}:{}", static_cast<int>(entity.kind), entity.id);
+    }
+
+    /// Есть ли такая сущность в подставной сессии.
+    [[nodiscard]] bool alive(EntityRef entity) const {
+        switch (entity.kind) {
+        case shared::EntityKind::Player:
+            return player(entity.id).has_value();
+        case shared::EntityKind::Vehicle:
+            return std::ranges::find(vehicleList, entity.id, &VehicleInfo::id) !=
+                   vehicleList.end();
+        case shared::EntityKind::Object:
+            return std::ranges::find(objectList, entity.id, &ObjectInfo::id) != objectList.end();
+        case shared::EntityKind::None:
+            break;
+        }
+
+        return false;
+    }
 
     [[nodiscard]] std::vector<PlayerInfo> players() const override { return playerList; }
 
@@ -265,6 +290,31 @@ public:
 
         it->dimension = dimension;
         return true;
+    }
+
+    bool attachEntity(EntityRef entity, const AttachmentInfo& attachment) override {
+        if (!alive(entity) || !alive(attachment.target) || entity == attachment.target) {
+            return false;
+        }
+
+        attachments[nameOf(entity)] = attachment;
+        said.push_back(std::format("attach {} to {}", nameOf(entity),
+                                   nameOf(attachment.target)));
+        return true;
+    }
+
+    bool detachEntity(EntityRef entity) override {
+        if (attachments.erase(nameOf(entity)) == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("detach {}", nameOf(entity)));
+        return true;
+    }
+
+    [[nodiscard]] std::optional<AttachmentInfo> attachment(EntityRef entity) const override {
+        const auto found = attachments.find(nameOf(entity));
+        return found == attachments.end() ? std::nullopt : std::optional{found->second};
     }
 
     [[nodiscard]] std::vector<ObjectInfo> objects() const override { return objectList; }

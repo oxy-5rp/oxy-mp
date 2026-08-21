@@ -53,6 +53,10 @@ public:
         sent.push_back(std::format("vehicle look {}", id));
     }
 
+    void attachmentChanged(AttachmentDirectory::Ref entity) override {
+        sent.push_back(std::format("attach {} {}", static_cast<int>(entity.kind), entity.id));
+    }
+
     void seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) override {
         sent.push_back(std::format("seat {} {} {}", player.id, vehicle, seat));
     }
@@ -168,8 +172,9 @@ struct Session {
     script::Events events;
     FakeSink sink;
 
-    ServerCore core{players, vehicles, objects,  blips,  markers, checkpoints,
-                    world,   config,   events,  sink};
+    AttachmentDirectory attachments;
+    ServerCore core{players,     vehicles, objects, blips,  markers, checkpoints,
+                    attachments, world,    config,  events, sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
         players.add(peer, std::move(nickname), 0);
@@ -876,4 +881,89 @@ TEST_CASE("an animation for nobody changes nothing", "[server][script]") {
 
     CHECK_FALSE(session.core.playAnimation(7, {}));
     CHECK_FALSE(session.core.clearTasks(7));
+}
+
+// --- Привязка сущностей ------------------------------------------------------
+
+namespace {
+
+script::EntityRef entity(shared::EntityKind kind, std::uint32_t id) {
+    return script::EntityRef{.kind = kind, .id = id};
+}
+
+} // namespace
+
+TEST_CASE("an object hangs on a player and everyone hears about it", "[server][script]") {
+    Session session;
+    session.join(1, "игрок");
+
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    script::AttachmentInfo worn;
+    worn.target = entity(shared::EntityKind::Player, 0);
+    worn.boneName = "SKEL_R_Hand";
+    worn.position = shared::Vec3{.x = 0.1F, .y = 0.0F, .z = 0.0F};
+
+    REQUIRE(session.core.attachEntity(entity(shared::EntityKind::Object, box), worn));
+
+    CHECK(std::ranges::count(session.sink.sent,
+                             std::format("attach {} {}",
+                                         static_cast<int>(shared::EntityKind::Object), box)) == 1);
+
+    const auto got = session.core.attachment(entity(shared::EntityKind::Object, box));
+    REQUIRE(got.has_value());
+
+    CHECK(got->target == entity(shared::EntityKind::Player, 0));
+    CHECK(got->boneName == "SKEL_R_Hand");
+}
+
+TEST_CASE("hanging on something that is not there is refused", "[server][script]") {
+    Session session;
+
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    script::AttachmentInfo worn;
+    worn.target = entity(shared::EntityKind::Vehicle, 42);
+
+    // Молчаливое согласие здесь было бы хуже отказа: предмет остался бы висеть в
+    // никуда, и отвязать его было бы уже некому.
+    CHECK_FALSE(session.core.attachEntity(entity(shared::EntityKind::Object, box), worn));
+
+    // И наоборот: вешать то, чего нет, тоже не на что.
+    worn.target = entity(shared::EntityKind::Object, box);
+    CHECK_FALSE(session.core.attachEntity(entity(shared::EntityKind::Object, 99), worn));
+}
+
+TEST_CASE("removing the thing it hangs on loosens what hung", "[server][script]") {
+    Session session;
+
+    const shared::VehicleId car = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+
+    REQUIRE(car != shared::kInvalidVehicleId);
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    script::AttachmentInfo worn;
+    worn.target = entity(shared::EntityKind::Vehicle, car);
+
+    REQUIRE(session.core.attachEntity(entity(shared::EntityKind::Object, box), worn));
+    REQUIRE(session.core.removeVehicle(car));
+
+    // Клиентам сказано дважды: первый раз о привязке, второй — о её снятии.
+    CHECK(std::ranges::count(session.sink.sent,
+                             std::format("attach {} {}",
+                                         static_cast<int>(shared::EntityKind::Object), box)) == 2);
+
+    CHECK_FALSE(session.core.attachment(entity(shared::EntityKind::Object, box)).has_value());
+}
+
+TEST_CASE("detaching what hangs on nothing changes nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.detachEntity(entity(shared::EntityKind::Object, 1)));
+    CHECK(std::ranges::none_of(session.sink.sent, [](const std::string& line) {
+        return line.starts_with("attach");
+    }));
 }

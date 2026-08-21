@@ -220,6 +220,12 @@ void Server::handleDisconnected(net::PeerId peer) {
     // их посреди дороги. Те, что он вёл, остаются без ведущего.
     vehicles_.forgetPlayer(player->id);
 
+    // Вместе с ним пропадает и всё, что на нём висело: предмет, привязанный к
+    // ушедшему, остался бы у остальных висеть в пустоте — отвязать его после
+    // было бы уже некому.
+    core_.forgetAttachments(
+        AttachmentDirectory::Ref{.kind = shared::EntityKind::Player, .id = player->id});
+
     // Пересмотр — немедленно, не дожидаясь очереди. Машины, которые вёл ушедший,
     // до него стоят замершими, и полсекунды неподвижной машины посреди дороги
     // видно всем.
@@ -540,6 +546,30 @@ void Server::sendDrawnTo(net::PeerId peer, std::int32_t dimension) {
     sendKindTo(checkpoints_, peer, dimension);
 }
 
+void Server::sendAttachmentsTo(net::PeerId peer) {
+    for (const auto& [key, attachment] : attachments_.all()) {
+        sendTo(peer, attachment);
+    }
+}
+
+void Server::attachmentChanged(AttachmentDirectory::Ref entity) {
+    const shared::EntityAttachment* const attachment = attachments_.find(entity);
+
+    if (attachment != nullptr) {
+        broadcast(*attachment);
+        return;
+    }
+
+    // Привязки больше нет — рассылается то же сообщение с пустой целью. Отдельного
+    // сообщения на отвязку нет и не нужно: получателю важно не «убери привязку», а
+    // «вот как эта сущность привязана теперь», а «никак» — такой же ответ.
+    shared::EntityAttachment loosened;
+    loosened.kind = entity.kind;
+    loosened.id = entity.id;
+
+    broadcast(loosened);
+}
+
 void Server::announcePlayerReady(Player& player) {
     if (player.scriptsReady) {
         return;
@@ -553,6 +583,10 @@ void Server::announcePlayerReady(Player& player) {
     // поставленное ими должно лечь поверх уже имеющегося, а не быть перекрыто
     // рассылкой старого.
     sendDrawnTo(player.peer, player.dimension);
+
+    // Привязки — по той же причине и в том же месте: они тоже состояние, а не
+    // событие, и вошедший обязан застать мир таким, каким его видят остальные.
+    sendAttachmentsTo(player.peer);
 
     // Обработчик вправе тут же выдать оружие или поставить машину, и его
     // распоряжения должны лечь поверх наших, а не под них.

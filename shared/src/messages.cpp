@@ -3,6 +3,30 @@
 #include <algorithm>
 
 namespace oxymp::shared {
+namespace {
+
+/// Род сущности из байта. Незнакомый — None, то есть «ни к кому».
+///
+/// С проверкой, а не приведением напрямую, и это не перестраховка. Род решает,
+/// в каком списке искать сущность; незнакомое число, приведённое молча, ушло бы
+/// в этот выбор и вышло бы из него неизвестно чем. None же означает «отвязано»
+/// — самое безобидное из всего, чем такое сообщение может оказаться.
+[[nodiscard]] EntityKind readEntityKind(std::uint8_t value) noexcept {
+    switch (static_cast<EntityKind>(value)) {
+    case EntityKind::Player:
+        return EntityKind::Player;
+    case EntityKind::Vehicle:
+        return EntityKind::Vehicle;
+    case EntityKind::Object:
+        return EntityKind::Object;
+    case EntityKind::None:
+        break;
+    }
+
+    return EntityKind::None;
+}
+
+} // namespace
 
 void ClientHello::write(ByteWriter& writer) const {
     writer.writeU16(protocolVersion);
@@ -900,6 +924,39 @@ PlayerAnimation PlayerAnimation::read(ByteReader& reader) {
     return message;
 }
 
+void EntityAttachment::write(ByteWriter& writer) const {
+    writer.writeU8(static_cast<std::uint8_t>(kind));
+    writer.writeU32(id);
+    writer.writeU8(static_cast<std::uint8_t>(targetKind));
+    writer.writeU32(target);
+    writer.writeU32(static_cast<std::uint32_t>(bone));
+    writer.writeString(boneName);
+    writer.writeVec3(position);
+    writer.writeVec3(rotation);
+
+    // Два признака одним байтом: четыре байта ради двух бит — расточительство,
+    // и так же уложены признаки маркера и движения.
+    writer.writeU8(static_cast<std::uint8_t>((collision ? 1U : 0U) | (fixedRotation ? 2U : 0U)));
+}
+
+EntityAttachment EntityAttachment::read(ByteReader& reader) {
+    EntityAttachment message;
+    message.kind = readEntityKind(reader.readU8());
+    message.id = reader.readU32();
+    message.targetKind = readEntityKind(reader.readU8());
+    message.target = reader.readU32();
+    message.bone = static_cast<std::int32_t>(reader.readU32());
+    message.boneName = reader.readString();
+    message.position = reader.readVec3();
+    message.rotation = reader.readVec3();
+
+    const std::uint8_t flags = reader.readU8();
+    message.collision = (flags & 1U) != 0;
+    message.fixedRotation = (flags & 2U) != 0;
+
+    return message;
+}
+
 void PlayerIntoVehicle::write(ByteWriter& writer) const {
     writer.writeU32(vehicle);
     writer.writeU8(static_cast<std::uint8_t>(seat));
@@ -957,6 +1014,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::CheckpointState:
     case MessageId::CheckpointRemoved:
     case MessageId::PlayerAnimation:
+    case MessageId::EntityAttachment:
         return static_cast<MessageId>(packet.front());
     }
 

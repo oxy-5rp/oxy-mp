@@ -1133,3 +1133,71 @@ TEST_CASE("an endless animation keeps its minus one", "[messages]") {
 TEST_CASE("an animation is recognised by its message id", "[messages]") {
     CHECK(peekMessageId(encode(PlayerAnimation{})) == MessageId::PlayerAnimation);
 }
+
+TEST_CASE("an attachment survives the round trip", "[messages]") {
+    EntityAttachment sent;
+    sent.kind = EntityKind::Object;
+    sent.id = 7;
+    sent.targetKind = EntityKind::Player;
+    sent.target = 0;
+    sent.bone = 28422;
+    sent.boneName = "SKEL_R_Hand";
+    sent.position = Vec3{.x = 0.1F, .y = -0.2F, .z = 0.3F};
+    sent.rotation = Vec3{.x = 90.0F, .y = 0.0F, .z = -45.0F};
+    sent.collision = true;
+    sent.fixedRotation = false;
+
+    const auto got = decode<EntityAttachment>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(*got == sent);
+
+    // Ноль здесь — законный номер игрока, а не «никого»: у игроков пустой номер
+    // это единицы во всех разрядах. Отвязку от привязки отличает род цели.
+    CHECK(got->targetKind == EntityKind::Player);
+    CHECK(got->target == 0);
+}
+
+// Кость «сама сущность» ходит по сети беззнаковой, как и длительность движения.
+// Перепутанное знаковое расширение сделало бы из неё кость номер четыре
+// миллиарда, и привязанное улетело бы в начало координат.
+TEST_CASE("attaching to the entity itself keeps its minus one", "[messages]") {
+    EntityAttachment sent;
+    sent.bone = -1;
+
+    const auto got = decode<EntityAttachment>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->bone == -1);
+}
+
+TEST_CASE("a detached entity names no target", "[messages]") {
+    EntityAttachment sent;
+    sent.kind = EntityKind::Vehicle;
+    sent.id = 3;
+
+    const auto got = decode<EntityAttachment>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->kind == EntityKind::Vehicle);
+    CHECK(got->targetKind == EntityKind::None);
+}
+
+// Род сущности приходит числом, и числом этим распоряжается отправитель. Род,
+// которого мы не знаем, обязан прочитаться как «ни к кому»: он решает, в каком
+// списке искать сущность, и незнакомое число ушло бы в этот выбор.
+TEST_CASE("an attachment to a kind we do not know reads as detached", "[messages]") {
+    std::vector<std::uint8_t> packet = encode(EntityAttachment{});
+
+    // Первый байт — номер сообщения, за ним род привязываемого.
+    packet[1] = 99;
+
+    const auto got = decode<EntityAttachment>(ByteView{packet});
+
+    REQUIRE(got);
+    CHECK(got->kind == EntityKind::None);
+}
+
+TEST_CASE("an attachment is recognised by its message id", "[messages]") {
+    CHECK(peekMessageId(encode(EntityAttachment{})) == MessageId::EntityAttachment);
+}

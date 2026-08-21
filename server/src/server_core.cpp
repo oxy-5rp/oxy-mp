@@ -109,6 +109,36 @@ namespace {
     return appearance;
 }
 
+/// Привязка, какой её знает скрипт.
+[[nodiscard]] script::AttachmentInfo describe(const shared::EntityAttachment& attachment) {
+    return script::AttachmentInfo{
+        .target = script::EntityRef{.kind = attachment.targetKind, .id = attachment.target},
+        .bone = attachment.bone,
+        .boneName = attachment.boneName,
+        .position = attachment.position,
+        .rotation = attachment.rotation,
+        .collision = attachment.collision,
+        .fixedRotation = attachment.fixedRotation,
+    };
+}
+
+/// Она же, какой её понимает протокол. Кого привязывают — довод, а не описание.
+[[nodiscard]] shared::EntityAttachment describe(script::EntityRef entity,
+                                                const script::AttachmentInfo& attachment) {
+    return shared::EntityAttachment{
+        .kind = entity.kind,
+        .id = entity.id,
+        .targetKind = attachment.target.kind,
+        .target = attachment.target.id,
+        .bone = attachment.bone,
+        .boneName = attachment.boneName,
+        .position = attachment.position,
+        .rotation = attachment.rotation,
+        .collision = attachment.collision,
+        .fixedRotation = attachment.fixedRotation,
+    };
+}
+
 [[nodiscard]] script::ObjectInfo describe(shared::ObjectId id,
                                           const ObjectDirectory::Object& object) {
     return script::ObjectInfo{
@@ -244,11 +274,12 @@ namespace {
 
 ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles,
                        ObjectDirectory& objects, BlipDirectory& blips, MarkerDirectory& markers,
-                       CheckpointDirectory& checkpoints, WorldClock& world, const Config& config,
-                       script::Events& events, CoreSink& sink) noexcept
+                       CheckpointDirectory& checkpoints, AttachmentDirectory& attachments,
+                       WorldClock& world, const Config& config, script::Events& events,
+                       CoreSink& sink) noexcept
     : players_(&players), vehicles_(&vehicles), objects_(&objects), blips_(&blips),
-      markers_(&markers), checkpoints_(&checkpoints), world_(&world), config_(&config),
-      events_(&events), sink_(&sink) {}
+      markers_(&markers), checkpoints_(&checkpoints), attachments_(&attachments), world_(&world),
+      config_(&config), events_(&events), sink_(&sink) {}
 
 std::vector<script::PlayerInfo> ServerCore::players() const {
     std::vector<script::PlayerInfo> everyone;
@@ -659,8 +690,73 @@ bool ServerCore::removeVehicle(shared::VehicleId id) {
         return false;
     }
 
+    forgetAttachments(
+        AttachmentDirectory::Ref{.kind = shared::EntityKind::Vehicle, .id = id});
+
     sink_->vehicleRemoved(id);
     return true;
+}
+
+// --- Привязка сущностей -----------------------------------------------------
+
+/// Есть ли такая сущность в сессии.
+///
+/// Проверять приходится здесь: реестр привязок знает только рода и номера, а
+/// списки лежат по трём разным местам. Без проверки скрипт повесил бы предмет на
+/// машину, которой нет, и предмет этот навсегда остался бы висеть в никуда —
+/// отвязать его было бы уже некому.
+bool ServerCore::exists(script::EntityRef entity) const {
+    switch (entity.kind) {
+    case shared::EntityKind::Player:
+        return players_->findById(entity.id) != nullptr;
+    case shared::EntityKind::Vehicle:
+        return vehicles_->find(entity.id) != nullptr;
+    case shared::EntityKind::Object:
+        return objects_->find(entity.id) != nullptr;
+    case shared::EntityKind::None:
+        break;
+    }
+
+    return false;
+}
+
+
+bool ServerCore::attachEntity(script::EntityRef entity,
+                              const script::AttachmentInfo& attachment) {
+    if (!exists(entity) || !exists(attachment.target)) {
+        return false;
+    }
+
+    if (!attachments_->attach(describe(entity, attachment))) {
+        return false;
+    }
+
+    sink_->attachmentChanged(AttachmentDirectory::Ref{.kind = entity.kind, .id = entity.id});
+    return true;
+}
+
+bool ServerCore::detachEntity(script::EntityRef entity) {
+    const AttachmentDirectory::Ref self{.kind = entity.kind, .id = entity.id};
+
+    if (!attachments_->detach(self)) {
+        return false;
+    }
+
+    sink_->attachmentChanged(self);
+    return true;
+}
+
+std::optional<script::AttachmentInfo> ServerCore::attachment(script::EntityRef entity) const {
+    const shared::EntityAttachment* const found =
+        attachments_->find(AttachmentDirectory::Ref{.kind = entity.kind, .id = entity.id});
+
+    return found == nullptr ? std::nullopt : std::optional{describe(*found)};
+}
+
+void ServerCore::forgetAttachments(AttachmentDirectory::Ref entity) {
+    for (const AttachmentDirectory::Ref& loosened : attachments_->forget(entity)) {
+        sink_->attachmentChanged(loosened);
+    }
 }
 
 std::vector<script::ObjectInfo> ServerCore::objects() const {
@@ -699,6 +795,8 @@ bool ServerCore::removeObject(shared::ObjectId id) {
     if (!objects_->remove(id)) {
         return false;
     }
+
+    forgetAttachments(AttachmentDirectory::Ref{.kind = shared::EntityKind::Object, .id = id});
 
     sink_->objectRemoved(id);
     return true;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "attachment_directory.hpp"
 #include "config.hpp"
 #include "drawn_directory.hpp"
 #include "object_directory.hpp"
@@ -77,6 +78,15 @@ public:
     /// Машину следует починить: просьба её ведущему.
     virtual void vehicleRepaired(shared::VehicleId id) = 0;
 
+    /// Привязка сущности заведена, изменена или снята — рассказать всем.
+    ///
+    /// Всем, а не тем, кто сущность видит, и это не расточительство. Привязок в
+    /// сессии единицы, живут они долго, а раздача по расстоянию потребовала бы
+    /// досылать привязку каждому, кому сущность приблизилась, — и помнить, кому
+    /// какую уже досылали. Тот, у кого нет ни одного из двух концов, просто
+    /// запомнит её до их появления.
+    virtual void attachmentChanged(AttachmentDirectory::Ref entity) = 0;
+
     /// Внешность машины назначена сервером — рассказать о ней всем, кто машину
     /// видит.
     ///
@@ -148,8 +158,8 @@ class ServerCore final : public script::Core {
 public:
     ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
                BlipDirectory& blips, MarkerDirectory& markers, CheckpointDirectory& checkpoints,
-               WorldClock& world, const Config& config, script::Events& events,
-               CoreSink& sink) noexcept;
+               AttachmentDirectory& attachments, WorldClock& world, const Config& config,
+               script::Events& events, CoreSink& sink) noexcept;
 
     // --- Игроки ----------------------------------------------------------------
 
@@ -194,6 +204,23 @@ public:
     bool setVehicleAppearance(shared::VehicleId id,
                               const script::VehicleAppearanceInfo& appearance) override;
 
+    // --- Привязка сущностей ----------------------------------------------------
+
+    bool attachEntity(script::EntityRef entity,
+                      const script::AttachmentInfo& attachment) override;
+    bool detachEntity(script::EntityRef entity) override;
+
+    [[nodiscard]] std::optional<script::AttachmentInfo> attachment(
+        script::EntityRef entity) const override;
+
+    /// Забывает привязки исчезнувшей сущности и рассказывает об отвязанных.
+    ///
+    /// Зовётся отовсюду, где сущность пропадает: из уборки машины и предмета, из
+    /// разрыва соединения. Собрано в одно место нарочно — забыть отвязать в одном
+    /// из трёх мест легко, а последствие увидишь не сразу: у игрока останется
+    /// висеть предмет на пустом месте.
+    void forgetAttachments(AttachmentDirectory::Ref entity);
+
     // --- Предметы --------------------------------------------------------------
 
     [[nodiscard]] std::vector<script::ObjectInfo> objects() const override;
@@ -237,12 +264,16 @@ public:
     bool setTime(std::uint8_t hour, std::uint8_t minute) override;
 
 private:
+    /// Есть ли такая сущность в сессии. Род решает, в каком реестре искать.
+    [[nodiscard]] bool exists(script::EntityRef entity) const;
+
     PlayerRegistry* players_ = nullptr;
     VehicleDirectory* vehicles_ = nullptr;
     ObjectDirectory* objects_ = nullptr;
     BlipDirectory* blips_ = nullptr;
     MarkerDirectory* markers_ = nullptr;
     CheckpointDirectory* checkpoints_ = nullptr;
+    AttachmentDirectory* attachments_ = nullptr;
     WorldClock* world_ = nullptr;
     const Config* config_ = nullptr;
     script::Events* events_ = nullptr;

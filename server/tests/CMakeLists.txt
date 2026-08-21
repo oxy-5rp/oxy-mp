@@ -4,6 +4,7 @@
 # конфигурационный файл и как идут часы — всё это решается без сети и проверяется
 # без неё же. Сокеты в этот список не попадают намеренно: там нечего решать.
 add_executable(oxymp_server_tests
+    attachment_directory_tests.cpp
     config_file_tests.cpp
     resource_catalog_tests.cpp
     server_core_tests.cpp

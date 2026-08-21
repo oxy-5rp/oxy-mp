@@ -1,5 +1,6 @@
 #pragma once
 
+#include "attachment_directory.hpp"
 #include "config.hpp"
 #include "http_server.hpp"
 #include "player_registry.hpp"
@@ -117,11 +118,20 @@ private:
                            float heading) override;
     void vehicleRepaired(shared::VehicleId id) override;
     void vehicleAppearanceChanged(shared::VehicleId id) override;
+    void attachmentChanged(AttachmentDirectory::Ref entity) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
     /// Рассказывает вошедшему обо всём нарисованном, что ему видно: о метках
     /// на карте, о маркерах и о контрольных точках.
     void sendDrawnTo(net::PeerId peer, std::int32_t dimension);
+
+    /// Рассказывает вошедшему обо всех привязках сессии.
+    ///
+    /// Обо всех, а не о видимых: привязка связывает две сущности, и хотя бы
+    /// одной из них у вошедшего в это мгновение может не быть — машины ему ещё
+    /// не раздали. Клиент запомнит привязку и наденет её, когда оба конца у него
+    /// появятся, — так же, как поступает с внешностью машины.
+    void sendAttachmentsTo(net::PeerId peer);
 
     /// Всё из одного реестра картинок — одному игроку.
     template<typename Directory>
@@ -288,6 +298,13 @@ private:
     MarkerDirectory markers_;
     CheckpointDirectory checkpoints_;
 
+    /// Кто к кому привязан.
+    ///
+    /// Отдельным реестром, потому что привязка не принадлежит ни одному роду
+    /// сущностей: предмет вешают на человека, человека сажают на предмет,
+    /// предмет цепляют к машине.
+    AttachmentDirectory attachments_;
+
     /// Что сервер раздаёт клиентам сверх самой игры.
     ///
     /// Объявлен раньше раздачи и потому переживает её: раздача держит на него
@@ -317,8 +334,8 @@ private:
     ///
     /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
     /// и быть не должно — они разошлись бы с настоящими молча.
-    ServerCore core_{players_, vehicles_, objects_, blips_,   markers_, checkpoints_,
-                     world_,   config_,   events_,  *this};
+    ServerCore core_{players_,     vehicles_, objects_, blips_,  markers_, checkpoints_,
+                     attachments_, world_,    config_,  events_, *this};
 
     /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
     ResourceCatalog catalog_;
