@@ -86,11 +86,31 @@ struct Drawn {
     /// него нет, — но по счётчику видно, что распоряжение дошло.
     std::size_t animations = 0;
 
+    /// Сколько раз пришла внешность машины и сколько из них несли тюнинг.
+    ///
+    /// Второе число здесь и есть проверка обвесов: заводскую внешность машина
+    /// объявляет и сама, а места тюнинга заводскими не бывают — их назначает
+    /// только сервер.
+    std::size_t appearances = 0;
+    std::size_t tuned = 0;
+
     void collect(oxymp::client::Connection& connection) {
         blips += connection.takeBlips().size();
         markers += connection.takeMarkers().size();
         checkpoints += connection.takeCheckpoints().size();
         animations += connection.takeAnimations().size();
+
+        for (const auto& appearance : connection.takeVehicleAppearances()) {
+            ++appearances;
+
+            const bool anyMod = std::ranges::any_of(appearance.mods, [](std::int8_t mod) {
+                return mod != oxymp::shared::kStockMod;
+            });
+
+            if (anyMod || appearance.toggleMods != 0) {
+                ++tuned;
+            }
+        }
 
         // Снятое вычитается: метка, поставленная и убранная, у игрока не
         // осталась бы, и счётчик, который об этом не знает, врёт.
@@ -401,6 +421,9 @@ int main(int argc, char** argv) {
                 spdlog::info("  сервер нарисовал: меток {}, маркеров {}, точек {}; "
                              "движений велел {}",
                              drawn.blips, drawn.markers, drawn.checkpoints, drawn.animations);
+
+                spdlog::info("  внешностей машин {}, из них с тюнингом {}", drawn.appearances,
+                             drawn.tuned);
 
                 // Главное доказательство работы мультиплеера: мы видим, где
                 // сейчас находятся другие игроки, и их положение меняется.

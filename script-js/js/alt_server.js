@@ -736,6 +736,89 @@
         },
     });
 
+    // --- Внешность машины ----------------------------------------------------
+    //
+    // У ядра внешность ходит целиком: одно описание — одно сообщение клиентам.
+    // У alt:V она разложена на два десятка свойств, и всякое пишется порознь.
+    // Отсюда `reshape`: прочитать целиком, поправить названное, записать целиком.
+    //
+    // Читается она заново на каждое обращение, и это не расточительство, а то же
+    // правило, что и везде: слой не хранит правду о мире. Машину могли
+    // перекрасить и без нас — из другого ресурса или тем же ресурсом строкой
+    // выше, — и запомненное здесь разошлось бы с настоящим в тот же миг.
+
+    /// Места тюнинга, которые не выбираются из списка, а включаются.
+    ///
+    /// Турбина, дым из-под колёс, ксенон. У alt:V они ставятся тем же `setMod`,
+    /// что и остальные, — нулём или единицей, — а у нас живут отдельным набором
+    /// битов: игра и спрашивает о них другим нативом.
+    const TOGGLE_MODS = new Set([18, 20, 22]);
+
+    /// Стороны неона в том порядке, в каком их нумерует игра.
+    const NEON_SIDES = { left: 1, right: 2, front: 4, back: 8 };
+
+    /// Места дисков в нумерации игры: передние и задние.
+    const FRONT_WHEELS = 23;
+    const REAR_WHEELS = 24;
+
+    /// Сколько у машины мест под тюнинг и «дополнений» кузова. Числа игры.
+    ///
+    /// Проверять их приходится здесь: место за пределами набора ядро отбросит
+    /// молча — набор у него ровно такой длины, — и ресурс, промахнувшийся
+    /// номером, искал бы пропавшую деталь в игре.
+    const MOD_SLOTS = 49;
+    const FIRST_EXTRA = 1;
+    const LAST_EXTRA = 14;
+
+    /// Внешность машины, какой её видит ядро.
+    ///
+    /// Машины уже нет — пустое описание, а не бросок: свойства внешности читают
+    /// в перечислениях и в обработчиках, и машина, исчезнувшая между двумя
+    /// строками, здесь обычное дело.
+    function look(vehicle) {
+        return vehicle.appearance ?? { mods: [] };
+    }
+
+    /// Правит внешность машины и отдаёт, удалось ли.
+    function reshape(vehicle, change) {
+        const worn = vehicle.appearance;
+        if (worn === undefined) {
+            return false;
+        }
+
+        change(worn);
+        return vehicle.setAppearance(worn);
+    }
+
+    /// Свойство внешности: читается из описания, пишется правкой на месте.
+    function looks(read, write) {
+        return {
+            get() { return read(look(this)); },
+            set(value) { reshape(this, (worn) => write(worn, value)); },
+        };
+    }
+
+    /// Цвет из трёх полей описания — и обратно.
+    ///
+    /// Прозрачность у alt:V в RGBA есть, а у неона и дыма её нет и в игре:
+    /// принимаем и отдаём непрозрачный.
+    function coloured(prefix) {
+        return {
+            get() {
+                const worn = look(this);
+                return new shared.RGBA(worn[`${prefix}Red`] ?? 0, worn[`${prefix}Green`] ?? 0,
+                                       worn[`${prefix}Blue`] ?? 0, 255);
+            },
+            set(value) {
+                reshape(this, (worn) => {
+                    worn[`${prefix}Red`] = Number(value?.r) || 0;
+                    worn[`${prefix}Green`] = Number(value?.g) || 0;
+                    worn[`${prefix}Blue`] = Number(value?.b) || 0;
+                });
+            },
+        };
+    }
+
     Object.defineProperties(Vehicle.prototype, {
         pos: {
             get() { return new shared.Vector3(this.position); },
@@ -752,12 +835,209 @@
         /// машина без водителя ведущего не теряет. Здесь отдаётся то же, что и
         /// `owner`, и расхождение стоит помнить.
         driver: { get() { return this.owner; } },
-        /// Слой мира, в котором машина стоит. Есть у ядра и работает.
         toString: {
             value() { return `Vehicle{ id: ${this.id} }`; },
         },
-        setMod: { value: unperformed('vehicle.setMod', 'обвесы машины сервером не меняются') },
 
+        // Цвета из палитры игры.
+        primaryColor: looks((worn) => worn.primaryColour ?? 0,
+                            (worn, value) => { worn.primaryColour = Number(value) || 0; }),
+        secondaryColor: looks((worn) => worn.secondaryColour ?? 0,
+                              (worn, value) => { worn.secondaryColour = Number(value) || 0; }),
+        pearlColor: looks((worn) => worn.pearlescentColour ?? 0,
+                          (worn, value) => { worn.pearlescentColour = Number(value) || 0; }),
+        wheelColor: looks((worn) => worn.wheelColour ?? 0,
+                          (worn, value) => { worn.wheelColour = Number(value) || 0; }),
+
+        tireSmokeColor: coloured('tyreSmoke'),
+        neonColor: coloured('neon'),
+
+        /// Какие полосы неона горят. У alt:V это объект из четырёх признаков.
+        neon: {
+            get() {
+                const sides = look(this).neonSides ?? 0;
+                return {
+                    left: (sides & NEON_SIDES.left) !== 0,
+                    right: (sides & NEON_SIDES.right) !== 0,
+                    front: (sides & NEON_SIDES.front) !== 0,
+                    back: (sides & NEON_SIDES.back) !== 0,
+                };
+            },
+            set(value) {
+                reshape(this, (worn) => {
+                    let sides = 0;
+
+                    for (const [name, bit] of Object.entries(NEON_SIDES)) {
+                        if (value?.[name]) {
+                            sides |= bit;
+                        }
+                    }
+
+                    worn.neonSides = sides;
+                });
+            },
+        },
+
+        numberPlateText: looks((worn) => worn.plate ?? '',
+                               (worn, value) => { worn.plate = String(value ?? ''); }),
+        numberPlateIndex: looks((worn) => worn.plateStyle ?? 0,
+                                (worn, value) => { worn.plateStyle = Number(value) || 0; }),
+
+        livery: looks((worn) => worn.livery ?? -1,
+                      (worn, value) => { worn.livery = Number(value) || 0; }),
+        windowTint: looks((worn) => worn.windowTint ?? -1,
+                          (worn, value) => { worn.windowTint = Number(value) || 0; }),
+        dirtLevel: looks((worn) => worn.dirtLevel ?? 0,
+                         (worn, value) => { worn.dirtLevel = Number(value) || 0; }),
+        customTires: looks((worn) => worn.customTyres === true,
+                           (worn, value) => { worn.customTyres = Boolean(value); }),
+
+        /// Тип дисков и их вариации. У alt:V они только читаются: ставит их
+        /// `setWheels`, и разделение это повторено здесь нарочно — ресурс,
+        /// написанный под alt:V, зовёт именно его.
+        wheelType: { get() { return look(this).wheelType ?? -1; } },
+        frontWheels: { get() { return look(this).mods?.[FRONT_WHEELS] ?? -1; } },
+        rearWheels: { get() { return look(this).mods?.[REAR_WHEELS] ?? -1; } },
+
+        setWheels: {
+            value(type, variation) {
+                return reshape(this, (worn) => {
+                    worn.wheelType = Number(type) || 0;
+                    worn.mods[FRONT_WHEELS] = Number(variation) || 0;
+                });
+            },
+        },
+        setRearWheels: {
+            value(variation) {
+                return reshape(this, (worn) => {
+                    worn.mods[REAR_WHEELS] = Number(variation) || 0;
+                });
+            },
+        },
+
+        /// Набор деталей. У alt:V ноль означает «тюнинг не поставить», и ресурсы
+        /// проверяют это перед всяким `setMod`.
+        ///
+        /// У нас набор у машины есть всегда: клиент выдаёт его перед тем, как
+        /// накладывать тюнинг, — иначе игра приняла бы вызовы и не сделала ничего.
+        /// Поэтому единица здесь не заглушка, а правда, сказанная на языке alt:V.
+        modKit: {
+            get() { return 1; },
+            set(value) {
+                if (Number(value) > 1) {
+                    warnOnce('vehicle.modKit',
+                             'второго набора деталей мы не передаём — у машины всегда первый');
+                }
+            },
+        },
+        modKitsCount: { get() { return 1; } },
+
+        getMod: {
+            value(category) {
+                const slot = Number(category) || 0;
+                const worn = look(this);
+
+                if (TOGGLE_MODS.has(slot)) {
+                    return ((worn.toggleMods ?? 0) >>> slot) & 1;
+                }
+
+                return worn.mods?.[slot] ?? -1;
+            },
+        },
+        setMod: {
+            value(category, id) {
+                const slot = Number(category) || 0;
+                const chosen = Number(id) || 0;
+
+                if (slot < 0 || slot >= MOD_SLOTS) {
+                    warnOnce('vehicle.setMod',
+                             `места тюнинга ${slot} у игры нет — их сорок девять, с нуля`);
+                    return false;
+                }
+
+                return reshape(this, (worn) => {
+                    if (!TOGGLE_MODS.has(slot)) {
+                        worn.mods[slot] = chosen;
+                        return;
+                    }
+
+                    worn.toggleMods = chosen === 0
+                        ? (worn.toggleMods & ~(1 << slot)) >>> 0
+                        : (worn.toggleMods | (1 << slot)) >>> 0;
+                });
+            },
+        },
+
+        /// Сколько деталей есть у этой модели в этом месте.
+        ///
+        /// Отказом, а не числом: ответ на это знает игра, а не сервер, — он лежит
+        /// в её файлах моделей, которых у нас нет. Соврать нулём значило бы
+        /// показать игроку пустое меню тюнинга и оставить его гадать, почему.
+        getModsCount: { value: absent('vehicle.getModsCount') },
+
+        getExtra: {
+            value(id) {
+                const extra = Number(id) || 0;
+                return ((look(this).extras ?? 0) & (1 << (extra - 1))) !== 0;
+            },
+        },
+        setExtra: {
+            value(id, state) {
+                const extra = Number(id) || 0;
+
+                if (extra < FIRST_EXTRA || extra > LAST_EXTRA) {
+                    warnOnce('vehicle.setExtra',
+                             `дополнения кузова ${extra} у игры нет — они с первого по`
+                             + ' четырнадцатое');
+                    return false;
+                }
+
+                return reshape(this, (worn) => {
+                    worn.extras = state
+                        ? (worn.extras | (1 << (extra - 1))) >>> 0
+                        : (worn.extras & ~(1 << (extra - 1))) >>> 0;
+                });
+            },
+        },
+
+        // Того, чего в протоколе внешности нет вовсе. Вопросы отказывают вслух,
+        // распоряжения говорят о себе один раз: см. absent и unperformed.
+        //
+        // Цвет салона, панели и раскраска крыши не попали в протокол не по
+        // забывчивости: нативов, которыми их читают, нет в открытой базе имён, а
+        // подставлять хеш по памяти — верный способ уронить игру. Появятся в базе
+        // — появятся и здесь.
+        customPrimaryColor: {
+            get: absent('vehicle.customPrimaryColor'),
+            set: unperformed('vehicle.customPrimaryColor',
+                             'цвет машины ходит числом палитры игры, а не тремя байтами'),
+        },
+        customSecondaryColor: {
+            get: absent('vehicle.customSecondaryColor'),
+            set: unperformed('vehicle.customSecondaryColor',
+                             'цвет машины ходит числом палитры игры, а не тремя байтами'),
+        },
+        interiorColor: {
+            get: absent('vehicle.interiorColor'),
+            set: unperformed('vehicle.interiorColor', 'цвет салона не передаётся'),
+        },
+        dashboardColor: {
+            get: absent('vehicle.dashboardColor'),
+            set: unperformed('vehicle.dashboardColor', 'цвет приборной панели не передаётся'),
+        },
+        roofLivery: {
+            get: absent('vehicle.roofLivery'),
+            set: unperformed('vehicle.roofLivery', 'раскраска крыши не передаётся'),
+        },
+        darkness: {
+            get: absent('vehicle.darkness'),
+            set: unperformed('vehicle.darkness', 'затемнение особых машин не передаётся'),
+        },
+        getAppearanceDataBase64: { value: absent('vehicle.getAppearanceDataBase64') },
+        setAppearanceDataBase64: {
+            value: unperformed('vehicle.setAppearanceDataBase64',
+                               'внешность у нас своя по составу, чужую запись не разобрать'),
+        },
     });
 
     Object.defineProperties(Vehicle, {

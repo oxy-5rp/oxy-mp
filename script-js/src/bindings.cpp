@@ -678,6 +678,47 @@ public:
         return static_cast<std::uint8_t>(std::clamp(number(name, fallback), 0.0, 255.0));
     }
 
+    /// Целое со знаком в один байт: место тюнинга, раскраска, тонировка.
+    ///
+    /// Отдельно от byte, а не заодно с ним: минус единица означает у них
+    /// «заводское», и обрезав её до нуля, мы поставили бы машине первую попавшуюся
+    /// деталь вместо того, чтобы оставить её как есть.
+    [[nodiscard]] std::int8_t signedByte(const char* name, double fallback) const {
+        return static_cast<std::int8_t>(std::clamp(number(name, fallback), -128.0, 127.0));
+    }
+
+    /// Набор чисел. Отсутствующее поле и всё, что набором не является, — пустой.
+    [[nodiscard]] std::vector<double> numbers(const char* name) const {
+        std::vector<double> got;
+
+        v8::Local<v8::Value> field;
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field) ||
+            !field->IsArray()) {
+            return got;
+        }
+
+        const v8::Local<v8::Array> array = field.As<v8::Array>();
+        got.reserve(array->Length());
+
+        for (std::uint32_t i = 0; i < array->Length(); ++i) {
+            v8::Local<v8::Value> item;
+            double value = 0.0;
+
+            if (array->Get(context_, i).ToLocal(&item) && item->NumberValue(context_).To(&value) &&
+                std::isfinite(value)) {
+                got.push_back(value);
+                continue;
+            }
+
+            // Дырка в наборе — не повод бросить остальное: место, которого скрипт
+            // не назвал, остаётся заводским, и ноль здесь означал бы первую
+            // попавшуюся деталь.
+            got.push_back(shared::kStockMod);
+        }
+
+        return got;
+    }
+
     /// Признак. Отсутствующий — ложь, как и у alt:V.
     [[nodiscard]] bool flag(const char* name) const {
         v8::Local<v8::Value> field;
@@ -791,6 +832,143 @@ void clearTasks(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     info.GetReturnValue().Set(
         resourceOf(isolate).core().clearTasks(static_cast<shared::PlayerId>(*id)));
+}
+
+// --- Внешность машины -------------------------------------------------------
+//
+// Ходит объектом и целиком, а не свойством на поле. Причина та же, что и у
+// метки: тюнинг ставят сразу помногу — покрасил, обул, навесил, — и поле за
+// полем означало бы по сообщению клиенту на каждое.
+//
+// Имена полей здесь наши, а не альтивишные: `alt-server` переводит их у себя.
+// Так и должно быть — разница между `colour` и `color` и между `tyre` и `tire`
+// принадлежит слою совместимости, а не мосту.
+
+[[nodiscard]] v8::Local<v8::Object> appearanceToJs(v8::Local<v8::Context> context,
+                                                   const VehicleAppearanceInfo& look) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Object> object = v8::Object::New(isolate);
+
+    const auto put = [&](const char* name, double value) {
+        (void)object->Set(context, toJs(isolate, name), v8::Number::New(isolate, value));
+    };
+
+    put("primaryColour", look.primaryColour);
+    put("secondaryColour", look.secondaryColour);
+    put("pearlescentColour", look.pearlescentColour);
+    put("wheelColour", look.wheelColour);
+    put("plateStyle", look.plateStyle);
+    put("livery", look.livery);
+    put("wheelType", look.wheelType);
+    put("windowTint", look.windowTint);
+    put("dirtLevel", look.dirtLevel);
+    put("toggleMods", look.toggleMods);
+    put("tyreSmokeRed", look.tyreSmokeRed);
+    put("tyreSmokeGreen", look.tyreSmokeGreen);
+    put("tyreSmokeBlue", look.tyreSmokeBlue);
+    put("neonSides", look.neonSides);
+    put("neonRed", look.neonRed);
+    put("neonGreen", look.neonGreen);
+    put("neonBlue", look.neonBlue);
+    put("extras", look.extras);
+
+    (void)object->Set(context, toJs(isolate, "plate"), toJs(isolate, look.plate));
+    (void)object->Set(context, toJs(isolate, "customTyres"),
+                      v8::Boolean::New(isolate, look.customTyres));
+
+    const v8::Local<v8::Array> mods =
+        v8::Array::New(isolate, static_cast<int>(look.mods.size()));
+
+    for (std::size_t slot = 0; slot < look.mods.size(); ++slot) {
+        (void)mods->Set(context, static_cast<std::uint32_t>(slot),
+                        v8::Integer::New(isolate, look.mods[slot]));
+    }
+
+    (void)object->Set(context, toJs(isolate, "mods"), mods);
+
+    return object;
+}
+
+[[nodiscard]] std::optional<VehicleAppearanceInfo> appearanceFromJs(
+    v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
+    const std::optional<Fields> fields = fieldsOf(context, value);
+    if (!fields) {
+        return std::nullopt;
+    }
+
+    VehicleAppearanceInfo look;
+    look.primaryColour = fields->byte("primaryColour", 0);
+    look.secondaryColour = fields->byte("secondaryColour", 0);
+    look.pearlescentColour = fields->byte("pearlescentColour", 0);
+    look.wheelColour = fields->byte("wheelColour", 0);
+    look.plate = fields->text("plate");
+    look.plateStyle = fields->byte("plateStyle", 0);
+    look.livery = fields->signedByte("livery", shared::kStockMod);
+    look.wheelType = fields->signedByte("wheelType", shared::kStockMod);
+    look.windowTint = fields->signedByte("windowTint", shared::kStockMod);
+    look.dirtLevel = static_cast<float>(fields->number("dirtLevel", 0.0));
+    look.toggleMods = static_cast<std::uint32_t>(fields->number("toggleMods", 0.0));
+    look.customTyres = fields->flag("customTyres");
+    look.tyreSmokeRed = fields->byte("tyreSmokeRed", 255);
+    look.tyreSmokeGreen = fields->byte("tyreSmokeGreen", 255);
+    look.tyreSmokeBlue = fields->byte("tyreSmokeBlue", 255);
+    look.neonSides = fields->byte("neonSides", 0);
+    look.neonRed = fields->byte("neonRed", 255);
+    look.neonGreen = fields->byte("neonGreen", 255);
+    look.neonBlue = fields->byte("neonBlue", 255);
+    look.extras = static_cast<std::uint16_t>(fields->number("extras", 0.0));
+
+    // Набор мест тюнинга короче нашего — остальные остаются заводскими; длиннее —
+    // лишнее отбрасывается. Отказать было бы неверно: длина набора задана
+    // протоколом, скрипт о ней не знает и знать не должен.
+    const std::vector<double> mods = fields->numbers("mods");
+
+    for (std::size_t slot = 0; slot < look.mods.size() && slot < mods.size(); ++slot) {
+        look.mods[slot] = static_cast<std::int8_t>(std::clamp(mods[slot], -128.0, 127.0));
+    }
+
+    return look;
+}
+
+/// Как машина выглядит. Пусто — машины уже нет.
+void vehicleAppearance(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<VehicleAppearanceInfo> look =
+        resourceOf(isolate).core().vehicleAppearance(*id);
+
+    if (!look) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(appearanceToJs(isolate->GetCurrentContext(), *look));
+}
+
+void vehicleSetAppearance(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        fail(isolate, "setAppearance зовётся у машины");
+        return;
+    }
+
+    const std::optional<VehicleAppearanceInfo> look =
+        info.Length() >= 1 ? appearanceFromJs(isolate->GetCurrentContext(), info[0])
+                           : std::nullopt;
+
+    if (!look) {
+        fail(isolate, "setAppearance ждёт описание внешности объектом");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setVehicleAppearance(*id, *look));
 }
 
 // --- Метка на карте ---------------------------------------------------------
@@ -1420,9 +1598,12 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
               setVehicleDimension);
     addGetter(isolate, shape, "valid", vehicleValid);
 
+    addGetter(isolate, shape, "appearance", vehicleAppearance);
+
     addMethod(isolate, shape, "destroy", vehicleDestroy);
     addMethod(isolate, shape, "teleport", vehicleTeleport);
     addMethod(isolate, shape, "repair", vehicleRepair);
+    addMethod(isolate, shape, "setAppearance", vehicleSetAppearance);
 
     return shape;
 }
