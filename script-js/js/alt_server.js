@@ -1556,8 +1556,10 @@
         NetworkObject: absent('alt.NetworkObject'),
         VirtualEntity: absent('alt.VirtualEntity'),
         VirtualEntityGroup: absent('alt.VirtualEntityGroup'),
-        HttpClient: absent('alt.HttpClient'),
-        WebSocketClient: absent('alt.WebSocketClient'),
+        // На сервере их нет и у самого alt:V — они клиентские. Серверу же
+        // доступен весь Node: `fetch`, `http`, `ws` и что угодно из npm.
+        HttpClient: absent('alt.HttpClient (он клиентский; на сервере есть fetch)'),
+        WebSocketClient: absent('alt.WebSocketClient (он клиентский)'),
         Resource: absent('alt.Resource'),
         restartResource: absent('alt.restartResource'),
         startResource: absent('alt.startResource'),

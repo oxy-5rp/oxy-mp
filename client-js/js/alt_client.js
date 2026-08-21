@@ -619,6 +619,7 @@
     // --- Сборка модуля -------------------------------------------------------
 
     const entities = alt.entities;
+    const net = alt.net;
     const objects = alt.objects;
     const extras = alt.extras;
     const locals = alt.locals;
@@ -779,12 +780,17 @@
         ColshapeSphere: locals.ColshapeSphere,
         ColshapeCircle: locals.ColshapeCircle,
 
+        // Сеть ресурса. Ходит в неё ресурс сервера, а не игрок: своей волей он
+        // отсюда ничего не вызовет — ни меню, ни команд, ни клавиш у клиента
+        // нет. Так же устроено и у alt:V.
+        HttpClient: net.HttpClient,
+        WebSocketClient: net.WebSocketClient,
+        WebSocketReadyState: net.WebSocketReadyState,
+
         // Того, чего ещё нет. Отказом, а не тишиной.
         VirtualEntity: absent('alt.VirtualEntity'),
         Voice: absent('alt.Voice'),
         Audio: absent('alt.Audio'),
-        HttpClient: absent('alt.HttpClient'),
-        WebSocketClient: absent('alt.WebSocketClient'),
         RmlDocument: absent('alt.RmlDocument'),
         Discord: absent('alt.Discord'),
         // Распоряжения, которых мы не умеем исполнить: говорят один раз и не

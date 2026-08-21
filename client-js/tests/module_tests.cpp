@@ -889,3 +889,108 @@ TEST_CASE("a real commonjs file is left alone", "[client][js]") {
 
     CHECK(said("обычный CommonJS поднялся"));
 }
+
+// --- Сеть ресурса ------------------------------------------------------------
+//
+// Сокета здесь не поднимается ни одного, и это не лень: проверка, которой нужен
+// живой сервер, не запускается никогда — ни в чужой сборке, ни без сети.
+// Проверяется то, что решается без неё: имена, заголовки, состояния и отказы.
+
+TEST_CASE("the resource has an http client with the methods alt:V promises",
+          "[client][js]") {
+    REQUIRE(run("http", "const alt = require('alt-client');\n"
+                        "const клиент = new alt.HttpClient();\n"
+                        "const имена = ['get', 'head', 'post', 'put', 'delete',\n"
+                        "               'connect', 'options', 'trace', 'patch'];\n"
+                        "alt.log('все на месте: ' +\n"
+                        "    имена.every((имя) => typeof клиент[имя] === 'function'));\n"));
+
+    CHECK(said("все на месте: true"));
+}
+
+TEST_CASE("extra headers stay with the http client, not with the request",
+          "[client][js]") {
+    // Так это устроено у alt:V: ресурс заводит один клиент, кладёт в него ключ
+    // доступа и потом ходит им по всем своим адресам.
+    REQUIRE(run("httphead", "const alt = require('alt-client');\n"
+                            "const клиент = new alt.HttpClient();\n"
+                            "клиент.setExtraHeader('X-Ключ', 'секрет');\n"
+                            "alt.log('заголовок: ' + клиент.getExtraHeaders()['X-Ключ']);\n"
+                            "const снятые = клиент.getExtraHeaders();\n"
+                            "снятые['X-Ключ'] = 'подмена';\n"
+                            "alt.log('после подмены: ' +\n"
+                            "    клиент.getExtraHeaders()['X-Ключ']);\n"));
+
+    CHECK(said("заголовок: секрет"));
+
+    // Отданный наружу набор — копия: иначе заголовки можно было бы менять в
+    // обход setExtraHeader, и менять молча.
+    CHECK(said("после подмены: секрет"));
+}
+
+// Отказ обещания, а не пустой ответ: ресурс, принявший тишину за пустое тело,
+// унёс бы эту ложь дальше.
+TEST_CASE("an http request to nowhere refuses out loud", "[client][js]") {
+    REQUIRE(run("httpbad", "const alt = require('alt-client');\n"
+                           "const клиент = new alt.HttpClient();\n"
+                           "клиент.get('не адрес вовсе')\n"
+                           "    .then(() => alt.logError('запрос удался, а не должен был'))\n"
+                           "    .catch((беда) => alt.log('отказ: ' + беда.message));\n"));
+
+    // Отказ обещания приходит следующим оборотом цикла событий, а крутит его
+    // клиент кадром игры — здесь же вместо кадра прокрутка вручную.
+    for (int attempt = 0; attempt < 200 && !said("отказ:"); ++attempt) {
+        ::Sleep(1);
+        Engine::instance()->tick();
+    }
+
+    CHECK(said("отказ: alt.HttpClient: адрес «не адрес вовсе» не разобран"));
+}
+
+TEST_CASE("a websocket starts closed and keeps its sub protocols", "[client][js]") {
+    REQUIRE(run("ws", "const alt = require('alt-client');\n"
+                      "const связь = new alt.WebSocketClient('ws://127.0.0.1:1/');\n"
+                      "alt.log('адрес: ' + связь.url);\n"
+                      "alt.log('состояние: ' + связь.readyState + ' из ' +\n"
+                      "    alt.WebSocketReadyState.Closed);\n"
+                      "связь.addSubProtocol('чат');\n"
+                      "связь.addSubProtocol('эхо');\n"
+                      "alt.log('протоколы: ' + связь.getSubProtocols().join(','));\n"
+                      "alt.log('послать до связи: ' + связь.send('привет'));\n"));
+
+    CHECK(said("адрес: ws://127.0.0.1:1/"));
+
+    // До start связи нет вовсе, и состояние у неё то же, что после закрытия.
+    CHECK(said("состояние: 3 из 3"));
+    CHECK(said("протоколы: чат,эхо"));
+
+    // Послать в неподнятую связь нельзя, и об этом говорится ложью в ответе, а
+    // не броском: у alt:V send отдаёт признак удачи.
+    CHECK(said("послать до связи: false"));
+}
+
+TEST_CASE("websocket listeners can be added and taken back", "[client][js]") {
+    REQUIRE(run("wsoff", "const alt = require('alt-client');\n"
+                         "const связь = new alt.WebSocketClient('ws://127.0.0.1:1/');\n"
+                         "const слушатель = () => {};\n"
+                         "связь.on('open', слушатель);\n"
+                         "alt.log('подписан: ' + связь.getEventListeners('open').length);\n"
+                         "связь.off('open', слушатель);\n"
+                         "alt.log('отписан: ' + связь.getEventListeners('open').length);\n"));
+
+    CHECK(said("подписан: 1"));
+    CHECK(said("отписан: 0"));
+}
+
+// Своих заголовков при рукопожатии стандартный WebSocket не принимает. Молчать
+// об этом нельзя, а бросать — тем более: вызов стоит посреди чужой настройки
+// связи, и брошенное отсюда унесло бы с собой всё, что идёт следом.
+TEST_CASE("a websocket says once that it cannot carry extra headers", "[client][js]") {
+    REQUIRE(run("wshead", "const alt = require('alt-client');\n"
+                          "const связь = new alt.WebSocketClient('ws://127.0.0.1:1/');\n"
+                          "связь.setExtraHeader('X-Ключ', 'секрет');\n"
+                          "alt.log('после заголовка выполнение продолжилось');\n"));
+
+    CHECK(said("websocket.setExtraHeader"));
+    CHECK(said("после заголовка выполнение продолжилось"));
+}
