@@ -131,8 +131,11 @@ bool UiFeed::menuOpen() const {
 }
 
 void UiFeed::setGameMenuOpen(bool open) {
-    const std::lock_guard guard{mutex_};
-    gameMenuOpen_ = open;
+    gameMenuOpen_.store(open, std::memory_order_relaxed);
+}
+
+bool UiFeed::gameMenuOpen() const {
+    return gameMenuOpen_.load(std::memory_order_relaxed);
 }
 
 
@@ -148,7 +151,7 @@ std::string UiFeed::takeUpdate() {
     std::string message = std::format(
         R"({{"inputActive":{},"inputText":"{}","ready":{},"alive":{},"menu":{})",
         inputActive_ ? 1 : 0, escape(inputText_), ready_ ? 1 : 0, alive ? 1 : 0,
-        (menuOpen_ || gameMenuOpen_) ? 1 : 0);
+        (menuOpen_ || gameMenuOpen()) ? 1 : 0);
 
     if (!chat_.empty()) {
         message += std::format(R"(,"chat":{})", linesToJson(chat_));

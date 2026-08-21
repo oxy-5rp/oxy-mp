@@ -3,6 +3,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 #include <oxymp/shared/status/load_stage.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -122,7 +123,16 @@ public:
     /// последнего кадра — меню паузы останавливает мир, а с ним и наш тик, — но
     /// вывод оказался неверным: тик идёт, чат остаётся на экране и лежит поверх
     /// игрового меню. Спрашивать надо саму игру, что и делает игровая сессия.
+    ///
+    /// Единственное здесь, что живёт без общей блокировки, и это не
+    /// непоследовательность. Признак спрашивает поток отрисовки игры на каждом
+    /// кадре — по нему решается, рисовать ли слой вообще, — а общую блокировку
+    /// держит тот, кто собирает страницу состояния строкой. Кадр игры длится
+    /// шестнадцать миллисекунд и ждать чужого форматирования не должен. Ни с
+    /// чем остальным здесь признак не связан: он сам по себе, и согласовывать
+    /// его не с чем.
     void setGameMenuOpen(bool open);
+    [[nodiscard]] bool gameMenuOpen() const;
 
     /// Собирает для страницы всё, что изменилось с прошлого раза.
     ///
@@ -148,7 +158,7 @@ private:
     std::string inputText_;
 
     bool menuOpen_ = false;
-    bool gameMenuOpen_ = false;
+    std::atomic<bool> gameMenuOpen_{false};
 
     shared::LoadStage stage_ = shared::LoadStage::Booting;
     bool worldReady_ = false;
