@@ -1,5 +1,7 @@
 #include "resource.hpp"
 
+#include <algorithm>
+
 #include "bindings.hpp"
 #include "convert.hpp"
 
@@ -93,7 +95,27 @@ Resource::Resource(std::string name, std::filesystem::path root, const OxympJsHo
       host_(&host),
       platform_(&platform) {}
 
+void Resource::rememberView(std::uint32_t view) {
+    if (view != 0) {
+        views_.push_back(view);
+    }
+}
+
+void Resource::forgetView(std::uint32_t view) {
+    std::erase(views_, view);
+}
+
 Resource::~Resource() {
+    // Окна убираются прежде изолята: после его разбора спросить у ресурса,
+    // какие окна за ним числились, будет уже не у кого.
+    if (host_ != nullptr && host_->destroyWebView != nullptr) {
+        for (const std::uint32_t view : views_) {
+            host_->destroyWebView(host_->context, view);
+        }
+    }
+
+    views_.clear();
+
     if (setup_ == nullptr) {
         return;
     }

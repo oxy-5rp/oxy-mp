@@ -749,7 +749,7 @@ void GameSession::handleTyping() {
     }
 }
 
-void GameSession::forgetDrawnOnLeaving() {
+void GameSession::forgetSessionOnLeaving() {
     const bool here = status_.snapshot().inSession();
 
     if (here == inSession_) {
@@ -781,6 +781,22 @@ void GameSession::forgetDrawnOnLeaving() {
     // будет никогда: куклы прежнего сервера остались бы стоять в мире
     // следующего.
     peds_.clear();
+
+    // Клиентские половины ресурсов останавливаются здесь же, и это не уборка
+    // ради опрятности. Движок отказывается поднимать ресурс, чьё имя уже
+    // занято, — а занято оно тем, что подняли в прошлой сессии. Оставленные
+    // жить, они не давали подняться ни одному ресурсу после переподключения, и
+    // выглядело это как «сервер перезапустился, и режим больше не работает».
+    //
+    // Вместе с ресурсом уходят и его окна: их убирает он сам, у себя.
+    if (scripts_ != nullptr) {
+        for (const std::string& name : startedResources_) {
+            scripts_->stopResource(name);
+            spdlog::info("клиентский ресурс \"{}\" остановлен: сессия кончилась", name);
+        }
+    }
+
+    startedResources_.clear();
 }
 
 /// Сколько ждать движение, прежде чем забыть его.
@@ -853,7 +869,7 @@ void GameSession::applyAttachments(int ped) {
 }
 
 void GameSession::applyServerEvents(int ped) {
-    forgetDrawnOnLeaving();
+    forgetSessionOnLeaving();
     applyAnimations(ped);
 
     // Перенос — единственное распоряжение сервера, которое исполняет игра:
@@ -1173,6 +1189,7 @@ void GameSession::runScripts() {
     for (const SessionMail::ClientResource& resource : waiting) {
         if (scripts_->startResource(resource.name, resource.root, resource.entry)) {
             spdlog::info("клиентский ресурс \"{}\" поднят", resource.name);
+            startedResources_.push_back(resource.name);
         } else {
             spdlog::error("клиентский ресурс \"{}\" не поднялся", resource.name);
         }

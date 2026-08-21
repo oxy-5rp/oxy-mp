@@ -211,8 +211,13 @@ void createWebView(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     const std::string url = info.Length() >= 1 ? fromJs(isolate, info[0]) : std::string{};
 
-    info.GetReturnValue().Set(
-        host.createWebView(host.context, toAbi(resource.name()), toAbi(url)));
+    const std::uint32_t view =
+        host.createWebView(host.context, toAbi(resource.name()), toAbi(url));
+
+    // Ресурс запоминает своё окно: убрать его при остановке больше некому.
+    resource.rememberView(view);
+
+    info.GetReturnValue().Set(view);
 }
 
 /// Достаёт номер окна первым доводом. Ноль — не назван.
@@ -228,10 +233,14 @@ void createWebView(const v8::FunctionCallbackInfo<v8::Value>& info) {
 }
 
 void destroyWebView(const v8::FunctionCallbackInfo<v8::Value>& info) {
-    const OxympJsHost& host = resourceOf(info.GetIsolate()).host();
+    Resource& resource = resourceOf(info.GetIsolate());
+    const OxympJsHost& host = resource.host();
+
+    const std::uint32_t view = viewOf(info);
+    resource.forgetView(view);
 
     if (host.destroyWebView != nullptr) {
-        host.destroyWebView(host.context, viewOf(info));
+        host.destroyWebView(host.context, view);
     }
 }
 
