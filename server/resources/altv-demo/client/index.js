@@ -160,5 +160,16 @@ alt.on('keydown', (код) => {
     if (код === alt.KeyCode.F2) {
         окно.isVisible = !окно.isVisible;
         alt.log(`страница ${окно.isVisible ? 'показана' : 'скрыта'}`);
+        return;
+    }
+
+    // F4 берёт в руки то, что выдал сервер. Выданное оружие в руки не идёт само
+    // и не должно: подменять человеку ствол посреди перестрелки оттого, что
+    // сервер прислал список, — издевательство. А посмотреть на насадки иначе
+    // нечем: в кармане их не видно.
+    if (код === alt.KeyCode.F4) {
+        natives.setCurrentPedWeapon(alt.Player.local.scriptID,
+                                    alt.hash('WEAPON_CARBINERIFLE'), true);
+        alt.log('карабин взят в руки');
     }
 });

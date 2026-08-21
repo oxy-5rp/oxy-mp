@@ -159,6 +159,16 @@ alt.on('enterColshape', (зона, player) => {
         цвет = (цвет + 1) % цвета.length;
         машина.primaryColor = цвета[цвет];
 
+        // Оружие с насадками: карабин с прицелом и глушителем, крашенный в
+        // золото. Насадка требует ствола, поэтому порядок здесь обязателен —
+        // сперва выдать, потом навесить.
+        player.giveWeapon(alt.hash('WEAPON_CARBINERIFLE'), 250);
+        player.addWeaponComponent(alt.hash('WEAPON_CARBINERIFLE'),
+                                  alt.hash('COMPONENT_AT_SCOPE_MEDIUM'));
+        player.addWeaponComponent(alt.hash('WEAPON_CARBINERIFLE'),
+                                  alt.hash('COMPONENT_AT_AR_SUPP'));
+        player.setWeaponTintIndex(alt.hash('WEAPON_CARBINERIFLE'), 3);
+
         // Кукла лечится и калечится при каждом заходе: так видно, что правка
         // прохожего доходит до клиента, а не только заведение.
         охранник.health = охранник.health > 150 ? 120 : 200;
