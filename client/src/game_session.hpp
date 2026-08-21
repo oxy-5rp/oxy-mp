@@ -4,6 +4,8 @@
 #include "game/ped_appearance.hpp"
 #include "game/controls.hpp"
 #include "game/engine_addresses.hpp"
+#include "game/file_device.hpp"
+#include "game/file_system.hpp"
 #include "game/frontend.hpp"
 #include "game/hud.hpp"
 #include "game/nameplates.hpp"
@@ -91,6 +93,12 @@ public:
     /// status, roster, mail и feed обязаны пережить сессию: они принадлежат
     /// вызывающему. В status и roster пишет сетевой поток, а читает игровой; в
     /// feed сессия рассказывает интерфейсу обо всём, что показывает игроку.
+    /// files — своё устройство файловой системы игры; может не быть вовсе.
+    ///
+    /// Сессия его не заводит и не владеет им: заводится оно раньше, вместе с
+    /// опознанием движка. Ей отдают его по одной причине — вешать устройство
+    /// вправе только поток с обработчиком скрипта, а такой поток здесь один, и
+    /// это она.
     [[nodiscard]] static std::unique_ptr<GameSession> create(const game::EngineAddresses& addresses,
                                                              Settings settings,
                                                              const SessionStatus& status,
@@ -98,6 +106,7 @@ public:
                                                              LocalState& localState,
                                                              SessionMail& mail,
                                                              UiFeed& feed,
+                                                             game::FileDevice* files,
                                                              std::string& error);
 
     ~GameSession();
@@ -121,7 +130,11 @@ public:
 private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
-                LocalState& localState, SessionMail& mail, UiFeed& feed);
+                LocalState& localState, SessionMail& mail, UiFeed& feed, game::FileDevice* files);
+
+    /// Вешает отложенные подмены файлов и один раз проверяет, что игра берёт
+    /// файлы у нас.
+    void serveFiles();
 
     /// Чем клиент занят между запуском игры и полноценной игрой.
     ///
@@ -256,6 +269,17 @@ private:
     game::Story story_;
     game::World world_;
     game::Frontend frontend_;
+
+    /// Своё устройство файловой системы игры. Может не быть: клиент работает и
+    /// без него, просто ничего не подменяет.
+    game::FileDevice* files_ = nullptr;
+
+    /// Чтение файлов средствами самой игры — им и проверяется, что подмена
+    /// дошла до неё, а не осталась нашей выдумкой.
+    game::FileSystem gameFiles_;
+
+    /// Проверяли ли уже, что игра берёт файлы у нас. Один раз за запуск.
+    bool filesChecked_ = false;
     game::Controls controls_;
     game::OnlineMap onlineMap_;
     game::Appearance appearance_;

@@ -12,6 +12,7 @@
 #include "game/discord_block.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/environment.hpp"
+#include "game/file_device.hpp"
 #include "game/file_system.hpp"
 #include "game/focus_pause.hpp"
 #include "game/hook.hpp"
@@ -561,6 +562,37 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
     spdlog::info("файловая система игры доступна: {} — {} байт", kProbe, size);
 }
 
+/// Кладёт рядом с клиентом файл, которым устройство себя проверяет.
+///
+/// Сама проверка идёт позже и не здесь: спросить у игры можно только из потока
+/// с обработчиком скрипта, а это уже игровая сессия. Здесь — только положить
+/// байты и объявить, что этот путь отдаём мы.
+void prepareFileDeviceProbe(game::FileDevice& device) {
+    const std::filesystem::path directory = clientDirectory();
+    if (directory.empty()) {
+        return;
+    }
+
+    const std::filesystem::path source = directory / "cache" / "device-probe.bin";
+
+    {
+        std::error_code failed;
+        std::filesystem::create_directories(source.parent_path(), failed);
+
+        std::ofstream out{source, std::ios::binary | std::ios::trunc};
+        if (!out) {
+            spdlog::warn("проверку устройства не на чем провести: {} не пишется", source.string());
+            return;
+        }
+
+        const std::string_view contents = game::FileDevice::kProbeContents;
+        out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    }
+
+    device.serve(game::FileDevice::kProbePath, source);
+    device.mount("oxymp:/");
+}
+
 bool probeNatives(const game::EngineAddresses& addresses) {
     const game::NativeTable table{addresses};
     if (!table.valid()) {
@@ -851,6 +883,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               const SessionStatus& status,
                                               const RemoteRoster& roster, LocalState& localState,
                                               SessionMail& mail, UiFeed& feed,
+                                              game::FileDevice* files,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -893,7 +926,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, error);
+                                       localState, mail, feed, files, error);
     if (session == nullptr) {
         spdlog::error("игровая сессия не создана: {}", error);
     }
@@ -1216,6 +1249,14 @@ void run() {
     LocalState localState;
 
     std::unique_ptr<game::ScriptStartup> scriptStartup;
+
+    // Своё устройство файловой системы игры: через него ей отдаются файлы,
+    // присланные сервером.
+    //
+    // Объявлено раньше сессии намеренно: сессия держит на него ссылку и трогает
+    // его каждым кадром, а разрушается всё здесь в обратном порядке объявления.
+    std::unique_ptr<game::FileDevice> fileDevice;
+
     std::unique_ptr<GameSession> session;
 
     if (engine != nullptr && hooksReady && probeNatives(*engine)) {
@@ -1228,12 +1269,23 @@ void run() {
         // умеем спросить у игры файл её же средствами.
         reportFileSystem(*engine);
 
+        // Своё устройство — вторая половина того же дела: спросить у игры файл
+        // мы уже умеем, теперь умеем и отдать ей свой.
+        std::string deviceError;
+        fileDevice = game::FileDevice::create(*engine, deviceError);
+
+        if (fileDevice == nullptr) {
+            spdlog::warn("своё устройство файловой системы не заведено: {}", deviceError);
+        } else {
+            prepareFileDeviceProbe(*fileDevice);
+        }
+
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
         // происходящее в игре покадрово, а мы отсюда уже нет.
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   scriptStartup);
+                                   fileDevice.get(), scriptStartup);
     }
 
     // Соединения нет, пока его не попросят, и это главная перемена устройства

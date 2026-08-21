@@ -111,7 +111,7 @@ bool pressedOnce(int key) {
 GameSession::GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
-                         UiFeed& feed)
+                         UiFeed& feed, game::FileDevice* files)
     : natives_(table),
       settings_(std::move(settings)),
       status_(status),
@@ -125,6 +125,8 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       story_(table),
       world_(table),
       frontend_(table),
+      files_(files),
+      gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
       appearance_(table),
@@ -150,7 +152,8 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  Settings settings, const SessionStatus& status,
                                                  const RemoteRoster& roster,
                                                  LocalState& localState, SessionMail& mail,
-                                                 UiFeed& feed, std::string& error) {
+                                                 UiFeed& feed, game::FileDevice* files,
+                                                 std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
         return nullptr;
@@ -163,7 +166,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     }
 
     std::unique_ptr<GameSession> session{new GameSession{
-        addresses, table, std::move(settings), status, roster, localState, mail, feed}};
+        addresses, table, std::move(settings), status, roster, localState, mail, feed, files}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -267,6 +270,10 @@ void GameSession::onFrame(bool ownsResources) {
             onlineMap_.enable();
         }
 
+        // Прежде всего остального: ресурсы сервера подменяют файлы игры, и
+        // подменённое должно стоять на месте раньше, чем игра его прочтёт.
+        serveFiles();
+
         suppressGame();
         advance();
     }
@@ -286,6 +293,40 @@ void GameSession::onFrame(bool ownsResources) {
     reportPause();
     publishStage();
     draw();
+}
+
+void GameSession::serveFiles() {
+    if (files_ == nullptr) {
+        return;
+    }
+
+    // Вешать устройство вправе только этот поток: внутри игры монтирование
+    // выделяет память её собственным аллокатором, а он у неё потоковый и в
+    // чужих потоках попросту отсутствует. Вызов оттуда роняет игру внутри неё
+    // самой — на разыменовании нуля в переходнике, достающем аллокатор.
+    if (files_->pump() == 0 || filesChecked_) {
+        return;
+    }
+
+    filesChecked_ = true;
+
+    // Проверка нужна отдельно от самой подмены и вот почему. Устройство — это
+    // таблица методов чужой раскладки: сдвинься в ней хоть одна запись, и игра
+    // позовёт не ту функцию. Проявится это не строкой в журнале, а вылетом
+    // внутри игры тогда, когда она соберётся читать подменённое. Дешевле
+    // спросить у неё то же самое сразу и сверить ответ.
+    //
+    // Спрашиваем именно у игры: её собственный поиск устройства по пути, её
+    // открытие, её чтение. Совпадение означает, что весь путь от неё до наших
+    // байт пройден целиком.
+    const std::string read = gameFiles_.read(game::FileDevice::kProbePath);
+
+    if (read == game::FileDevice::kProbeContents) {
+        spdlog::info("своё устройство файловой системы работает: игра читает наши байты");
+    } else {
+        spdlog::error("своё устройство встало, но игра прочла из него не то: {} байт",
+                      read.size());
+    }
 }
 
 void GameSession::reportPause() {
