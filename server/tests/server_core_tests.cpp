@@ -129,6 +129,16 @@ public:
 
     void worldChanged() override { sent.emplace_back("world"); }
 
+    /// Адрес и задержка в проверках подставные и постоянные: они приходят от
+    /// транспорта, а транспорта здесь нет вовсе — и не должно быть.
+    [[nodiscard]] std::string addressOf(const Player& player) const override {
+        return std::format("10.0.0.{}", player.id);
+    }
+
+    [[nodiscard]] std::uint32_t latencyOf(const Player& player) const override {
+        return 40 + player.id;
+    }
+
     void chatLine(shared::PlayerId to, std::string text) override {
         sent.push_back(std::format("chat {} {}", to == shared::kInvalidPlayerId ? -1
                                                                                 : static_cast<int>(to),
@@ -1159,4 +1169,17 @@ TEST_CASE("weapon components for nobody change nothing", "[server][script]") {
     CHECK_FALSE(session.core.addWeaponComponent(7, 1, 2));
     CHECK_FALSE(session.core.removeWeaponComponent(7, 1, 2));
     CHECK_FALSE(session.core.setWeaponTint(7, 1, 2));
+}
+
+// Адрес и задержка — свойства игрока, а не отдельный вопрос к серверу: режим
+// спрашивает их в обработчике входа, вместе с именем.
+TEST_CASE("a player carries their address and latency", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    const auto shown = session.core.player(player.id);
+
+    REQUIRE(shown);
+    CHECK(shown->ip == "10.0.0.0");
+    CHECK(shown->ping == 40);
 }

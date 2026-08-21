@@ -742,8 +742,6 @@
         },
         /// Слой мира, в котором игрок находится. Есть у ядра и работает.
         /// Как игрока зовут. У alt:V это `name`, и оно уже есть в ядре.
-        ip: { get: absent('player.ip') },
-        ping: { get: absent('player.ping') },
         /// alt:V даёт `valid` полем — у ядра оно уже такое.
         toString: {
             value() { return `Player{ id: ${this.id}, name: ${this.name} }`; },

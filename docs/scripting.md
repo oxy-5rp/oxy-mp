@@ -548,6 +548,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `player.playAnimation`, `clearTasks` | Уходят всем, кто игрока видит, — не одному хозяину |
 | `player.addWeaponComponent` и родня | Насадки и расцветка ствола ходят вместе со снаряжением |
 | `alt.on('keydown')` на клиенте | Клавиши доходят, когда меню закрыто |
+| `player.ip`, `player.ping` | Спрашиваются у транспорта на каждое обращение |
 | `player.setIntoVehicle` | Просьбой ему самому: персонаж живёт в его игре |
 | `vehicle.pos`, `vehicle.repair` | Просьбой ведущему: машина живёт в игре у него |
 | Внешность машины: `setMod`, цвета, неон, номер, дополнения | Назначает сервер; объявления ведущего её больше не перебивают |
@@ -558,8 +559,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 **Есть на сервере, но игрок не видит** (говорится в журнал один раз): голосовые
 каналы.
 
-**Отказывает вслух:** `NetworkObject`, `VirtualEntity`, `HttpClient`,
-`WebSocketClient`, `alt.Resource`, `player.ip`, `player.ping`,
+**Отказывает вслух:** `NetworkObject`, `VirtualEntity`, `alt.Resource`,
 `vehicle.getModsCount`, цвет салона и панели, раскраска крыши.
 
 `getModsCount` в этом списке — не забывчивость: сколько деталей есть у модели в

@@ -1905,6 +1905,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
 
     addGetter(isolate, shape, "id", playerField<&PlayerInfo::id>);
     addGetter(isolate, shape, "name", playerField<&PlayerInfo::nickname>);
+    addGetter(isolate, shape, "ip", playerField<&PlayerInfo::ip>);
+    addGetter(isolate, shape, "ping", playerField<&PlayerInfo::ping>);
     addGetter(isolate, shape, "position", playerField<&PlayerInfo::position>);
     addGetter(isolate, shape, "heading", playerField<&PlayerInfo::heading>);
     addGetter(isolate, shape, "health", playerField<&PlayerInfo::health>, setPlayerHealth);

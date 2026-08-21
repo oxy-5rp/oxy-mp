@@ -151,6 +151,14 @@ public:
     /// Строка в чат. kInvalidPlayerId — всем.
     virtual void chatLine(shared::PlayerId to, std::string text) = 0;
 
+    /// Откуда игрок подключился и какова задержка до него.
+    ///
+    /// Спрашивается у рассылки, потому что знает это транспорт, а он — у
+    /// сервера. Ядро своих сокетов не держит и держать не должно: заведи оно
+    /// их, проверить его стало бы нельзя.
+    [[nodiscard]] virtual std::string addressOf(const Player& player) const = 0;
+    [[nodiscard]] virtual std::uint32_t latencyOf(const Player& player) const = 0;
+
 protected:
     CoreSink() = default;
 };

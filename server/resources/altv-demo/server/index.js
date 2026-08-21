@@ -10,7 +10,15 @@ const alt = require('alt-server');
 alt.log('показательный режим поднят');
 
 alt.on('playerConnect', (player) => {
-    alt.log(`вошёл ${player.name}`);
+    alt.log(`вошёл ${player.name} с адреса ${player.ip}`);
+
+    // Задержка спрашивается позже: в мгновение входа транспорт её ещё не
+    // измерил, и ноль здесь — правда, а не поломка.
+    alt.setTimeout(() => {
+        if (player.valid) {
+            alt.log(`задержка до ${player.name}: ${player.ping} мс`);
+        }
+    }, 5000);
 
     // Метаданные игрока — из тех, что видит и клиент.
     player.setSyncedMeta('вошёл', new Date().toLocaleTimeString('ru-RU'));

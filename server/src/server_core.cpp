@@ -8,7 +8,7 @@ namespace {
 
 /// Что о нём знает скрипт.
 [[nodiscard]] script::PlayerInfo describe(const Player& player, const VehicleDirectory& vehicles,
-                                          const Config& config) {
+                                          const Config& config, const CoreSink& sink) {
     const VehicleDirectory::Seat seat = vehicles.seatOf(player.id);
 
     return script::PlayerInfo{
@@ -22,6 +22,13 @@ namespace {
         .vehicle = seat.vehicle,
         .seat = seat.index,
         .dimension = player.dimension,
+
+        // Адрес и задержка спрашиваются у рассылки: знает их транспорт, а до
+        // него дотягивается только сервер. Спрашиваются на каждый снимок, а не
+        // запоминаются: задержка меняется каждую секунду, а запомненная врала
+        // бы тем убедительнее, чем дольше её не трогали.
+        .ip = sink.addressOf(player),
+        .ping = sink.latencyOf(player),
 
         // Право живёт в настройках сервера, а не у скрипта: назначает
         // распорядителей хозяин сессии, и подменять его решение ресурсу
@@ -317,7 +324,7 @@ std::vector<script::PlayerInfo> ServerCore::players() const {
     everyone.reserve(players_->size());
 
     for (const auto& [peer, player] : *players_) {
-        everyone.push_back(describe(player, *vehicles_, *config_));
+        everyone.push_back(describe(player, *vehicles_, *config_, *sink_));
     }
 
     return everyone;
@@ -325,7 +332,9 @@ std::vector<script::PlayerInfo> ServerCore::players() const {
 
 std::optional<script::PlayerInfo> ServerCore::player(shared::PlayerId id) const {
     const Player* found = players_->findById(id);
-    return found == nullptr ? std::nullopt : std::optional{describe(*found, *vehicles_, *config_)};
+
+    return found == nullptr ? std::nullopt
+                            : std::optional{describe(*found, *vehicles_, *config_, *sink_)};
 }
 
 bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) {

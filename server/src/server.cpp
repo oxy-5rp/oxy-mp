@@ -1568,6 +1568,14 @@ void Server::dimensionChanged(const Player& player, std::int32_t previous) {
     redrawKindFor<CheckpointDirectory, shared::CheckpointRemoved>(checkpoints_, player, previous);
 }
 
+std::string Server::addressOf(const Player& player) const {
+    return host_ == nullptr ? std::string{} : host_->addressOf(player.peer);
+}
+
+std::uint32_t Server::latencyOf(const Player& player) const {
+    return host_ == nullptr ? 0 : host_->latencyOf(player.peer);
+}
+
 void Server::worldChanged() {
     broadcast(world_.snapshot());
 }

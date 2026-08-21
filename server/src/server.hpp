@@ -171,6 +171,9 @@ private:
     void worldChanged() override;
     void chatLine(shared::PlayerId to, std::string text) override;
 
+    [[nodiscard]] std::string addressOf(const Player& player) const override;
+    [[nodiscard]] std::uint32_t latencyOf(const Player& player) const override;
+
     /// Объявляет скриптам событие про игрока.
     ///
     /// Возвращает false, если кто-то из них его отменил. Считается это только у

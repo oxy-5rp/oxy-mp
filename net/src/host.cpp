@@ -161,6 +161,26 @@ ENetPeer* Host::find(PeerId peer) const {
     return it == peers_.end() ? nullptr : it->second;
 }
 
+std::string Host::addressOf(PeerId peer) const {
+    const ENetPeer* const target = find(peer);
+    if (target == nullptr) {
+        return {};
+    }
+
+    // Своими руками, а не enet_address_get_host_ip: та пишет в буфер и требует
+    // его размера, а адрес здесь четырёхбайтовый и лежит в сетевом порядке —
+    // сложить его в строку короче, чем объяснять транспорту, куда писать.
+    const enet_uint32 host = target->address.host;
+
+    return std::to_string(host & 0xFFU) + '.' + std::to_string((host >> 8U) & 0xFFU) + '.' +
+           std::to_string((host >> 16U) & 0xFFU) + '.' + std::to_string((host >> 24U) & 0xFFU);
+}
+
+std::uint32_t Host::latencyOf(PeerId peer) const {
+    const ENetPeer* const target = find(peer);
+    return target == nullptr ? 0 : static_cast<std::uint32_t>(target->roundTripTime);
+}
+
 std::optional<Event> Host::poll(std::chrono::milliseconds timeout) {
     ENetEvent raw{};
 
