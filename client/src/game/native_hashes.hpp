@@ -1041,4 +1041,12 @@ inline constexpr std::uint64_t kClearVehicleCustomPrimaryColour = 0X963D9A7202C0
 /// CLEAR_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X5FFBDEEC3E8E2009.
 inline constexpr std::uint64_t kClearVehicleCustomSecondaryColour = 0X588D8FDC61F7CFAD;
 
+// --- Взгляд -------------------------------------------------------------------
+//
+// Голова у персонажа поворачивается отдельно от тела, и задача взгляда —
+// вторичная: она уживается с ходьбой, а не отменяет её.
+
+/// TASK_LOOK_AT_COORD, канонический хеш 0X6FA46612594F7973.
+inline constexpr std::uint64_t kTaskLookAtCoord = 0XE237FA90A8AFEE59;
+
 } // namespace oxymp::client::game::natives

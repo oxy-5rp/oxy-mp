@@ -4,6 +4,7 @@
 #include "native_hashes.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace oxymp::client::game {
 namespace {
@@ -14,6 +15,26 @@ namespace {
 /// направление, в котором персонаж держит оружие, и на сотне метров направление
 /// то же, что и на пятистах.
 constexpr float kAimDistance = 100.0F;
+
+/// Как далеко ставится точка взгляда, в метрах.
+///
+/// Ближе прицельной нарочно: взгляд у получателя — это поворот головы, и точка
+/// за сто метров разворачивает шею почти так же, как за двадцать, а вот вблизи
+/// разница видна. Двадцать метров — расстояние, на котором игроки друг с другом
+/// разговаривают.
+constexpr float kLookDistance = 20.0F;
+
+/// На какой высоте от подошв находится голова, в метрах.
+///
+/// Взгляд, пущенный от земли, уводит шею вверх тем сильнее, чем ближе цель.
+constexpr float kHeadHeight = 0.65F;
+
+/// Градусы в радианы.
+constexpr float kRadians = 3.14159265F / 180.0F;
+
+/// Порядок поворотов, которым игра описывает всё: сперва наклон, потом крен,
+/// потом рыскание.
+constexpr int kGameRotationOrder = 2;
 
 /// Сколько замеченный удар держится в снимке, в миллисекундах.
 ///
@@ -44,6 +65,7 @@ Player::Player(const NativeTable& table) noexcept
       applyDamage_(table.handlerFor(natives::kApplyDamageToPed)),
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
       setArmour_(table.handlerFor(natives::kSetPedArmour)),
+      camRotation_(table.handlerFor(natives::kGetGameplayCamRot)),
       giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)),
       giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
       setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
@@ -188,6 +210,36 @@ shared::Vec3 Player::aimPoint(int ped) const {
                         position.z + forward.z * kAimDistance};
 }
 
+shared::Vec3 Player::lookPoint(int ped) const {
+    const shared::Vec3 position = coords(ped);
+
+    // Точка отсчёта — голова, а не подошвы: взгляд, пущенный от земли, уводит
+    // шею вверх тем сильнее, чем ближе цель.
+    const shared::Vec3 head{position.x, position.y, position.z + kHeadHeight};
+
+    if (camRotation_ == nullptr) {
+        return head;
+    }
+
+    // Порядок поворотов — второй, тот же, которым игра описывает всё
+    // остальное. Возвращается тройка: наклон, крен и рыскание в градусах.
+    NativeContext context;
+    context.push(kGameRotationOrder);
+    camRotation_(context.address());
+
+    const float pitch = context.result<float>(0) * kRadians;
+    const float yaw = context.result<float>(2) * kRadians;
+
+    // Направление взгляда из двух углов. Знак у горизонтали такой, а не иной,
+    // потому что у GTA ось Y смотрит на север, а угол растёт против часовой:
+    // при нулевом рыскании взгляд направлен на север.
+    const float flat = std::cos(pitch);
+
+    return shared::Vec3{head.x - std::sin(yaw) * flat * kLookDistance,
+                        head.y + std::cos(yaw) * flat * kLookDistance,
+                        head.z + std::sin(pitch) * kLookDistance};
+}
+
 shared::PlayerState Player::snapshot(int player, int ped, bool dead) {
     shared::PlayerState state;
 
@@ -212,12 +264,13 @@ shared::PlayerState Player::snapshot(int player, int ped, bool dead) {
         state.ammo = ammo(ped, state.weapon);
     }
 
-    // Точка прицела считается только когда она нужна: это лишний натив на кадр,
-    // а стоящему без оружия она ничего не описывает.
-    if (shared::has(state.flags, shared::PlayerFlag::Aiming) ||
-        shared::has(state.flags, shared::PlayerFlag::Shooting)) {
-        state.aimAt = aimPoint(ped);
-    }
+    // Целящийся смотрит туда, куда целится, — и точка берётся у оружия.
+    // Остальные смотрят туда, куда повёрнута камера, и это направление телу не
+    // равно: человек идёт прямо и оглядывается по сторонам.
+    state.aimAt = shared::has(state.flags, shared::PlayerFlag::Aiming) ||
+                          shared::has(state.flags, shared::PlayerFlag::Shooting)
+                      ? aimPoint(ped)
+                      : lookPoint(ped);
 
     state.action = holdStrike(activity_.strike(ped, state.weapon));
     state.actionSequence = actionSequence_;

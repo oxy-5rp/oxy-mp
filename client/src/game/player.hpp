@@ -122,6 +122,13 @@ private:
     /// считает стрелявший у себя.
     [[nodiscard]] shared::Vec3 aimPoint(int ped) const;
 
+    /// Куда смотрит игрок — то есть куда повёрнута его камера.
+    ///
+    /// Отличается от направления тела, и в этом весь смысл: человек идёт прямо
+    /// и оглядывается по сторонам, а тело поворачивается только когда он
+    /// поворачивает. Без этого чужие игроки ходят с намертво прямой шеей.
+    [[nodiscard]] shared::Vec3 lookPoint(int ped) const;
+
     /// Держит замеченный удар в снимке достаточно долго, чтобы он ушёл по сети.
     [[nodiscard]] shared::PedAction holdStrike(shared::PedAction started);
 
@@ -143,6 +150,7 @@ private:
     NativeHandler applyDamage_ = nullptr;
     NativeHandler setHealth_ = nullptr;
     NativeHandler setArmour_ = nullptr;
+    NativeHandler camRotation_ = nullptr;
     NativeHandler giveWeapon_ = nullptr;
     NativeHandler giveComponent_ = nullptr;
     NativeHandler setWeaponTint_ = nullptr;

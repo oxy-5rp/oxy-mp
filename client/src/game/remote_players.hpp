@@ -134,6 +134,14 @@ private:
         /// Номер персонажа в игре.
         int ped = 0;
 
+        /// Куда кукла сейчас смотрит и когда ей это велели.
+        ///
+        /// По ним видно, стоит ли выдавать задачу взгляда заново: каждый кадр
+        /// её выдавать нельзя — голова начинает поворот сначала тридцать раз в
+        /// секунду и замирает, не дойдя и до половины.
+        shared::Vec3 lookAt;
+        std::int32_t lookedAt = 0;
+
         /// Куда сейчас направлена задача движения. По ней видно, развернулся ли
         /// игрок настолько, чтобы задачу имело смысл выдать заново.
         shared::Vec3 aim;
@@ -204,6 +212,14 @@ private:
     /// Ведёт оружие: выдачу, прицел и стрельбу стоящего.
     void aim(Puppet& puppet, const RemotePlayerView& player) const;
 
+    /// Поворачивает кукле голову туда, куда смотрит её хозяин.
+    ///
+    /// Задача взгляда вторична: она уживается с ходьбой и не отменяет её — этим
+    /// и отличается от задачи прицела, которая тело разворачивает. Отсюда и то,
+    /// что она выдаётся всем, кто не целится: целящийся и так смотрит туда,
+    /// куда целится.
+    void look(Puppet& puppet, const RemotePlayerView& player, std::int32_t now) const;
+
     /// Показывает короткое движение, если оно новое.
     void act(Puppet& puppet, const RemotePlayerView& player);
 
@@ -257,6 +273,7 @@ private:
     NativeHandler setWeapon_ = nullptr;
     NativeHandler setAmmo_ = nullptr;
     NativeHandler taskAim_ = nullptr;
+    NativeHandler taskLookAt_ = nullptr;
     NativeHandler taskShoot_ = nullptr;
     NativeHandler setRagdoll_ = nullptr;
     NativeHandler canRagdoll_ = nullptr;

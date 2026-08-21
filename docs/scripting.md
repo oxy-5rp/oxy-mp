@@ -548,6 +548,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `player.playAnimation`, `clearTasks` | Уходят всем, кто игрока видит, — не одному хозяину |
 | `player.addWeaponComponent` и родня | Насадки и расцветка ствола ходят вместе со снаряжением |
 | `alt.on('keydown')` на клиенте | Клавиши доходят, когда меню закрыто |
+| Поворот головы | Чужие смотрят туда же, куда их хозяин, — не только при прицеле |
 | `player.ip`, `player.ping` | Спрашиваются у транспорта на каждое обращение |
 | `alt.Resource` | `current`, `all`, `get`, `exists`: имя, корень, тип |
 | `vehicle.customPrimaryColor` и второй | Своя краска поверх палитры; null снимает |

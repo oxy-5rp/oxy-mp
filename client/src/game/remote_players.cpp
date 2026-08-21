@@ -176,6 +176,25 @@ float blendForSpeed(float speed) {
 }
 
 /// Целится ли игрок — то есть нужно ли разводить взгляд и направление движения.
+/// Как часто задача взгляда выдаётся заново, в миллисекундах.
+constexpr std::int32_t kLookRefresh = 400;
+
+/// Насколько должна сдвинуться точка взгляда, чтобы задачу стоило выдать
+/// раньше срока, в метрах.
+constexpr float kRelookDistance = 2.0F;
+
+/// Сколько живёт задача взгляда. Чуть дольше промежутка между выдачами:
+/// кончившаяся раньше следующей выдачи роняет голову прямо.
+constexpr int kLookTaskDuration = 600;
+
+/// Насколько сильно поворачивается голова и какова важность задачи.
+///
+/// Единица — «поворачивать головой и корпусом понемногу», двойка — «важнее
+/// обычного»: без второго взгляд отменяется всякой мелочью, которую игра
+/// придумывает персонажу сама.
+constexpr int kLookFlags = 1;
+constexpr int kLookPriority = 2;
+
 bool aiming(const shared::PlayerState& state) {
     return shared::has(state.flags, shared::PlayerFlag::Aiming) ||
            shared::has(state.flags, shared::PlayerFlag::Shooting);
@@ -218,6 +237,7 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       setWeapon_(table.handlerFor(natives::kSetCurrentPedWeapon)),
       setAmmo_(table.handlerFor(natives::kSetPedAmmo)),
       taskAim_(table.handlerFor(natives::kTaskAimGunAtCoord)),
+      taskLookAt_(table.handlerFor(natives::kTaskLookAtCoord)),
       taskShoot_(table.handlerFor(natives::kTaskShootAtCoord)),
       setRagdoll_(table.handlerFor(natives::kSetPedToRagdoll)),
       canRagdoll_(table.handlerFor(natives::kSetPedCanRagdoll)),
@@ -412,6 +432,7 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
             if (!riding && !entering) {
                 walk(puppet, player, seconds, now);
                 aim(puppet, player);
+                look(puppet, player, now);
             }
 
             animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
@@ -752,6 +773,47 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
         invokeNative<void>(taskAim_, puppet.ped, player.state.aimAt.x, player.state.aimAt.y,
                            player.state.aimAt.z, kAimTaskDuration, false, false);
     }
+}
+
+void RemotePlayers::look(Puppet& puppet, const RemotePlayerView& player,
+                         std::int32_t now) const {
+    if (taskLookAt_ == nullptr || puppet.ped == 0) {
+        return;
+    }
+
+    // Целящийся смотрит туда, куда целится, и голову ему поворачивает задача
+    // прицела. Вторая задача взгляда с ней бы спорила.
+    if (aiming(player.state)) {
+        return;
+    }
+
+    // Обмякшее тело головы не поворачивает: ею распоряжается физика.
+    if (shared::has(player.state.flags, shared::PlayerFlag::Ragdoll)) {
+        return;
+    }
+
+    // Задача выдаётся заново не каждый кадр, а по сроку и по повороту. Каждый
+    // кадр — значит начинать поворот головы заново тридцать раз в секунду:
+    // голова замирает, не дойдя и до половины.
+    const bool stale = now - puppet.lookedAt >= kLookRefresh;
+    const bool moved = distanceBetween(puppet.lookAt, player.state.aimAt) >= kRelookDistance;
+
+    if (puppet.lookedAt != 0 && !stale && !moved) {
+        return;
+    }
+
+    puppet.lookAt = player.state.aimAt;
+    puppet.lookedAt = now;
+
+    // Срок задачи чуть длиннее промежутка между выдачами: кончившаяся раньше
+    // следующей выдачи роняет голову прямо, и получается подёргивание.
+    //
+    // Последние два довода — насколько сильно поворачивается голова и какова
+    // важность задачи. Единица и двойка означают «поворачивать и головой, и
+    // корпусом понемногу» и «важнее обычного»: без второго взгляд отменяется
+    // всякой мелочью, которую игра придумает персонажу сама.
+    invokeNative<void>(taskLookAt_, puppet.ped, player.state.aimAt.x, player.state.aimAt.y,
+                       player.state.aimAt.z, kLookTaskDuration, kLookFlags, kLookPriority);
 }
 
 void RemotePlayers::act(Puppet& puppet, const RemotePlayerView& player) {
