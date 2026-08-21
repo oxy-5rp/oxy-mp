@@ -190,6 +190,43 @@ void setPlayerArmour(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                          static_cast<std::uint16_t>(std::clamp<std::int64_t>(*armour, 0, 100)));
 }
 
+/// В каком слое мира игрок. Ставится числом; всё, что не число, пропускается.
+void setPlayerDimension(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                        const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = idOf<shared::PlayerId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> dimension = intFromJs(isolate->GetCurrentContext(), value);
+    if (!dimension) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setDimension(*id, static_cast<std::int32_t>(*dimension));
+}
+
+/// То же для машины.
+void setVehicleDimension(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                         const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> dimension = intFromJs(isolate->GetCurrentContext(), value);
+    if (!dimension) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setVehicleDimension(*id,
+                                                         static_cast<std::int32_t>(*dimension));
+}
+
 /// Машина, в которой едет игрок. Пусто — идёт пешком.
 void playerVehicle(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -612,6 +649,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
     addGetter(isolate, shape, "seat", playerField<&PlayerInfo::seat>);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
+    addGetter(isolate, shape, "dimension", playerField<&PlayerInfo::dimension>,
+              setPlayerDimension);
     addGetter(isolate, shape, "vehicle", playerVehicle);
     addGetter(isolate, shape, "valid", playerValid);
 
@@ -634,6 +673,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "position", vehicleField<&VehicleInfo::position>);
     addGetter(isolate, shape, "rotation", vehicleField<&VehicleInfo::rotation>);
     addGetter(isolate, shape, "owner", vehicleOwner);
+    addGetter(isolate, shape, "dimension", vehicleField<&VehicleInfo::dimension>,
+              setVehicleDimension);
     addGetter(isolate, shape, "valid", vehicleValid);
 
     addMethod(isolate, shape, "destroy", vehicleDestroy);

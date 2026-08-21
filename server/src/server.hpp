@@ -206,12 +206,17 @@ private:
     /// не дошедший цвет не исправится сам никогда.
     template<typename Message>
     void broadcastNear(const shared::Vec3& origin, shared::Channel channel, const Message& message,
-                       net::PeerId except = net::kInvalidPeerId) {
+                       std::int32_t dimension, net::PeerId except = net::kInvalidPeerId) {
         const auto packet = shared::encode(message);
         const float reach = config_.streamDistance * config_.streamDistance;
 
         for (const auto& [peer, player] : players_) {
             if (peer == except || shared::distanceSquared(origin, player.position) > reach) {
+                continue;
+            }
+
+            // Из чужого слоя мира — никому и ничего.
+            if (!script::dimensionsMeet(player.dimension, dimension)) {
                 continue;
             }
 
@@ -306,6 +311,11 @@ private:
         net::PeerId peer = net::kInvalidPeerId;
         shared::PlayerId id = shared::kInvalidPlayerId;
         shared::Vec3 position;
+
+        /// В каком слое мира игрок. Здесь же, а не спрашивается из реестра:
+        /// перебор идёт всех против всех, и лишний поход в хеш-таблицу на
+        /// каждую пару стоил бы дороже самой рассылки.
+        std::int32_t dimension = script::kDefaultDimension;
 
         /// Где в общем буфере лежат готовые байты снимка этого игрока.
         /// Нулевая длина означает, что в этот такт он не рассылается вовсе.

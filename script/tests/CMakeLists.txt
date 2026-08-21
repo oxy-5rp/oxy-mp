@@ -4,6 +4,7 @@
 # интерфейсом: проверить, что ссылка на вышедшего игрока честно отвечает «его
 # больше нет», можно не поднимая ни сети, ни игры.
 add_executable(oxymp_script_tests
+    dimension_tests.cpp
     entity_tests.cpp
     events_tests.cpp
 )

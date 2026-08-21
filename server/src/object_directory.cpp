@@ -19,6 +19,16 @@ shared::ObjectId ObjectDirectory::add(std::uint32_t model, const shared::Vec3& p
     return id;
 }
 
+bool ObjectDirectory::setDimension(shared::ObjectId id, std::int32_t dimension) {
+    const auto found = objects_.find(id);
+    if (found == objects_.end()) {
+        return false;
+    }
+
+    found->second.dimension = dimension;
+    return true;
+}
+
 bool ObjectDirectory::remove(shared::ObjectId id) {
     return objects_.erase(id) != 0;
 }

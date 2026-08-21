@@ -417,3 +417,64 @@ TEST_CASE("an event without a name goes nowhere", "[server][script]") {
     REQUIRE(session.core.emit(0, "ui:menu", R"({"open":0})"));
     CHECK(session.sink.sent.back() == R"(emit 0 ui:menu {"open":0})");
 }
+
+TEST_CASE("a player starts in the default dimension and can be moved out of it",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    CHECK(player.dimension == script::kDefaultDimension);
+    CHECK(session.core.player(player.id)->dimension == script::kDefaultDimension);
+
+    REQUIRE(session.core.setDimension(player.id, 42));
+
+    CHECK(player.dimension == 42);
+    CHECK(session.core.player(player.id)->dimension == 42);
+}
+
+TEST_CASE("moving a player between dimensions tells the clients nothing",
+          "[server][script]") {
+    // Клиент про измерения не знает вовсе, и рассылать ему тут нечего: перемена
+    // скажется сама собой — тем, кто его больше видеть не должен, снимки просто
+    // перестанут приходить. Не рассказать и есть единственный способ не дать
+    // увидеть.
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    const std::size_t before = session.sink.sent.size();
+
+    REQUIRE(session.core.setDimension(player.id, 3));
+
+    CHECK(session.sink.sent.size() == before);
+}
+
+TEST_CASE("a dimension named for nobody changes nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.setDimension(7, 1));
+}
+
+TEST_CASE("a vehicle carries its own dimension, not its driver's", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    const shared::VehicleId id =
+        session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    CHECK(session.core.vehicle(id)->dimension == script::kDefaultDimension);
+
+    // Слой мира у машины свой: вести её можно и не сидя в ней, а стоит она там,
+    // где стоит, независимо от того, кто её ведёт.
+    REQUIRE(session.core.setDimension(player.id, 5));
+    CHECK(session.core.vehicle(id)->dimension == script::kDefaultDimension);
+
+    REQUIRE(session.core.setVehicleDimension(id, 5));
+    CHECK(session.core.vehicle(id)->dimension == 5);
+}
+
+TEST_CASE("a dimension named for a vehicle that is gone changes nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.setVehicleDimension(1, 1));
+}

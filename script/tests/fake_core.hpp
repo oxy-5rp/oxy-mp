@@ -75,6 +75,17 @@ public:
         return true;
     }
 
+    bool setDimension(shared::PlayerId id, std::int32_t dimension) override {
+        const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
+        if (it == playerList.end()) {
+            return false;
+        }
+
+        it->dimension = dimension;
+        said.push_back(std::format("dimension {} {}", id, dimension));
+        return true;
+    }
+
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override {
         const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
         if (it == playerList.end()) {
@@ -141,6 +152,16 @@ public:
                }) != 0;
     }
 
+    bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+        if (it == vehicleList.end()) {
+            return false;
+        }
+
+        it->dimension = dimension;
+        return true;
+    }
+
     [[nodiscard]] std::vector<ObjectInfo> objects() const override { return objectList; }
 
     [[nodiscard]] std::optional<ObjectInfo> object(shared::ObjectId id) const override {
@@ -168,6 +189,16 @@ public:
         return std::erase_if(objectList, [id](const ObjectInfo& info) {
                    return info.id == id;
                }) != 0;
+    }
+
+    bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override {
+        const auto it = std::ranges::find(objectList, id, &ObjectInfo::id);
+        if (it == objectList.end()) {
+            return false;
+        }
+
+        it->dimension = dimension;
+        return true;
     }
 
     void broadcast(std::string_view text) override {

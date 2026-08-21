@@ -50,6 +50,16 @@ shared::VehicleId VehicleDirectory::add(std::uint32_t model, const shared::Vec3&
     return id;
 }
 
+bool VehicleDirectory::setDimension(shared::VehicleId id, std::int32_t dimension) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    found->second.dimension = dimension;
+    return true;
+}
+
 bool VehicleDirectory::remove(shared::VehicleId id) {
     if (vehicles_.erase(id) == 0) {
         return false;

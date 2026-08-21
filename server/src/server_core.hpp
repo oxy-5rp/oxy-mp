@@ -104,6 +104,7 @@ public:
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
     bool setModel(shared::PlayerId id, std::uint32_t model) override;
+    bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;
     bool emit(shared::PlayerId id, std::string_view name, std::string_view payload) override;
@@ -118,6 +119,7 @@ public:
                                                   float heading) override;
 
     bool removeVehicle(shared::VehicleId id) override;
+    bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override;
 
     // --- Предметы --------------------------------------------------------------
 
@@ -128,6 +130,7 @@ public:
                                                 const shared::Vec3& rotation) override;
 
     bool removeObject(shared::ObjectId id) override;
+    bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;
 
     // --- Мир и общение ---------------------------------------------------------
 

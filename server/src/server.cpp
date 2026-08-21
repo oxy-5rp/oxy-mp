@@ -739,8 +739,12 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
 
     // От машины, а не от её ведущего: вести машину можно и не сидя в ней, и
     // считать видимость по тому, кто её ведёт, значило бы рассылать снимки не
-    // тем, кто её видит.
-    broadcastNear(state.position, shared::Channel::State, state, peer);
+    // тем, кто её видит. Слой мира — тоже её собственный, по той же причине.
+    const VehicleDirectory::Vehicle* const moved = vehicles_.find(state.id);
+    const std::int32_t dimension =
+        moved == nullptr ? script::kDefaultDimension : moved->dimension;
+
+    broadcastNear(state.position, shared::Channel::State, state, dimension, peer);
 }
 
 void Server::handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance) {
@@ -781,7 +785,8 @@ void Server::handleVehicleAppearance(net::PeerId peer, shared::VehicleAppearance
     // его до конца сессии, потому что забыть его им будет не по чему.
     const VehicleDirectory::Vehicle* vehicle = vehicles_.find(appearance.id);
 
-    broadcastNear(vehicle->state.position, shared::Channel::Control, appearance, peer);
+    broadcastNear(vehicle->state.position, shared::Channel::Control, appearance,
+                  vehicle->dimension, peer);
 }
 
 void Server::streamObjects() {
@@ -794,7 +799,8 @@ void Server::streamObjects() {
             // шестнадцатиразрядных времён. Он пуст, и переменная с таким именем
             // просто исчезает — вместе с внятностью сообщения об ошибке.
             const bool nearby =
-                shared::distanceSquared(player.position, object.position) <= appears;
+                shared::distanceSquared(player.position, object.position) <= appears &&
+                script::dimensionsMeet(player.dimension, object.dimension);
 
             if (!nearby || player.streamedObjects.contains(id)) {
                 continue;
@@ -813,8 +819,10 @@ void Server::streamObjects() {
         for (auto it = player.streamedObjects.begin(); it != player.streamedObjects.end();) {
             const ObjectDirectory::Object* object = objects_.find(*it);
 
-            const bool keep = object != nullptr &&
-                              shared::distanceSquared(player.position, object->position) <= vanishes;
+            const bool keep =
+                object != nullptr &&
+                shared::distanceSquared(player.position, object->position) <= vanishes &&
+                script::dimensionsMeet(player.dimension, object->dimension);
 
             if (keep) {
                 ++it;
@@ -949,7 +957,8 @@ void Server::streamVehicles() {
         // неизвестной машине.
         for (const auto& [id, vehicle] : vehicles_.all()) {
             const bool nearby =
-                shared::distanceSquared(player.position, vehicle.state.position) <= appears;
+                shared::distanceSquared(player.position, vehicle.state.position) <= appears &&
+                script::dimensionsMeet(player.dimension, vehicle.dimension);
 
             if (!nearby || player.streamed.contains(id)) {
                 continue;
@@ -965,9 +974,13 @@ void Server::streamVehicles() {
         for (auto it = player.streamed.begin(); it != player.streamed.end();) {
             const VehicleDirectory::Vehicle* vehicle = vehicles_.find(*it);
 
+            // Ушедшая в другой слой мира убирается тем же порядком, что и
+            // отдалившаяся: для получателя это одно и то же — перестать её
+            // показывать.
             const bool keep =
                 vehicle != nullptr &&
-                shared::distanceSquared(player.position, vehicle->state.position) <= vanishes;
+                shared::distanceSquared(player.position, vehicle->state.position) <= vanishes &&
+                script::dimensionsMeet(player.dimension, vehicle->dimension);
 
             if (keep) {
                 ++it;

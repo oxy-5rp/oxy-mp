@@ -1,5 +1,6 @@
 #pragma once
 
+#include <oxymp/script/dimension.hpp>
 #include <oxymp/shared/math/vec3.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
 
@@ -30,6 +31,9 @@ public:
         std::uint32_t model = 0;
         shared::Vec3 position;
         shared::Vec3 rotation;
+
+        /// В каком слое мира он стоит. См. script/dimension.hpp.
+        std::int32_t dimension = script::kDefaultDimension;
     };
 
     /// Ставит предмет и выдаёт ему номер.
@@ -38,6 +42,9 @@ public:
     /// отказ: либо предел исчерпан, либо модель негодная.
     [[nodiscard]] shared::ObjectId add(std::uint32_t model, const shared::Vec3& position,
                                        const shared::Vec3& rotation, std::size_t limit);
+
+    /// Переставляет предмет в другой слой мира. false — предмета уже нет.
+    bool setDimension(shared::ObjectId id, std::int32_t dimension);
 
     /// Убирает предмет. false — предмета с таким номером не было.
     bool remove(shared::ObjectId id);

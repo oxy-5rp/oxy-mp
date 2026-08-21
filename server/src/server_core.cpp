@@ -21,6 +21,7 @@ namespace {
         .model = player.appearance ? player.appearance->model : 0,
         .vehicle = seat.vehicle,
         .seat = seat.index,
+        .dimension = player.dimension,
 
         // Право живёт в настройках сервера, а не у скрипта: назначает
         // распорядителей хозяин сессии, и подменять его решение ресурсу
@@ -38,6 +39,7 @@ namespace {
         .position = vehicle.state.position,
         .rotation = vehicle.state.rotation,
         .owner = vehicle.owner,
+        .dimension = vehicle.dimension,
     };
 }
 
@@ -48,6 +50,7 @@ namespace {
         .model = object.model,
         .position = object.position,
         .rotation = object.rotation,
+        .dimension = object.dimension,
     };
 }
 
@@ -144,6 +147,20 @@ bool ServerCore::clearWeapons(shared::PlayerId id) {
     // С заменой: пустой список без этого признака означал бы «добавить ничего»,
     // и оружие осталось бы у игрока в руках.
     sink_->loadoutChanged(*player, true);
+    return true;
+}
+
+bool ServerCore::setDimension(shared::PlayerId id, std::int32_t dimension) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    player->dimension = dimension;
+
+    // Рассказывать об этом клиентам нечем и незачем: они про измерения не знают
+    // вовсе. Перемена скажется сама собой на ближайшей рассылке — тем, кто его
+    // больше видеть не должен, снимки просто перестанут приходить.
     return true;
 }
 
@@ -254,6 +271,10 @@ shared::VehicleId ServerCore::createVehicle(std::uint32_t model, const shared::V
     return id;
 }
 
+bool ServerCore::setVehicleDimension(shared::VehicleId id, std::int32_t dimension) {
+    return vehicles_->setDimension(id, dimension);
+}
+
 bool ServerCore::removeVehicle(shared::VehicleId id) {
     if (vehicles_->find(id) == nullptr) {
         return false;
@@ -303,6 +324,10 @@ shared::ObjectId ServerCore::createObject(std::uint32_t model, const shared::Vec
 
     sink_->objectAdded(id);
     return id;
+}
+
+bool ServerCore::setObjectDimension(shared::ObjectId id, std::int32_t dimension) {
+    return objects_->setDimension(id, dimension);
 }
 
 bool ServerCore::removeObject(shared::ObjectId id) {

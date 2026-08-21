@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oxymp/shared/math/vec3.hpp>
+#include <oxymp/script/dimension.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <chrono>
@@ -71,6 +72,9 @@ public:
 
         /// Когда о машине последний раз приходил снимок.
         Clock::time_point stateAt{};
+
+        /// В каком слое мира она стоит. См. script/dimension.hpp.
+        std::int32_t dimension = script::kDefaultDimension;
     };
 
     /// Где сидит игрок.
@@ -108,6 +112,9 @@ public:
     /// сотне машин и ни у кого не идёт игра.
     [[nodiscard]] shared::VehicleId add(std::uint32_t model, const shared::Vec3& position,
                                         float heading, shared::PlayerId owner, std::size_t limit);
+
+    /// Переставляет машину в другой слой мира. false — машины уже нет.
+    bool setDimension(shared::VehicleId id, std::int32_t dimension);
 
     /// Убирает машину. false — машины с таким номером не было.
     bool remove(shared::VehicleId id);

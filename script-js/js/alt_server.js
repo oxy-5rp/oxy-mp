@@ -554,10 +554,7 @@
         rot: {
             get() { return headingToRot(this.heading); },
         },
-        dimension: {
-            get() { return 0; },
-            set: unperformed('player.dimension', 'измерений в oxyMP нет'),
-        },
+        /// Слой мира, в котором игрок находится. Есть у ядра и работает.
         /// Как игрока зовут. У alt:V это `name`, и оно уже есть в ядре.
         ip: { get: absent('player.ip') },
         ping: { get: absent('player.ping') },
@@ -641,10 +638,7 @@
         /// машина без водителя ведущего не теряет. Здесь отдаётся то же, что и
         /// `owner`, и расхождение стоит помнить.
         driver: { get() { return this.owner; } },
-        dimension: {
-            get() { return 0; },
-            set: unperformed('vehicle.dimension', 'измерений в oxyMP нет'),
-        },
+        /// Слой мира, в котором машина стоит. Есть у ядра и работает.
         toString: {
             value() { return `Vehicle{ id: ${this.id} }`; },
         },
@@ -751,6 +745,7 @@
         branch: 'release',
         get resourceName() { return native.resourceName; },
         get defaultDimension() { return 0; },
+        get globalDimension() { return -2147483648; },
 
         Player,
         Vehicle: ConstructibleVehicle,

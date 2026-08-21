@@ -1,5 +1,7 @@
 #pragma once
 
+#include <oxymp/script/dimension.hpp>
+
 #include <oxymp/shared/math/vec3.hpp>
 #include <oxymp/shared/protocol/messages.hpp>
 
@@ -37,6 +39,9 @@ struct PlayerInfo {
     shared::VehicleId vehicle = shared::kInvalidVehicleId;
     std::int8_t seat = shared::kNoSeat;
 
+    /// В каком слое мира находится. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
+
     /// Позволено ли ему распоряжаться сессией.
     ///
     /// Здесь, а не отдельным вопросом к ядру, и это существенно: право — такое
@@ -59,6 +64,9 @@ struct VehicleInfo {
 
     /// Кто её ведёт. kInvalidPlayerId — никто, машина стоит.
     shared::PlayerId owner = shared::kInvalidPlayerId;
+
+    /// В каком слое мира находится. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
 };
 
 /// Что скрипт знает о предмете.
@@ -68,6 +76,9 @@ struct ObjectInfo {
 
     shared::Vec3 position;
     shared::Vec3 rotation;
+
+    /// В каком слое мира находится. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
 };
 
 /// Всё, до чего дотягивается скрипт.
@@ -104,6 +115,13 @@ public:
 
     /// Отбирает всё оружие.
     virtual bool clearWeapons(shared::PlayerId id) = 0;
+
+    /// Переставляет игрока в другой слой мира.
+    ///
+    /// Из чужого слоя он пропадает у всех разом: сервер попросту перестаёт
+    /// рассказывать о нём тем, кто его больше видеть не должен, и наоборот.
+    /// false — игрока уже нет.
+    virtual bool setDimension(shared::PlayerId id, std::int32_t dimension) = 0;
 
     /// Меняет модель персонажа.
     ///
@@ -154,6 +172,9 @@ public:
 
     virtual bool removeVehicle(shared::VehicleId id) = 0;
 
+    /// Переставляет машину в другой слой мира. false — машины уже нет.
+    virtual bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) = 0;
+
     // --- Предметы --------------------------------------------------------------
 
     [[nodiscard]] virtual std::vector<ObjectInfo> objects() const = 0;
@@ -164,6 +185,9 @@ public:
                                                         const shared::Vec3& rotation) = 0;
 
     virtual bool removeObject(shared::ObjectId id) = 0;
+
+    /// Переставляет предмет в другой слой мира. false — предмета уже нет.
+    virtual bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) = 0;
 
     // --- Мир и общение ---------------------------------------------------------
 
