@@ -45,6 +45,8 @@ Player::Player(const NativeTable& table) noexcept
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
       setArmour_(table.handlerFor(natives::kSetPedArmour)),
       giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)),
+      giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
+      setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
       removeAllWeapons_(table.handlerFor(natives::kRemoveAllPedWeapons)),
       getAmmo_(table.handlerFor(natives::kGetAmmoInPedWeapon)),
       activity_(table),
@@ -291,6 +293,22 @@ void Player::applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapon
         // перестрелки оттого, что сервер прислал список, было бы издевательством.
         invokeNative<void>(giveWeapon_, ped, slot.weapon, static_cast<int>(slot.ammo), false,
                            false);
+
+        // Насадки — после самого ствола и только после него: поставленное на
+        // оружие, которого у персонажа ещё нет, игра проглатывает молча.
+        if (giveComponent_ != nullptr) {
+            for (const std::uint32_t component : slot.components) {
+                if (component != 0) {
+                    invokeNative<void>(giveComponent_, ped, slot.weapon, component);
+                }
+            }
+        }
+
+        // Расцветка ставится всегда, включая заводскую: список полный, и ноль
+        // здесь означает «покрасить как с завода», а не «оставить как было».
+        if (setWeaponTint_ != nullptr) {
+            invokeNative<void>(setWeaponTint_, ped, slot.weapon, static_cast<int>(slot.tint));
+        }
     }
 }
 

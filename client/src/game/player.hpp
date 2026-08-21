@@ -144,6 +144,8 @@ private:
     NativeHandler setHealth_ = nullptr;
     NativeHandler setArmour_ = nullptr;
     NativeHandler giveWeapon_ = nullptr;
+    NativeHandler giveComponent_ = nullptr;
+    NativeHandler setWeaponTint_ = nullptr;
     NativeHandler removeAllWeapons_ = nullptr;
     NativeHandler getAmmo_ = nullptr;
 

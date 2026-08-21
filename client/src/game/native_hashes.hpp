@@ -1009,4 +1009,18 @@ inline constexpr std::uint64_t kSetCheckpointRgba = 0XEDC9B904B870CE80;
 /// _SET_CHECKPOINT_ICON_RGBA, канонический хеш 0XB9EA40907C680580.
 inline constexpr std::uint64_t kSetCheckpointIconRgba = 0XF7408C8F340BA88B;
 
+// --- Насадки на оружие --------------------------------------------------------
+//
+// Ставит их сервер, а надевает игра. Отдельного «снять все» у неё нет: снятая
+// насадка снимается по одной, а проще всего оружие выдать заново.
+
+/// GIVE_WEAPON_COMPONENT_TO_PED, канонический хеш 0XD966D51AA5B28BB9.
+inline constexpr std::uint64_t kGiveWeaponComponentToPed = 0X6D5FA72F8C43D132;
+
+/// REMOVE_WEAPON_COMPONENT_FROM_PED, канонический хеш 0X1E8BE90C74FB4C09.
+inline constexpr std::uint64_t kRemoveWeaponComponentFromPed = 0X80E6FC2ACEAF8AA3;
+
+/// SET_PED_WEAPON_TINT_INDEX, канонический хеш 0X50969B9B89ED5738.
+inline constexpr std::uint64_t kSetPedWeaponTintIndex = 0XC37D2709B04BD397;
+
 } // namespace oxymp::client::game::natives

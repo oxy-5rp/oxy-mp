@@ -1240,3 +1240,54 @@ TEST_CASE("a ped is a kind an attachment can name", "[messages]") {
     CHECK(got->targetKind == EntityKind::Ped);
     CHECK(got->target == 7);
 }
+
+TEST_CASE("a weapon carries its components and tint", "[messages]") {
+    PlayerLoadout sent;
+    sent.replace = true;
+    sent.weapons.push_back(WeaponSlot{
+        .weapon = 0x1B06D571,
+        .ammo = 250,
+        .tint = 4,
+        .components = {0xC0A3098D, 0xA0D89C42},
+    });
+
+    // Второй ствол — без насадок вовсе: у пустого списка своя длина, и спутать
+    // её с длиной соседа проще всего именно здесь.
+    sent.weapons.push_back(WeaponSlot{.weapon = 0x83BF0278, .ammo = 30});
+
+    const auto got = decode<PlayerLoadout>(encode(sent));
+
+    REQUIRE(got);
+    REQUIRE(got->weapons.size() == 2);
+
+    CHECK(got->replace);
+    CHECK(got->weapons[0].weapon == sent.weapons[0].weapon);
+    CHECK(got->weapons[0].ammo == sent.weapons[0].ammo);
+    CHECK(got->weapons[0].tint == 4);
+    CHECK(got->weapons[0].components == sent.weapons[0].components);
+
+    CHECK(got->weapons[1].weapon == sent.weapons[1].weapon);
+    CHECK(got->weapons[1].tint == 0);
+    CHECK(got->weapons[1].components.empty());
+}
+
+// Длина списка насадок приходит из пакета, и верить ей нельзя: испорченное
+// число заставило бы получателя выделить память под список, которого нет.
+TEST_CASE("a weapon takes no more components than it can hold", "[messages]") {
+    PlayerLoadout sent;
+
+    WeaponSlot slot;
+    slot.weapon = 0x1B06D571;
+
+    for (std::uint32_t part = 1; part <= kMaxWeaponComponents + 4; ++part) {
+        slot.components.push_back(part);
+    }
+
+    sent.weapons.push_back(slot);
+
+    const auto got = decode<PlayerLoadout>(encode(sent));
+
+    REQUIRE(got);
+    REQUIRE(got->weapons.size() == 1);
+    CHECK(got->weapons[0].components.size() == kMaxWeaponComponents);
+}

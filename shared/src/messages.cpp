@@ -496,8 +496,20 @@ void PlayerLoadout::write(ByteWriter& writer) const {
     writer.writeU16(count);
 
     for (std::uint16_t index = 0; index < count; ++index) {
-        writer.writeU32(weapons[index].weapon);
-        writer.writeU16(weapons[index].ammo);
+        const WeaponSlot& slot = weapons[index];
+
+        writer.writeU32(slot.weapon);
+        writer.writeU16(slot.ammo);
+        writer.writeU8(slot.tint);
+
+        const auto parts = static_cast<std::uint8_t>(
+            std::min<std::size_t>(slot.components.size(), kMaxWeaponComponents));
+
+        writer.writeU8(parts);
+
+        for (std::uint8_t part = 0; part < parts; ++part) {
+            writer.writeU32(slot.components[part]);
+        }
     }
 }
 
@@ -521,9 +533,23 @@ PlayerLoadout PlayerLoadout::read(ByteReader& reader) {
         WeaponSlot slot;
         slot.weapon = reader.readU32();
         slot.ammo = reader.readU16();
+        slot.tint = reader.readU8();
+
+        const std::uint8_t parts = reader.readU8();
+        slot.components.reserve(std::min<std::size_t>(parts, kMaxWeaponComponents));
+
+        // Читается ровно столько, сколько названо, а кладётся не больше предела:
+        // то же правило, что и у списка оружия выше, и по той же причине.
+        for (std::uint8_t part = 0; part < parts; ++part) {
+            const std::uint32_t component = reader.readU32();
+
+            if (slot.components.size() < kMaxWeaponComponents) {
+                slot.components.push_back(component);
+            }
+        }
 
         if (message.weapons.size() < kMaxWeaponSlots) {
-            message.weapons.push_back(slot);
+            message.weapons.push_back(std::move(slot));
         }
     }
 

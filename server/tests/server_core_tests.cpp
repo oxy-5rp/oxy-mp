@@ -1089,3 +1089,74 @@ TEST_CASE("the session refuses more peds than it allows", "[server][script]") {
     CHECK(session.core.createPed(standing(0x9C9EFFD8)) != shared::kInvalidPedId);
     CHECK(session.core.createPed(standing(0x9C9EFFD8)) == shared::kInvalidPedId);
 }
+
+// Насадка без ствола — насадка ни на чём: запомнить её молча значило бы
+// пообещать то, чего не будет.
+TEST_CASE("a weapon component needs the weapon to be there", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    constexpr std::uint32_t kRifle = 0xBFEFFF6D;
+    constexpr std::uint32_t kScope = 0xA0D89C42;
+
+    CHECK_FALSE(session.core.addWeaponComponent(player.id, kRifle, kScope));
+
+    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120));
+    REQUIRE(session.core.addWeaponComponent(player.id, kRifle, kScope));
+
+    REQUIRE(player.loadout.size() == 1);
+    CHECK(player.loadout[0].components == std::vector<std::uint32_t>{kScope});
+
+    // Та же насадка второй раз списка не растит: игра держит по одной каждого
+    // вида, и повторная выдача ничего не меняет.
+    REQUIRE(session.core.addWeaponComponent(player.id, kRifle, kScope));
+    CHECK(player.loadout[0].components.size() == 1);
+
+    CHECK(session.core.removeWeaponComponent(player.id, kRifle, kScope));
+    CHECK(player.loadout[0].components.empty());
+
+    // Снимать нечего — отказ, а не тишина.
+    CHECK_FALSE(session.core.removeWeaponComponent(player.id, kRifle, kScope));
+}
+
+TEST_CASE("a weapon tint needs the weapon too", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    constexpr std::uint32_t kPistol = 0x1B06D571;
+
+    CHECK_FALSE(session.core.setWeaponTint(player.id, kPistol, 3));
+
+    REQUIRE(session.core.giveWeapon(player.id, kPistol, 50));
+    REQUIRE(session.core.setWeaponTint(player.id, kPistol, 3));
+
+    REQUIRE(player.loadout.size() == 1);
+    CHECK(player.loadout[0].tint == 3);
+}
+
+// Снятая насадка требует отбора оружия: игра не снимает поставленное сама, и
+// список без насадки для неё неотличим от списка без насадки.
+TEST_CASE("removing a component asks for the weapon to be given anew",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    constexpr std::uint32_t kRifle = 0xBFEFFF6D;
+    constexpr std::uint32_t kScope = 0xA0D89C42;
+
+    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120));
+    REQUIRE(session.core.addWeaponComponent(player.id, kRifle, kScope));
+
+    session.sink.sent.clear();
+    REQUIRE(session.core.removeWeaponComponent(player.id, kRifle, kScope));
+
+    CHECK(session.sink.sent == std::vector<std::string>{"loadout 0 1 replace"});
+}
+
+TEST_CASE("weapon components for nobody change nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.addWeaponComponent(7, 1, 2));
+    CHECK_FALSE(session.core.removeWeaponComponent(7, 1, 2));
+    CHECK_FALSE(session.core.setWeaponTint(7, 1, 2));
+}

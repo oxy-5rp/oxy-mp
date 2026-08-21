@@ -74,6 +74,35 @@ public:
         return it == playerList.end() ? std::nullopt : std::optional{*it};
     }
 
+    bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                            std::uint32_t component) override {
+        if (!player(id) || weapon == 0 || component == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("component+ {} {:#x} {:#x}", id, weapon, component));
+        return true;
+    }
+
+    bool removeWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                               std::uint32_t component) override {
+        if (!player(id) || weapon == 0 || component == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("component- {} {:#x} {:#x}", id, weapon, component));
+        return true;
+    }
+
+    bool setWeaponTint(shared::PlayerId id, std::uint32_t weapon, std::uint8_t tint) override {
+        if (!player(id) || weapon == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("tint {} {:#x} {}", id, weapon, tint));
+        return true;
+    }
+
     bool playAnimation(shared::PlayerId id, const AnimationInfo& animation) override {
         if (!player(id)) {
             return false;

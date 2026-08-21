@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace oxymp::script::js {
@@ -463,6 +464,81 @@ void playerGiveWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().giveWeapon(
         *id, static_cast<std::uint32_t>(*weapon),
         static_cast<std::uint16_t>(std::clamp<std::int64_t>(ammo.value_or(0), 0, 0xFFFF))));
+}
+
+/// Читает у вызова хеш ствола и второе число: хеш насадки либо номер расцветки.
+///
+/// Общее на три метода, потому что доводы у них одинаковы до последнего: два
+/// числа и игрок, у которого их спрашивают. Пусто — назвали не то.
+[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>> weaponPairFromJs(
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+
+    const std::optional<std::int64_t> weapon =
+        info.Length() >= 1 ? intFromJs(context, info[0]) : std::nullopt;
+
+    const std::optional<std::int64_t> second =
+        info.Length() >= 2 ? intFromJs(context, info[1]) : std::nullopt;
+
+    if (!weapon || !second) {
+        return std::nullopt;
+    }
+
+    return std::pair{static_cast<std::uint32_t>(*weapon), static_cast<std::uint32_t>(*second)};
+}
+
+void playerAddWeaponComponent(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const auto named = weaponPairFromJs(info);
+    if (!named) {
+        fail(isolate, "addWeaponComponent ждёт числовые хеши оружия и насадки");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().addWeaponComponent(*id, named->first, named->second));
+}
+
+void playerRemoveWeaponComponent(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const auto named = weaponPairFromJs(info);
+    if (!named) {
+        fail(isolate, "removeWeaponComponent ждёт числовые хеши оружия и насадки");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeWeaponComponent(*id, named->first, named->second));
+}
+
+void playerSetWeaponTint(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const auto named = weaponPairFromJs(info);
+    if (!named) {
+        fail(isolate, "setWeaponTintIndex ждёт хеш оружия и номер расцветки");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setWeaponTint(
+        *id, named->first, static_cast<std::uint8_t>(named->second)));
 }
 
 void playerClearWeapons(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -1844,6 +1920,9 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "teleport", playerTeleport);
     addMethod(isolate, shape, "giveWeapon", playerGiveWeapon);
     addMethod(isolate, shape, "clearWeapons", playerClearWeapons);
+    addMethod(isolate, shape, "addWeaponComponent", playerAddWeaponComponent);
+    addMethod(isolate, shape, "removeWeaponComponent", playerRemoveWeaponComponent);
+    addMethod(isolate, shape, "setWeaponTintIndex", playerSetWeaponTint);
     addMethod(isolate, shape, "setClothes", playerSetClothes);
     addMethod(isolate, shape, "setProp", playerSetProp);
     addMethod(isolate, shape, "clearProp", playerClearProp);

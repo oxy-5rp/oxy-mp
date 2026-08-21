@@ -386,6 +386,91 @@ bool ServerCore::giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint
     return true;
 }
 
+namespace {
+
+/// Ствол в снаряжении игрока. Пусто — такого у него нет.
+[[nodiscard]] shared::WeaponSlot* weaponOf(Player& player, std::uint32_t weapon) {
+    const auto found = std::ranges::find(player.loadout, weapon, &shared::WeaponSlot::weapon);
+    return found == player.loadout.end() ? nullptr : &*found;
+}
+
+} // namespace
+
+bool ServerCore::addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                                    std::uint32_t component) {
+    if (weapon == 0 || component == 0) {
+        return false;
+    }
+
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Ствол обязан быть у игрока. Насадка без ствола — насадка ни на чём, и
+    // запомнить её молча значило бы пообещать то, чего не будет: выдай сервер
+    // этот ствол потом, насадку он к нему уже не привяжет.
+    shared::WeaponSlot* const slot = weaponOf(*player, weapon);
+    if (slot == nullptr) {
+        return false;
+    }
+
+    if (std::ranges::find(slot->components, component) != slot->components.end()) {
+        return true;
+    }
+
+    if (slot->components.size() >= shared::kMaxWeaponComponents) {
+        return false;
+    }
+
+    slot->components.push_back(component);
+
+    // Снаряжение уходит целиком и без отбора имеющегося: список полный, и
+    // отбирать нечего — то же оружие вернётся с той же насадкой.
+    sink_->loadoutChanged(*player, false);
+    return true;
+}
+
+bool ServerCore::removeWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                                       std::uint32_t component) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::WeaponSlot* const slot = weaponOf(*player, weapon);
+    if (slot == nullptr) {
+        return false;
+    }
+
+    if (std::erase(slot->components, component) == 0) {
+        return false;
+    }
+
+    // Снятая насадка требует отбора: игра не снимает поставленное сама, и
+    // список без насадки для неё выглядит просто как список без насадки.
+    // Поэтому оружие выдаётся заново, поверх отобранного.
+    sink_->loadoutChanged(*player, true);
+    return true;
+}
+
+bool ServerCore::setWeaponTint(shared::PlayerId id, std::uint32_t weapon, std::uint8_t tint) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::WeaponSlot* const slot = weaponOf(*player, weapon);
+    if (slot == nullptr) {
+        return false;
+    }
+
+    slot->tint = tint;
+
+    sink_->loadoutChanged(*player, false);
+    return true;
+}
+
 bool ServerCore::clearWeapons(shared::PlayerId id) {
     Player* player = players_->findById(id);
     if (player == nullptr) {

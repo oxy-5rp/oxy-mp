@@ -180,6 +180,11 @@ public:
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
+    bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                            std::uint32_t component) override;
+    bool removeWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
+                               std::uint32_t component) override;
+    bool setWeaponTint(shared::PlayerId id, std::uint32_t weapon, std::uint8_t tint) override;
     bool setModel(shared::PlayerId id, std::uint32_t model) override;
     bool setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
                         std::int8_t seat) override;
