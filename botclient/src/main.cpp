@@ -472,6 +472,24 @@ int main(int argc, char** argv) {
                 spdlog::info("  попаданий по нам {}, здоровье {}, броня {}", drawn.hits,
                              drawn.health, drawn.armour);
 
+                // Машины пересказываются поимённо, а не числом: главное здесь
+                // не сколько их, а движутся ли они. Стоящая машина снимков не
+                // шлёт вовсе, и «ведёт никто» — её обычное состояние; а вот у
+                // машины под игроком положение обязано меняться от строки к
+                // строке. Без этого проверить сеть машин было нечем: в игре
+                // видно чужую машину, но не видно, откуда она там взялась.
+                for (const auto& [id, vehicle] : connection.vehicles()) {
+                    const auto state = vehicle.at(now);
+
+                    spdlog::info("  машина {} в точке {:.1f} {:.1f} {:.1f}, ведёт {}, "
+                                 "снимков {}",
+                                 id, state.position.x, state.position.y, state.position.z,
+                                 vehicle.owner == oxymp::shared::kInvalidPlayerId
+                                     ? std::string{"никто"}
+                                     : std::to_string(vehicle.owner),
+                                 vehicle.snapshots);
+                }
+
                 spdlog::info("  внешностей машин {}, из них с тюнингом {}", drawn.appearances,
                              drawn.tuned);
 
