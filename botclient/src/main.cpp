@@ -87,6 +87,15 @@ struct Drawn {
     /// него нет, — но по счётчику видно, что распоряжение дошло.
     std::size_t animations = 0;
 
+    /// Сколько раз по боту попали и сколько у него здоровья по мнению сервера.
+    ///
+    /// Здоровье принадлежит серверу целиком, и бот его не ведёт: он и не может
+    /// — стреляют в него, а не он. По этим двум числам и видно, что попадания
+    /// доходят до сервера и что он их считает.
+    std::size_t hits = 0;
+    std::uint16_t health = 200;
+    std::uint16_t armour = 0;
+
     /// Сколько раз пришла внешность машины и сколько из них несли тюнинг.
     ///
     /// Второе число здесь и есть проверка обвесов: заводскую внешность машина
@@ -114,6 +123,12 @@ struct Drawn {
         markers += connection.takeMarkers().size();
         checkpoints += connection.takeCheckpoints().size();
         animations += connection.takeAnimations().size();
+        hits += connection.takeDamage().size();
+
+        if (const auto changed = connection.takeHealth()) {
+            health = changed->health;
+            armour = changed->armour;
+        }
 
         for (const auto& ped : connection.takePeds()) {
             ++pedMessages;
@@ -453,6 +468,9 @@ int main(int argc, char** argv) {
                 spdlog::info("  сервер нарисовал: меток {}, маркеров {}, точек {}; "
                              "движений велел {}",
                              drawn.blips, drawn.markers, drawn.checkpoints, drawn.animations);
+
+                spdlog::info("  попаданий по нам {}, здоровье {}, броня {}", drawn.hits,
+                             drawn.health, drawn.armour);
 
                 spdlog::info("  внешностей машин {}, из них с тюнингом {}", drawn.appearances,
                              drawn.tuned);
