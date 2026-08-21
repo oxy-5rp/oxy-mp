@@ -469,6 +469,30 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::MarkerState:
+        if (const auto marker = shared::decode<shared::MarkerState>(packet)) {
+            markers_.push_back(*marker);
+        }
+        return;
+
+    case shared::MessageId::MarkerRemoved:
+        if (const auto removed = shared::decode<shared::MarkerRemoved>(packet)) {
+            removedMarkers_.push_back(removed->id);
+        }
+        return;
+
+    case shared::MessageId::CheckpointState:
+        if (const auto checkpoint = shared::decode<shared::CheckpointState>(packet)) {
+            checkpoints_.push_back(*checkpoint);
+        }
+        return;
+
+    case shared::MessageId::CheckpointRemoved:
+        if (const auto removed = shared::decode<shared::CheckpointRemoved>(packet)) {
+            removedCheckpoints_.push_back(removed->id);
+        }
+        return;
+
     case shared::MessageId::PlayerIntoVehicle:
         if (const auto seat = shared::decode<shared::PlayerIntoVehicle>(packet)) {
             seats_.push_back(*seat);
@@ -772,6 +796,22 @@ std::vector<shared::BlipState> Connection::takeBlips() {
 
 std::vector<shared::BlipId> Connection::takeRemovedBlips() {
     return std::exchange(removedBlips_, {});
+}
+
+std::vector<shared::MarkerState> Connection::takeMarkers() {
+    return std::exchange(markers_, {});
+}
+
+std::vector<shared::MarkerId> Connection::takeRemovedMarkers() {
+    return std::exchange(removedMarkers_, {});
+}
+
+std::vector<shared::CheckpointState> Connection::takeCheckpoints() {
+    return std::exchange(checkpoints_, {});
+}
+
+std::vector<shared::CheckpointId> Connection::takeRemovedCheckpoints() {
+    return std::exchange(removedCheckpoints_, {});
 }
 
 std::vector<shared::PlayerIntoVehicle> Connection::takeSeats() {

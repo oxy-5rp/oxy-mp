@@ -1664,6 +1664,10 @@ void run() {
         mail.deliverVehicleRepairs(connection->takeVehicleRepairs());
         mail.deliverBlips(connection->takeBlips());
         mail.deliverRemovedBlips(connection->takeRemovedBlips());
+        mail.deliverMarkers(connection->takeMarkers());
+        mail.deliverRemovedMarkers(connection->takeRemovedMarkers());
+        mail.deliverCheckpoints(connection->takeCheckpoints());
+        mail.deliverRemovedCheckpoints(connection->takeRemovedCheckpoints());
         mail.deliverSeats(connection->takeSeats());
         mail.deliverServerEvents(connection->takeServerEvents());
         mail.deliverVehicleAppearances(connection->takeVehicleAppearances());

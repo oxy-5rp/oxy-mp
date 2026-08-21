@@ -2,6 +2,7 @@
 
 #include "game/appearance.hpp"
 #include "game/blips.hpp"
+#include "game/checkpoints.hpp"
 #include "game/ped_appearance.hpp"
 #include "game/controls.hpp"
 #include "game/data_files.hpp"
@@ -10,6 +11,7 @@
 #include "game/file_system.hpp"
 #include "game/frontend.hpp"
 #include "game/hud.hpp"
+#include "game/markers.hpp"
 #include "game/nameplates.hpp"
 #include "game/net_session.hpp"
 #include "game/network_bail.hpp"
@@ -190,6 +192,9 @@ private:
     void handleTyping();
 
     /// Исполняет то, что велел сервер: перенос игрока и именованные события.
+    /// Убирает нарисованное, когда сессия кончилась.
+    void forgetDrawnOnLeaving();
+
     void applyServerEvents(int ped);
 
     /// Поднимает клиентские половины ресурсов и даёт машине поработать.
@@ -277,7 +282,18 @@ private:
     game::Frontend frontend_;
 
     /// Метки на карте, поставленные сервером.
+    /// Были ли мы в сессии на прошлом кадре.
+    ///
+    /// Нужно ровно затем, чтобы поймать миг выхода: нарисованное убирается один
+    /// раз, а не каждый кадр, пока сессии нет.
+    bool inSession_ = false;
+
     game::Blips blips_;
+
+    /// Нарисованное в мире. Врозь с метками, потому что рисуется врозь: маркер
+    /// перерисовывается каждый кадр, а контрольную точку игра ведёт сама.
+    game::Markers markers_;
+    game::Checkpoints checkpoints_;
 
     /// Своё устройство файловой системы игры. Может не быть: клиент работает и
     /// без него, просто ничего не подменяет.

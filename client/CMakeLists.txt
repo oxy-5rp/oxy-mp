@@ -36,6 +36,7 @@ if(WIN32)
         src/game/appearance.cpp
         src/game/bink_sound.cpp
         src/game/blips.cpp
+        src/game/checkpoints.cpp
         src/game/controls.cpp
         src/game/code_patch.cpp
         src/game/crash_log.cpp
@@ -54,6 +55,7 @@ if(WIN32)
         src/game/keyboard_layout.cpp
         src/game/landing_page.cpp
         src/game/loaded_image.cpp
+        src/game/markers.cpp
         src/game/menu_input.cpp
         src/game/native_table.cpp
         src/game/net_session.cpp

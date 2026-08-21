@@ -112,7 +112,7 @@ std::uint32_t Appearance::modelHash() {
     return model_;
 }
 
-bool Appearance::want(std::uint32_t model, int player) {
+bool Appearance::want(std::uint32_t model) {
     if (!ready()) {
         return false;
     }

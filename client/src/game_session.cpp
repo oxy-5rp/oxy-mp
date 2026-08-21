@@ -127,6 +127,8 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       world_(table),
       frontend_(table),
       blips_(table),
+      markers_(table),
+      checkpoints_(table),
       files_(files),
       streamed_(streamed),
       described_(described),
@@ -744,7 +746,33 @@ void GameSession::handleTyping() {
     }
 }
 
+void GameSession::forgetDrawnOnLeaving() {
+    const bool here = status_.snapshot().inSession();
+
+    if (here == inSession_) {
+        return;
+    }
+
+    inSession_ = here;
+
+    if (here) {
+        return;
+    }
+
+    // Метки, маркеры и точки — единственное из мира сессии, что не убирается
+    // само собой. Люди и машины пропадают, потому что сверяются со списком, а
+    // опустевший список убирает всех; нарисованное же приходит событиями, и
+    // события эти после разрыва не придут никогда.
+    //
+    // Стоило это карты прежнего сервера поверх карты следующего.
+    blips_.clear();
+    markers_.clear();
+    checkpoints_.clear();
+}
+
 void GameSession::applyServerEvents(int ped) {
+    forgetDrawnOnLeaving();
+
     // Перенос — единственное распоряжение сервера, которое исполняет игра:
     // персонаж живёт здесь, и переставить его больше некому.
     if (ped != 0) {
@@ -776,6 +804,24 @@ void GameSession::applyServerEvents(int ped) {
 
     for (const shared::BlipState& blip : mail_.takeBlips()) {
         blips_.apply(blip);
+    }
+
+    // Маркеры и контрольные точки — тем же порядком и по той же причине:
+    // убранные раньше назначенных.
+    for (const shared::MarkerId id : mail_.takeRemovedMarkers()) {
+        markers_.remove(id);
+    }
+
+    for (const shared::MarkerState& marker : mail_.takeMarkers()) {
+        markers_.apply(marker);
+    }
+
+    for (const shared::CheckpointId id : mail_.takeRemovedCheckpoints()) {
+        checkpoints_.remove(id);
+    }
+
+    for (const shared::CheckpointState& checkpoint : mail_.takeCheckpoints()) {
+        checkpoints_.apply(checkpoint);
     }
 
     // Распоряжения о машинах исполняет тоже игра, и тоже потому, что больше
@@ -1288,7 +1334,7 @@ void GameSession::wearOwn(const shared::PlayerAppearance& appearance) {
     // Модель меняется отдельно от одежды и не всегда: `want` сам решает, нужна
     // ли замена вовсе. Пересоздание персонажа теряет всё, что на нём было, и
     // делать его на каждое объявление внешности значило бы раздевать человека.
-    if (appearance_.want(appearance.model, player_.id())) {
+    if (appearance_.want(appearance.model)) {
         changingModel_ = true;
         return;
     }
@@ -1406,6 +1452,11 @@ void GameSession::showRemotePlayers(int ped) {
     vehicles_.sweep();
 
     nameplates_.draw(views, remotePlayers_, player_.coords(ped));
+
+    // Маркеры — последними в кадре, и это не порядок ради порядка: игра их у
+    // себя не помнит, и нарисованное держится ровно один кадр. Пропустив вызов,
+    // мы получим не сдвинувшуюся фигуру, а мигание.
+    markers_.draw(player_.coords(ped));
 }
 
 bool GameSession::running() const noexcept {

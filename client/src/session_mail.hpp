@@ -218,6 +218,69 @@ public:
         return std::exchange(removedBlips_, {});
     }
 
+    /// Маркеры и контрольные точки, назначенные сервером.
+    ///
+    /// Тем же порядком, что и метки: пришедшее либо заводится, либо
+    /// поправляется, а убранное приходит отдельным списком.
+    void deliverMarkers(std::vector<shared::MarkerState> markers) {
+        if (markers.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        markers_.insert(markers_.end(), std::make_move_iterator(markers.begin()),
+                        std::make_move_iterator(markers.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::MarkerState> takeMarkers() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(markers_, {});
+    }
+
+    void deliverRemovedMarkers(std::vector<shared::MarkerId> markers) {
+        if (markers.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        removedMarkers_.insert(removedMarkers_.end(), markers.begin(), markers.end());
+    }
+
+    [[nodiscard]] std::vector<shared::MarkerId> takeRemovedMarkers() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(removedMarkers_, {});
+    }
+
+    void deliverCheckpoints(std::vector<shared::CheckpointState> checkpoints) {
+        if (checkpoints.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        checkpoints_.insert(checkpoints_.end(), std::make_move_iterator(checkpoints.begin()),
+                            std::make_move_iterator(checkpoints.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::CheckpointState> takeCheckpoints() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(checkpoints_, {});
+    }
+
+    void deliverRemovedCheckpoints(std::vector<shared::CheckpointId> checkpoints) {
+        if (checkpoints.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        removedCheckpoints_.insert(removedCheckpoints_.end(), checkpoints.begin(),
+                                   checkpoints.end());
+    }
+
+    [[nodiscard]] std::vector<shared::CheckpointId> takeRemovedCheckpoints() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(removedCheckpoints_, {});
+    }
+
     /// Куда сервер велел сесть.
     void deliverSeats(std::vector<shared::PlayerIntoVehicle> seats) {
         if (seats.empty()) {
@@ -437,6 +500,10 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::MarkerState> markers_;
+    std::vector<shared::MarkerId> removedMarkers_;
+    std::vector<shared::CheckpointState> checkpoints_;
+    std::vector<shared::CheckpointId> removedCheckpoints_;
     std::vector<shared::PlayerIntoVehicle> seats_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;

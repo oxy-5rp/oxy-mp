@@ -263,6 +263,16 @@ public:
     [[nodiscard]] std::vector<shared::BlipState> takeBlips();
     [[nodiscard]] std::vector<shared::BlipId> takeRemovedBlips();
 
+    /// Маркеры и контрольные точки — тем же порядком и по той же причине.
+    ///
+    /// Расстоянием их не отбирает сервер: у обоих своё поле видимости, и
+    /// считает его тот, кто рисует.
+    [[nodiscard]] std::vector<shared::MarkerState> takeMarkers();
+    [[nodiscard]] std::vector<shared::MarkerId> takeRemovedMarkers();
+
+    [[nodiscard]] std::vector<shared::CheckpointState> takeCheckpoints();
+    [[nodiscard]] std::vector<shared::CheckpointId> takeRemovedCheckpoints();
+
     /// Куда сервер велел сесть. Приходит только нам самим.
     [[nodiscard]] std::vector<shared::PlayerIntoVehicle> takeSeats();
 
@@ -404,6 +414,10 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::MarkerState> markers_;
+    std::vector<shared::MarkerId> removedMarkers_;
+    std::vector<shared::CheckpointState> checkpoints_;
+    std::vector<shared::CheckpointId> removedCheckpoints_;
     std::vector<shared::PlayerIntoVehicle> seats_;
     std::vector<shared::ServerEvent> serverEvents_;
     std::vector<shared::VehicleAppearance> vehicleAppearances_;

@@ -964,4 +964,29 @@ inline constexpr std::uint64_t kDoesExtraExist = 0X579FA5568DE0C2A0;
 /// GET_VEHICLE_MOD_VARIATION, канонический хеш 0XB3924ECD70E095DC.
 inline constexpr std::uint64_t kGetVehicleModVariation = 0XEFDD8C5443F6C9E4;
 
+// --- Нарисованное в мире ------------------------------------------------------
+//
+// Маркер и контрольная точка ставятся сервером, а рисует их игра. Рисует
+// по-разному, и это видно прямо здесь: у маркера один натив, зовущийся каждый
+// кадр, а у точки — заведение, правка и снятие, потому что её игра помнит
+// сама.
+
+/// DRAW_MARKER, канонический хеш 0X28477EC23D892089.
+inline constexpr std::uint64_t kDrawMarker = 0X7E763410A91A972B;
+
+/// CREATE_CHECKPOINT, канонический хеш 0X0134F0835AB6BFCB.
+inline constexpr std::uint64_t kCreateCheckpoint = 0XDCC9FF4954D6DCB1;
+
+/// DELETE_CHECKPOINT, канонический хеш 0XF5ED37F54CD4D52E.
+inline constexpr std::uint64_t kDeleteCheckpoint = 0XC2A5E7DCD1900AA1;
+
+/// SET_CHECKPOINT_CYLINDER_HEIGHT, канонический хеш 0X2707AAE9D9297D89.
+inline constexpr std::uint64_t kSetCheckpointCylinderHeight = 0XA7DD2E2BCBD9C8D5;
+
+/// SET_CHECKPOINT_RGBA, канонический хеш 0X7167371E8AD747F7.
+inline constexpr std::uint64_t kSetCheckpointRgba = 0XEDC9B904B870CE80;
+
+/// _SET_CHECKPOINT_ICON_RGBA, канонический хеш 0XB9EA40907C680580.
+inline constexpr std::uint64_t kSetCheckpointIconRgba = 0XF7408C8F340BA88B;
+
 } // namespace oxymp::client::game::natives
