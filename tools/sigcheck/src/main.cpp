@@ -78,6 +78,8 @@ std::string describeValue(const Result& result) {
         return std::format("функция  VA {:#x}  (rva {:#x})", resolved.value, resolved.targetRva);
     case gamesig::Resolution::RipRelative:
         return std::format("ссылка   VA {:#x}  (rva {:#x})", resolved.value, resolved.targetRva);
+    case gamesig::Resolution::ImageRelative:
+        return std::format("таблица  VA {:#x}  (rva {:#x})", resolved.value, resolved.targetRva);
     case gamesig::Resolution::Immediate32:
         return std::format("значение {:#x}  ({})", resolved.value, resolved.value);
     }

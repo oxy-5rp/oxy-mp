@@ -42,6 +42,7 @@ if(WIN32)
         src/game/discord_block.cpp
         src/game/engine_addresses.cpp
         src/game/environment.cpp
+        src/game/data_files.cpp
         src/game/file_device.cpp
         src/game/file_system.cpp
         src/game/focus_pause.cpp

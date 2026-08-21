@@ -112,7 +112,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
                          UiFeed& feed, game::FileDevice* files,
-                         game::StreamingFiles* streamed)
+                         game::StreamingFiles* streamed, game::DataFiles* described)
     : natives_(table),
       settings_(std::move(settings)),
       status_(status),
@@ -128,6 +128,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       frontend_(table),
       files_(files),
       streamed_(streamed),
+      described_(described),
       gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
@@ -156,6 +157,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  LocalState& localState, SessionMail& mail,
                                                  UiFeed& feed, game::FileDevice* files,
                                                  game::StreamingFiles* streamed,
+                                                 game::DataFiles* described,
                                                  std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
@@ -170,7 +172,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
 
     std::unique_ptr<GameSession> session{new GameSession{
         addresses, table, std::move(settings), status, roster, localState, mail, feed, files,
-        streamed}};
+        streamed, described}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -315,6 +317,13 @@ void GameSession::serveFiles() {
     // раскладку страниц, а открыть его она может только через наше устройство.
     if (streamed_ != nullptr) {
         streamed_->pump();
+    }
+
+    // Описания — последними, и порядок снова обязателен: описание машины
+    // ссылается на её модель по имени, а имя к этому времени должно быть уже
+    // объявлено стримингу.
+    if (described_ != nullptr) {
+        described_->pump();
     }
 
     if (mounted == 0 || filesChecked_) {

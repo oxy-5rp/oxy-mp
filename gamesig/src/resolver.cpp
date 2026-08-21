@@ -29,12 +29,12 @@ namespace {
 ///
 /// Поэтому здесь не отсеивается ничего: отчёт обязан показывать всё, что нашёл,
 /// а решать, верное ли это место, — дело того, кто заводит сигнатуру.
-std::vector<std::uint64_t> scanExecutableSections(const ImageSource& image,
-                                                  const memscan::Pattern& pattern) {
+std::vector<std::uint64_t> scanSections(const ImageSource& image,
+                                        const memscan::Pattern& pattern, bool inData) {
     std::vector<std::uint64_t> hits;
 
     for (const Section& section : image.sections()) {
-        if (!section.executable) {
+        if (section.executable == inData) {
             continue;
         }
 
@@ -91,7 +91,7 @@ Resolved resolve(const ImageSource& image, const Signature& signature) {
         return result;
     }
 
-    const auto hits = scanExecutableSections(image, *pattern);
+    const auto hits = scanSections(image, *pattern, signature.inData);
     result.matchCount = hits.size();
 
     if (hits.empty()) {
@@ -142,6 +142,23 @@ Resolved resolve(const ImageSource& image, const Signature& signature) {
         }
 
         result.targetRva = static_cast<std::uint64_t>(target);
+        result.value = image.baseAddress() + result.targetRva;
+        result.status = ResolveStatus::Ok;
+        return result;
+    }
+
+    case Resolution::ImageRelative: {
+        const std::uint8_t* operand = image.rvaToPointer(result.siteRva, sizeof(std::uint32_t));
+        if (operand == nullptr) {
+            result.status = ResolveStatus::Unreadable;
+            result.detail = "по адресу смещения нет данных";
+            return result;
+        }
+
+        std::uint32_t displacement = 0;
+        std::memcpy(&displacement, operand, sizeof(displacement));
+
+        result.targetRva = displacement;
         result.value = image.baseAddress() + result.targetRva;
         result.status = ResolveStatus::Ok;
         return result;

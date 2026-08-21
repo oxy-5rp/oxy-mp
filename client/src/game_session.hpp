@@ -3,6 +3,7 @@
 #include "game/appearance.hpp"
 #include "game/ped_appearance.hpp"
 #include "game/controls.hpp"
+#include "game/data_files.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/file_device.hpp"
 #include "game/file_system.hpp"
@@ -109,6 +110,7 @@ public:
                                                              UiFeed& feed,
                                                              game::FileDevice* files,
                                                              game::StreamingFiles* streamed,
+                                                             game::DataFiles* described,
                                                              std::string& error);
 
     ~GameSession();
@@ -133,7 +135,7 @@ private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
                 LocalState& localState, SessionMail& mail, UiFeed& feed, game::FileDevice* files,
-                game::StreamingFiles* streamed);
+                game::StreamingFiles* streamed, game::DataFiles* described);
 
     /// Вешает отложенные подмены файлов и один раз проверяет, что игра берёт
     /// файлы у нас.
@@ -281,6 +283,11 @@ private:
     /// только после него: объявляемый файл игра тут же открывает, а открыть его
     /// может лишь через устройство.
     game::StreamingFiles* streamed_ = nullptr;
+
+    /// Описания: чем игра узнаёт, что такая машина бывает. Идут последними —
+    /// описание ссылается на модель по имени, а имя к тому времени должно быть
+    /// объявлено.
+    game::DataFiles* described_ = nullptr;
 
     /// Чтение файлов средствами самой игры — им и проверяется, что подмена
     /// дошла до неё, а не осталась нашей выдумкой.

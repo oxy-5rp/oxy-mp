@@ -12,6 +12,7 @@
 #include "game/discord_block.hpp"
 #include "game/engine_addresses.hpp"
 #include "game/environment.hpp"
+#include "game/data_files.hpp"
 #include "game/file_device.hpp"
 #include "game/file_system.hpp"
 #include "game/streaming_files.hpp"
@@ -589,6 +590,26 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
     return std::string{tail};
 }
 
+/// Имя файла, если это описание в корне ресурса, — иначе пусто.
+///
+/// Описания лежат рядом с каталогом моделей, а не внутри него: так их кладут и
+/// у alt:V, и у FiveM. Вглубь не заходим — `.meta` в подкаталогах бывают у
+/// чужого добра, которое ресурс просто носит с собой.
+[[nodiscard]] std::string describedFileName(std::string_view resourceEntry) {
+    const std::size_t slash = resourceEntry.find('/');
+    if (slash == std::string_view::npos) {
+        return {};
+    }
+
+    const std::string_view tail = resourceEntry.substr(slash + 1);
+
+    if (tail.find('/') != std::string_view::npos || !tail.ends_with(".meta")) {
+        return {};
+    }
+
+    return std::string{tail};
+}
+
 /// Кладёт рядом с клиентом файл, которым устройство себя проверяет.
 ///
 /// Сама проверка идёт позже и не здесь: спросить у игры можно только из потока
@@ -912,6 +933,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               SessionMail& mail, UiFeed& feed,
                                               game::FileDevice* files,
                                               game::StreamingFiles* streamed,
+                                              game::DataFiles* described,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -954,7 +976,8 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, files, streamed, error);
+                                       localState, mail, feed, files, streamed, described,
+                                       error);
     if (session == nullptr) {
         spdlog::error("игровая сессия не создана: {}", error);
     }
@@ -1290,6 +1313,10 @@ void run() {
     // списке подгружаемого.
     std::unique_ptr<game::StreamingFiles> streamedFiles;
 
+    // И третья: описания, из которых игра узнаёт, что такая машина вообще
+    // бывает. Без них у неё есть модель, но нет машины.
+    std::unique_ptr<game::DataFiles> dataFiles;
+
     std::unique_ptr<GameSession> session;
 
     if (engine != nullptr && hooksReady && probeNatives(*engine)) {
@@ -1320,12 +1347,20 @@ void run() {
             spdlog::warn("объявлять игре свои модели нечем: {}", streamingError);
         }
 
+        std::string dataError;
+        dataFiles = game::DataFiles::create(*engine, dataError);
+
+        if (dataFiles == nullptr) {
+            spdlog::warn("доносить до игры свои описания нечем: {}", dataError);
+        }
+
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
         // происходящее в игре покадрово, а мы отсюда уже нет.
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   fileDevice.get(), streamedFiles.get(), scriptStartup);
+                                   fileDevice.get(), streamedFiles.get(), dataFiles.get(),
+                                   scriptStartup);
     }
 
     // Соединения нет, пока его не попросят, и это главная перемена устройства
@@ -1530,6 +1565,27 @@ void run() {
 
                     if (streamedFiles != nullptr) {
                         streamedFiles->add(gamePath, streamed);
+                    }
+                }
+
+                // Описания — отдельным проходом и после моделей, чтобы порядок
+                // просьб совпадал с порядком, в котором игра их получит.
+                for (const shared::ResourceEntry& entry : *offered) {
+                    const std::string described = describedFileName(entry.name);
+                    if (described.empty()) {
+                        continue;
+                    }
+
+                    // Путь у описания свой, с именем ресурса внутри: одинаково
+                    // названные `vehicles.meta` двух ресурсов иначе сошлись бы
+                    // в одно.
+                    const std::string gamePath = std::format("oxymp:/meta/{}", entry.name);
+
+                    fileDevice->serve(gamePath, resources.resourceRoot() / entry.name);
+                    fileDevice->mount("oxymp:/");
+
+                    if (dataFiles != nullptr) {
+                        dataFiles->add(gamePath, described);
                     }
                 }
             }

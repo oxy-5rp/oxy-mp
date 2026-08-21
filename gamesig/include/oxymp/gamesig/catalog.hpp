@@ -619,6 +619,32 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
     // Сигнатуры взяты у CitizenFX (`components/gta-streaming-five`) и проверены
     // пробой на нашей сборке: совпадение ровно одно.
     {
+        .id = "data_file_mounters",
+        .description = "CDataFileMount::sm_Interfaces — таблица загрузчиков описаний, по одному "
+                       "на вид. Ими игра загружает vehicles.meta и всё, что рядом; ими же можно "
+                       "донести до неё свои описания.",
+        .pattern = "48 63 82 90 00 00 00 49 8B 8C C0 ? ? ? ? 48",
+        .offset = 11,
+        .resolution = Resolution::ImageRelative,
+        // Совпадения два: загрузка и выгрузка описаний устроены одинаково.
+        // Смещение в них одно и то же — проверено дампом обоих мест.
+        .expectedMatches = 2,
+    },
+    {
+        .id = "data_file_types",
+        .description = "Таблица видов описаний: хеш имени вида и его номер в таблице загрузчиков. "
+                       "По ней VEHICLE_METADATA_FILE превращается в номер, которым выбирают "
+                       "загрузчик.",
+        .pattern = "61 44 DF 04 00 00 00 00",
+        .offset = 0,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+        // Лежит в данных, а не в коде: из кода на неё не ссылается ничто —
+        // игра ходит по ней от вычисленного адреса. Опознаётся по первой
+        // записи: хеш имени RPF_FILE и его номер, ноль.
+        .inData = true,
+    },
+    {
         .id = "streaming_register_raw_file",
         .description = "streaming::RegisterRawStreamingFile — объявляет игре отдельно лежащий "
                        "файл: путь, имя, под которым его искать. Тем же вызовом свои модели "
