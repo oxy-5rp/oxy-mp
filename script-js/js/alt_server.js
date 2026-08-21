@@ -605,6 +605,7 @@
 
     const Player = native.Player;
     const Vehicle = native.Vehicle;
+    const WorldObject = native.Object;
 
     /// Угол поворота у alt:V — вектор в радианах, у oxyMP — один угол в градусах.
     ///
@@ -790,6 +791,77 @@
         },
     });
 
+    Object.defineProperties(WorldObject.prototype, {
+        pos: {
+            get() { return new shared.Vector3(this.position); },
+            set: unperformed('object.pos', 'переставить предмет сервер пока не умеет'),
+        },
+        rot: {
+            get() { return new shared.Vector3(this.rotation); },
+        },
+        toString: {
+            value() { return `Object{ id: ${this.id} }`; },
+        },
+
+        /// У alt:V предмет умеет ещё и качаться, гореть и быть невидимым —
+        /// у нас он стоит. Так он и заведён на сервере: подвинуть его может
+        /// лишь тот, кто поставил, и подвинет он его у всех разом.
+        ///
+        /// Молчать об этом нельзя: ресурс, потушивший невидимость, решил бы,
+        /// что предмет виден.
+        alpha: {
+            get() { return 255; },
+            set: unperformed('object.alpha', 'прозрачность предмета сервером не задаётся'),
+        },
+        collision: {
+            get() { return true; },
+            set: unperformed('object.collision', 'столкновения предмета сервером не задаются'),
+        },
+        isCollisionEnabled: { get() { return true; } },
+        activatePhysics: { value: unperformed('object.activatePhysics',
+                                       'физика предмета у нас не считается: он стоит') },
+    });
+
+    Object.defineProperties(WorldObject, {
+        all: { get() { return native.objects(); } },
+        count: { get() { return native.objects().length; } },
+        getByID: {
+            value(id) {
+                return native.objects().find((object) => object.id === id) ?? null;
+            },
+        },
+    });
+
+    /// `new alt.Object(...)` — так предметы и ставят в alt:V.
+    ///
+    /// Посредником над классом ядра по той же причине, что и у машины:
+    /// `instanceof alt.Object` обязан узнавать предметы, пришедшие из ядра.
+    const ConstructibleObject = new Proxy(WorldObject, {
+        construct(_target, args) {
+            const [model] = args;
+            const hashed = typeof model === 'string' ? shared.hash(model) : model;
+
+            const position = args.length >= 4
+                ? new shared.Vector3(args[1], args[2], args[3])
+                : new shared.Vector3(args[1]);
+
+            // Поворот у alt:V в градусах — в отличие от машины, где радианы.
+            // Расхождение не наше: так это у него и сделано.
+            const rotation = args.length >= 7
+                ? new shared.Vector3(args[4], args[5], args[6])
+                : (args[2] === undefined ? new shared.Vector3(0, 0, 0)
+                                         : new shared.Vector3(args[2]));
+
+            const object = native.createObject(hashed, position, rotation);
+
+            if (object === null) {
+                throw new Error(`alt.Object: предмет модели ${model} не поставился`);
+            }
+
+            return object;
+        },
+    });
+
     // --- Таймеры -------------------------------------------------------------
 
     /// Таймеры alt:V отличаются от родных для JS одним: они возвращают число.
@@ -871,7 +943,10 @@
         // Метки, зоны, чекпоинты, маркеры и голосовые каналы кладёт сюда
         // alt_objects.js — он исполняется следом и заменяет их настоящими.
         Ped: absent('alt.Ped'),
-        Object: absent('alt.Object'),
+        Object: ConstructibleObject,
+
+        /// Сетевой предмет — тот, которым игроки могут двигать друг у друга.
+        /// У нас предмет стоит: подвинуть его может лишь тот, кто поставил.
         NetworkObject: absent('alt.NetworkObject'),
         VirtualEntity: absent('alt.VirtualEntity'),
         VirtualEntityGroup: absent('alt.VirtualEntityGroup'),

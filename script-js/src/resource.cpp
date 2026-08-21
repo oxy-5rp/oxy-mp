@@ -332,12 +332,21 @@ v8::Local<v8::FunctionTemplate> Resource::vehicleShape() const {
                                    : vehicleShape_.Get(setup_->isolate());
 }
 
+v8::Local<v8::FunctionTemplate> Resource::objectShape() const {
+    return objectShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
+                                   : objectShape_.Get(setup_->isolate());
+}
+
 void Resource::setPlayerShape(v8::Local<v8::FunctionTemplate> value) {
     playerShape_.Reset(setup_->isolate(), value);
 }
 
 void Resource::setVehicleShape(v8::Local<v8::FunctionTemplate> value) {
     vehicleShape_.Reset(setup_->isolate(), value);
+}
+
+void Resource::setObjectShape(v8::Local<v8::FunctionTemplate> value) {
+    objectShape_.Reset(setup_->isolate(), value);
 }
 
 void Resource::deliver(std::string_view name, std::string_view payload) {

@@ -100,9 +100,11 @@ public:
     /// прототипов, никого не спрашивая.
     [[nodiscard]] v8::Local<v8::FunctionTemplate> playerShape() const;
     [[nodiscard]] v8::Local<v8::FunctionTemplate> vehicleShape() const;
+    [[nodiscard]] v8::Local<v8::FunctionTemplate> objectShape() const;
 
     void setPlayerShape(v8::Local<v8::FunctionTemplate> value);
     void setVehicleShape(v8::Local<v8::FunctionTemplate> value);
+    void setObjectShape(v8::Local<v8::FunctionTemplate> value);
 
 private:
     /// Слот в изоляте, в котором лежит указатель на ресурс.
@@ -145,6 +147,7 @@ private:
 
     v8::Global<v8::FunctionTemplate> playerShape_;
     v8::Global<v8::FunctionTemplate> vehicleShape_;
+    v8::Global<v8::FunctionTemplate> objectShape_;
 };
 
 } // namespace oxymp::script::js

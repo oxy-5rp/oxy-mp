@@ -34,4 +34,9 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context);
                                                 v8::Local<v8::Context> context,
                                                 shared::VehicleId id);
 
+/// То же для предмета.
+[[nodiscard]] v8::Local<v8::Value> wrapObject(Resource& resource,
+                                               v8::Local<v8::Context> context,
+                                               shared::ObjectId id);
+
 } // namespace oxymp::script::js

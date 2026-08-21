@@ -542,6 +542,68 @@ void vehicleDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(info.GetIsolate()).core().removeVehicle(*id));
 }
 
+// --- Предмет ----------------------------------------------------------------
+//
+// Устроен проще машины, и это не упрощение ради экономии, а следствие того, чем
+// он является. У машины есть ведущий — клиент, считающий её физику, — потому что
+// машина едет, мнётся и переворачивается. Предмет стоит.
+
+template<auto Field>
+void objectField(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::ObjectId> id = idOf<shared::ObjectId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<ObjectInfo> object = resourceOf(isolate).core().object(*id);
+    if (!object) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    if constexpr (std::is_same_v<std::decay_t<decltype((*object).*Field)>, shared::Vec3>) {
+        info.GetReturnValue().Set(toJs(isolate->GetCurrentContext(), (*object).*Field));
+    } else {
+        info.GetReturnValue().Set(static_cast<double>((*object).*Field));
+    }
+}
+
+void objectValid(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    const std::optional<shared::ObjectId> id = idOf<shared::ObjectId>(info.This());
+
+    info.GetReturnValue().Set(id.has_value() &&
+                              resourceOf(info.GetIsolate()).core().object(*id).has_value());
+}
+
+void setObjectDimensionValue(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                             const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::ObjectId> id = idOf<shared::ObjectId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> dimension = intFromJs(isolate->GetCurrentContext(), value);
+    if (!dimension) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setObjectDimension(*id,
+                                                        static_cast<std::int32_t>(*dimension));
+}
+
+void objectDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const std::optional<shared::ObjectId> id = idOf<shared::ObjectId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(info.GetIsolate()).core().removeObject(*id));
+}
+
 // --- Объект oxymp -----------------------------------------------------------
 
 void onEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -686,6 +748,55 @@ void players(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(array);
 }
 
+void objects(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    Resource& resource = resourceOf(isolate);
+
+    const std::vector<ObjectInfo> all = resource.core().objects();
+    const v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int>(all.size()));
+
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        (void)array->Set(context, static_cast<std::uint32_t>(i),
+                         wrapObject(resource, context, all[i].id));
+    }
+
+    info.GetReturnValue().Set(array);
+}
+
+void createObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<std::int64_t> model =
+        info.Length() >= 1 ? intFromJs(context, info[0]) : std::nullopt;
+
+    const std::optional<shared::Vec3> where =
+        info.Length() >= 2 ? vec3FromJs(context, info[1]) : std::nullopt;
+
+    if (!model || !where) {
+        fail(isolate, "createObject ждёт модель и точку");
+        return;
+    }
+
+    // Поворот необязателен: предмет чаще ставят как есть.
+    const shared::Vec3 rotation =
+        info.Length() >= 3 ? vec3FromJs(context, info[2]).value_or(shared::Vec3{}) : shared::Vec3{};
+
+    Resource& resource = resourceOf(isolate);
+
+    const shared::ObjectId id = resource.core().createObject(
+        static_cast<std::uint32_t>(*model), *where, rotation);
+
+    if (id == shared::kInvalidObjectId) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(wrapObject(resource, context, id));
+}
+
 void vehicles(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -826,6 +937,23 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     return shape;
 }
 
+[[nodiscard]] v8::Local<v8::FunctionTemplate> buildObjectShape(v8::Local<v8::Context> context) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::FunctionTemplate> shape = entityTemplate(isolate, "Object");
+
+    addGetter(isolate, shape, "id", objectField<&ObjectInfo::id>);
+    addGetter(isolate, shape, "model", objectField<&ObjectInfo::model>);
+    addGetter(isolate, shape, "position", objectField<&ObjectInfo::position>);
+    addGetter(isolate, shape, "rotation", objectField<&ObjectInfo::rotation>);
+    addGetter(isolate, shape, "dimension", objectField<&ObjectInfo::dimension>,
+              setObjectDimensionValue);
+    addGetter(isolate, shape, "valid", objectValid);
+
+    addMethod(isolate, shape, "destroy", objectDestroy);
+
+    return shape;
+}
+
 [[nodiscard]] v8::Local<v8::FunctionTemplate> buildVehicleShape(v8::Local<v8::Context> context) {
     v8::Isolate* const isolate = context->GetIsolate();
     const v8::Local<v8::FunctionTemplate> shape = entityTemplate(isolate, "Vehicle");
@@ -888,14 +1016,21 @@ v8::Local<v8::Value> wrapVehicle(Resource& resource, v8::Local<v8::Context> cont
     return instantiate(context, resource.vehicleShape(), static_cast<std::uint32_t>(id));
 }
 
+v8::Local<v8::Value> wrapObject(Resource& resource, v8::Local<v8::Context> context,
+                                shared::ObjectId id) {
+    return instantiate(context, resource.objectShape(), static_cast<std::uint32_t>(id));
+}
+
 void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     v8::Isolate* const isolate = context->GetIsolate();
 
     const v8::Local<v8::FunctionTemplate> playerShape = buildPlayerShape(context);
     const v8::Local<v8::FunctionTemplate> vehicleShape = buildVehicleShape(context);
+    const v8::Local<v8::FunctionTemplate> objectShape = buildObjectShape(context);
 
     resource.setPlayerShape(playerShape);
     resource.setVehicleShape(vehicleShape);
+    resource.setObjectShape(objectShape);
 
     const v8::Local<v8::Object> oxymp = v8::Object::New(isolate);
 
@@ -910,6 +1045,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "players", players);
     addFunction(context, oxymp, "vehicles", vehicles);
     addFunction(context, oxymp, "createVehicle", createVehicle);
+    addFunction(context, oxymp, "objects", objects);
+    addFunction(context, oxymp, "createObject", createObject);
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
 
@@ -919,6 +1056,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
                      playerShape->GetFunction(context).ToLocalChecked());
     (void)oxymp->Set(context, toJs(isolate, "Vehicle"),
                      vehicleShape->GetFunction(context).ToLocalChecked());
+    (void)oxymp->Set(context, toJs(isolate, "Object"),
+                     objectShape->GetFunction(context).ToLocalChecked());
 
     // Имя ресурса — чтобы он мог собрать путь к своим файлам и назвать себя в
     // событии клиенту.
