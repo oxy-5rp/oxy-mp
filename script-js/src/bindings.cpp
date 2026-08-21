@@ -324,6 +324,44 @@ void vehicleRepair(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().repairVehicle(*id));
 }
 
+/// Сажает игрока в машину: сама машина и место в ней.
+void playerSetIntoVehicle(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    // Машина приходит сущностью, как её и передают у alt:V. Числом — тоже
+    // принимаем: номер машины у нас и есть её имя, и ресурс вправе держать его
+    // у себя.
+    std::optional<shared::VehicleId> vehicle;
+
+    if (info.Length() >= 1) {
+        vehicle = idOf<shared::VehicleId>(info[0]);
+
+        if (!vehicle) {
+            if (const std::optional<std::int64_t> number =
+                    intFromJs(isolate->GetCurrentContext(), info[0])) {
+                vehicle = static_cast<shared::VehicleId>(*number);
+            }
+        }
+    }
+
+    if (!vehicle) {
+        fail(isolate, "setIntoVehicle ждёт машину первым доводом");
+        return;
+    }
+
+    // Место необязательно: не названное, оно означает «за руль» — так же
+    // толкует его и alt:V.
+    const std::int64_t seat = argAt(info, 1).value_or(shared::kNoSeat);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setIntoVehicle(
+        *id, *vehicle, static_cast<std::int8_t>(seat)));
+}
+
 /// В каком слое мира игрок. Ставится числом; всё, что не число, пропускается.
 void setPlayerDimension(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                         const v8::PropertyCallbackInfo<void>& info) {
@@ -1049,6 +1087,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "setClothes", playerSetClothes);
     addMethod(isolate, shape, "setProp", playerSetProp);
     addMethod(isolate, shape, "clearProp", playerClearProp);
+    addMethod(isolate, shape, "setIntoVehicle", playerSetIntoVehicle);
     addMethod(isolate, shape, "emit", playerEmit);
     addMethod(isolate, shape, "tell", playerTell);
     addMethod(isolate, shape, "kick", playerKick);

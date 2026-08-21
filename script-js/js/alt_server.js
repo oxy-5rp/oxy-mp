@@ -686,7 +686,10 @@
         setWeather: { value: unperformed('player.setWeather', 'погода у нас общая на сессию — см. alt.setWeather') },
         setDateTime: { value: unperformed('player.setDateTime', 'часы у нас общие на сессию — см. alt.setTime') },
         removeWeapon: { value: unperformed('player.removeWeapon', 'отобрать одно оружие нельзя, можно всё — clearWeapons') },
-        setIntoVehicle: { value: unperformed('player.setIntoVehicle', 'посадить игрока в машину сервер пока не умеет') },
+        /// Посадить игрока в машину ядро умеет: просьбой ему самому.
+        ///
+        /// У alt:V место называется вторым доводом, и минус единица означает
+        /// «за руль». У нас так же — нумерация взята у самой игры.
         addWeaponComponent: { value: unperformed('player.addWeaponComponent', 'обвесы оружия не передаются') },
         playAnimation: { value: unperformed('player.playAnimation', 'движения по слову сервера не проигрываются') },
         attachTo: { value: unperformed('player.attachTo', 'привязка сущностей друг к другу не передаётся') },

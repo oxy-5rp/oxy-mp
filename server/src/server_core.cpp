@@ -201,6 +201,21 @@ namespace {
 
 } // namespace
 
+bool ServerCore::setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
+                                std::int8_t seat) {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr || vehicles_->find(vehicle) == nullptr) {
+        return false;
+    }
+
+    // Место в реестре здесь не проставляется, и это не забывчивость. Кто где
+    // сидит, сервер узнаёт из снимков: пока игра на той стороне не посадила
+    // персонажа, он не сидит нигде, и записать обратное значило бы разойтись с
+    // правдой до первого же снимка — а по ней сервер решает, кому вести машину.
+    sink_->seated(*player, vehicle, seat);
+    return true;
+}
+
 bool ServerCore::setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
                             std::uint8_t texture, std::uint8_t palette) {
     Player* const player = players_->findById(id);

@@ -768,6 +768,18 @@ BlipRemoved BlipRemoved::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerIntoVehicle::write(ByteWriter& writer) const {
+    writer.writeU32(vehicle);
+    writer.writeU8(static_cast<std::uint8_t>(seat));
+}
+
+PlayerIntoVehicle PlayerIntoVehicle::read(ByteReader& reader) {
+    PlayerIntoVehicle message;
+    message.vehicle = reader.readU32();
+    message.seat = static_cast<std::int8_t>(reader.readU8());
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -807,6 +819,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::VehicleRepair:
     case MessageId::BlipState:
     case MessageId::BlipRemoved:
+    case MessageId::PlayerIntoVehicle:
         return static_cast<MessageId>(packet.front());
     }
 

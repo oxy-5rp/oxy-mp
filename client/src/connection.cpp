@@ -469,6 +469,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerIntoVehicle:
+        if (const auto seat = shared::decode<shared::PlayerIntoVehicle>(packet)) {
+            seats_.push_back(*seat);
+        }
+        return;
+
     case shared::MessageId::ServerEvent:
         if (auto event = shared::decode<shared::ServerEvent>(packet)) {
             serverEvents_.push_back(std::move(*event));
@@ -768,6 +774,10 @@ std::vector<shared::BlipId> Connection::takeRemovedBlips() {
     return std::exchange(removedBlips_, {});
 }
 
+std::vector<shared::PlayerIntoVehicle> Connection::takeSeats() {
+    return std::exchange(seats_, {});
+}
+
 std::vector<shared::ServerEvent> Connection::takeServerEvents() {
     return std::exchange(serverEvents_, {});
 }
@@ -911,6 +921,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     vehicleRepairs_.clear();
     blips_.clear();
     removedBlips_.clear();
+    seats_.clear();
     loadout_.reset();
     health_.reset();
     latency_.reset();

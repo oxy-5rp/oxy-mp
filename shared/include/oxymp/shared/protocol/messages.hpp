@@ -1234,6 +1234,19 @@ struct VehicleRepair {
     [[nodiscard]] static VehicleRepair read(ByteReader& reader);
 };
 
+/// Посадить игрока в машину. Только от сервера и только ему самому.
+struct PlayerIntoVehicle {
+    static constexpr MessageId kId = MessageId::PlayerIntoVehicle;
+
+    VehicleId vehicle = kInvalidVehicleId;
+
+    /// Куда сажать. Минус единица — за руль; так же нумерует места и сама игра.
+    std::int8_t seat = kNoSeat;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerIntoVehicle read(ByteReader& reader);
+};
+
 // --- Упаковка сообщений в пакеты ----------------------------------------------
 //
 // Пакет — это байт с типом сообщения и следом его поля. Границы пакетов

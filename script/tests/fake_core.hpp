@@ -77,6 +77,17 @@ public:
         return true;
     }
 
+    bool setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
+                        std::int8_t seat) override {
+        if (!player(id) ||
+            std::ranges::find(vehicleList, vehicle, &VehicleInfo::id) == vehicleList.end()) {
+            return false;
+        }
+
+        said.push_back(std::format("seat {} {} {}", id, vehicle, seat));
+        return true;
+    }
+
     bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
                     std::uint8_t texture, std::uint8_t palette) override {
         if (!player(id) || component >= shared::kPedComponentCount) {

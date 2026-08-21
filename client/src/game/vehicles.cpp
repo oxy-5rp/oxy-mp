@@ -45,7 +45,8 @@ Vehicles::Vehicles(const NativeTable& table) noexcept
       setHeading_(table.handlerFor(natives::kSetEntityHeading)),
       setVelocity_(table.handlerFor(natives::kSetEntityVelocity)),
       fix_(table.handlerFor(natives::kSetVehicleFixed)),
-      fixDeformation_(table.handlerFor(natives::kSetVehicleDeformationFixed)) {}
+      fixDeformation_(table.handlerFor(natives::kSetVehicleDeformationFixed)),
+      intoVehicle_(table.handlerFor(natives::kSetPedIntoVehicle)) {}
 
 Vehicles::~Vehicles() {
     // Машины здесь уже не убрать: разрушение приходится на выгрузку модуля, а
@@ -300,6 +301,18 @@ bool Vehicles::place(shared::VehicleId id, const shared::Vec3& position, float h
 
     spdlog::debug("машина {} переставлена в {:.1f} {:.1f} {:.1f}", id, position.x, position.y,
                   position.z);
+    return true;
+}
+
+bool Vehicles::seat(int ped, shared::VehicleId id, std::int8_t place) {
+    const int vehicle = handleFor(id);
+    if (ped == 0 || vehicle == 0 || intoVehicle_ == nullptr) {
+        return false;
+    }
+
+    invokeNative<void>(intoVehicle_, ped, vehicle, static_cast<int>(place));
+
+    spdlog::debug("персонаж посажен в машину {} на место {}", id, static_cast<int>(place));
     return true;
 }
 

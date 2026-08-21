@@ -137,6 +137,15 @@ public:
     /// же распоряжение. false — такой машины здесь нет.
     bool place(shared::VehicleId id, const shared::Vec3& position, float heading);
 
+    /// Сажает персонажа в машину по номеру сессии.
+    ///
+    /// Мгновенно, без подхода к двери: подойти и сесть игрок умеет сам, а
+    /// распоряжением сервера его сажают тогда, когда нужно именно посадить.
+    ///
+    /// false — такой машины здесь нет: она могла не дойти до нас вовсе или
+    /// уехать за горизонт между отправкой распоряжения и его приходом.
+    bool seat(int ped, shared::VehicleId id, std::int8_t place);
+
     /// Чинит машину, которую мы ведём: кузов, двигатель, стёкла, двери, колёса
     /// и вмятины.
     ///
@@ -260,6 +269,7 @@ private:
     NativeHandler setVelocity_ = nullptr;
     NativeHandler fix_ = nullptr;
     NativeHandler fixDeformation_ = nullptr;
+    NativeHandler intoVehicle_ = nullptr;
 
     /// Когда шёл прошлый кадр, по игровому времени.
     ///

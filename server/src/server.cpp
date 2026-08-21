@@ -1228,6 +1228,14 @@ void Server::teleported(const Player& player, const shared::Vec3& position) {
     sendTo(player.peer, teleport);
 }
 
+void Server::seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) {
+    shared::PlayerIntoVehicle message;
+    message.vehicle = vehicle;
+    message.seat = seat;
+
+    sendTo(player.peer, message);
+}
+
 void Server::kicked(const Player& player, std::string_view reason) {
     spdlog::info("игрок {} выгнан: {}", player.nickname,
                  reason.empty() ? std::string_view{"без объяснения"} : reason);

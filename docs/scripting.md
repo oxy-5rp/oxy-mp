@@ -543,6 +543,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | Одежда и аксессуары | `setClothes`, `setProp`, `clearProp` |
 | `alt.Object` | Предметы сессии: заводятся, стоят, убираются |
 | `alt.Blip` | Метки на карте: игрок их видит, значок и цвет доходят |
+| `player.setIntoVehicle` | Просьбой ему самому: персонаж живёт в его игре |
 | `vehicle.pos`, `vehicle.repair` | Просьбой ведущему: машина живёт в игре у него |
 | `player.kick` | Причина уходит игроку до разрыва |
 
@@ -553,7 +554,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 `WebSocketClient`, `alt.Resource`, `player.ip`, `player.ping`.
 
 **Говорит один раз в журнал и не бросает:** обвесы машины, `playAnimation`,
-`attachTo`, `setIntoVehicle`, одежда из наборов DLC.
+`attachTo`, одежда из наборов DLC.
 
 Разница между этими двумя списками — главное, что стоит понять про отказы здесь,
 и она не в громкости, а в цене.

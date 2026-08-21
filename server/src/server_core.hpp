@@ -51,6 +51,9 @@ public:
     virtual void emitted(const Player& player, std::string_view name,
                          std::string_view payload) = 0;
 
+    /// Игрока следует посадить в машину: просьба ему самому.
+    virtual void seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) = 0;
+
     /// Игрока следует выгнать из сессии.
     virtual void kicked(const Player& player, std::string_view reason) = 0;
 
@@ -123,6 +126,8 @@ public:
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
     bool setModel(shared::PlayerId id, std::uint32_t model) override;
+    bool setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
+                        std::int8_t seat) override;
     bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
                     std::uint8_t texture, std::uint8_t palette) override;
     bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,

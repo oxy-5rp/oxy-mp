@@ -263,6 +263,9 @@ public:
     [[nodiscard]] std::vector<shared::BlipState> takeBlips();
     [[nodiscard]] std::vector<shared::BlipId> takeRemovedBlips();
 
+    /// Куда сервер велел сесть. Приходит только нам самим.
+    [[nodiscard]] std::vector<shared::PlayerIntoVehicle> takeSeats();
+
     /// Забирает пришедшие от сервера именованные события.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь
@@ -401,6 +404,7 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::PlayerIntoVehicle> seats_;
     std::vector<shared::ServerEvent> serverEvents_;
     std::vector<shared::VehicleAppearance> vehicleAppearances_;
 

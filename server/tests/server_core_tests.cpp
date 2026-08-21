@@ -48,6 +48,10 @@ public:
         sent.push_back(std::format("vehicle repair {}", id));
     }
 
+    void seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) override {
+        sent.push_back(std::format("seat {} {} {}", player.id, vehicle, seat));
+    }
+
     void kicked(const Player& player, std::string_view reason) override {
         sent.push_back(std::format("kick {} {}", player.id, reason));
     }
@@ -650,4 +654,29 @@ TEST_CASE("blips stop being handed out once the limit is reached", "[server][scr
     CHECK(session.core.createBlip(script::BlipInfo{}) != shared::kInvalidBlipId);
     CHECK(session.core.createBlip(script::BlipInfo{}) != shared::kInvalidBlipId);
     CHECK(session.core.createBlip(script::BlipInfo{}) == shared::kInvalidBlipId);
+}
+
+TEST_CASE("seating a player is a request, not a change in the registry", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    const shared::VehicleId id = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    REQUIRE(session.core.setIntoVehicle(player.id, id, shared::kNoSeat));
+
+    CHECK(session.sink.sent.back() ==
+          std::format("seat {} {} {}", player.id, id, static_cast<int>(shared::kNoSeat)));
+
+    // Место в реестре не проставляется: кто где сидит, сервер узнаёт из
+    // снимков. Записанное здесь разошлось бы с правдой до первого же снимка — а
+    // по ней сервер решает, кому вести машину.
+    CHECK(session.core.player(player.id)->vehicle == shared::kInvalidVehicleId);
+}
+
+TEST_CASE("seating into a vehicle that is gone changes nothing", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    CHECK_FALSE(session.core.setIntoVehicle(player.id, 1, shared::kNoSeat));
 }

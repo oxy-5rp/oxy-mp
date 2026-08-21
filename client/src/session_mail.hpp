@@ -218,6 +218,21 @@ public:
         return std::exchange(removedBlips_, {});
     }
 
+    /// Куда сервер велел сесть.
+    void deliverSeats(std::vector<shared::PlayerIntoVehicle> seats) {
+        if (seats.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        seats_.insert(seats_.end(), seats.begin(), seats.end());
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerIntoVehicle> takeSeats() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(seats_, {});
+    }
+
     /// Именованные события от сервера.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь они
@@ -422,6 +437,7 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::PlayerIntoVehicle> seats_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;
     std::optional<shared::PlayerAppearance> outgoingAppearance_;
