@@ -375,6 +375,12 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
     }
 
     if (!actions_.wanted || !actions_.wanted()) {
+        // Меню ввода не просит — значит клавиша игры. Ресурсам о ней говорится
+        // здесь, и только здесь: пока меню открыто, ввод принадлежит ему.
+        if (message.message != WM_CHAR && actions_.gameKey) {
+            actions_.gameKey(key, down);
+        }
+
         return false;
     }
 
@@ -471,6 +477,10 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     }
 
     if (!actions_.wanted || !actions_.wanted()) {
+        if (actions_.gameKey) {
+            actions_.gameKey(key, down);
+        }
+
         return false;
     }
 

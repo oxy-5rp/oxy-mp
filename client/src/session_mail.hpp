@@ -60,6 +60,32 @@ public:
         return std::exchange(outgoingDamage_, {});
     }
 
+    /// Клавиша, нажатая или отпущенная игроком.
+    ///
+    /// Кладёт её перехват ввода — он живёт в потоке слоя интерфейса, — а
+    /// забирает игровой поток. Через почту, а не прямым вызовом, и это не
+    /// формальность: обработчик ресурса зовёт нативы, а нативы игра принимает
+    /// только из своего потока. Позови мы скриптовую машину прямо из перехвата,
+    /// первый же `alt.on('keydown')` с нативом внутри уронил бы игру.
+    ///
+    /// Событиями, а не состоянием: нажатие и отпускание — действия, и потерять
+    /// их нельзя. Потерянное отпускание оставило бы клавишу «зажатой» навсегда,
+    /// и `alt.isKeyDown` врал бы до конца сессии.
+    struct KeyEvent {
+        std::uint32_t code = 0;
+        bool down = false;
+    };
+
+    void postKey(std::uint32_t code, bool down) {
+        const std::lock_guard guard{mutex_};
+        keys_.push_back(KeyEvent{.code = code, .down = down});
+    }
+
+    [[nodiscard]] std::vector<KeyEvent> takeKeys() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(keys_, {});
+    }
+
     /// Именованное событие серверу: нажатие в интерфейсе.
     ///
     /// Единственное, чем игра теперь просит сервер что-либо сделать. Раньше
@@ -550,6 +576,7 @@ private:
     std::vector<shared::ServerEvent> incomingEvents_;
     std::vector<ClientResource> clientResources_;
     std::vector<ViewEvent> viewEvents_;
+    std::vector<KeyEvent> keys_;
     ViewBridge viewBridge_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;

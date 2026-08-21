@@ -262,6 +262,7 @@ struct UiLayer::State {
     std::atomic<std::uint32_t> nextViewId{1};
 
     ViewEventHandler onViewEvent;
+    GameKeyHandler onGameKey;
 
     /// Находит окно по номеру. Зовётся под viewsMutex.
     [[nodiscard]] ResourceView* findView(std::uint32_t id) {
@@ -495,6 +496,15 @@ struct UiLayer::State {
         actions.console = [this] { menu->toggleConsole(); };
         actions.askExit = [this] { askExit(); };
         actions.exitNow = quit;
+
+        // Клавиши игры уходят клиентским половинам ресурсов. Обработчик
+        // спрашивается на каждое нажатие, а не запоминается: слой поднимается
+        // раньше сессии, и в мгновение установки перехвата его может не быть.
+        actions.gameKey = [this](unsigned key, bool down) {
+            if (onGameKey) {
+                onGameKey(key, down);
+            }
+        };
 
         input = MenuInput::install(game, *menuSurface.browser, std::move(actions), error);
 
@@ -758,6 +768,12 @@ void UiLayer::focusView(std::uint32_t view, bool focused) {
 
     state_->viewRequests.push_back(State::ViewRequest{
         .kind = State::ViewRequest::Kind::Focus, .view = view, .flag = focused});
+}
+
+void UiLayer::onGameKey(GameKeyHandler handler) {
+    if (state_ != nullptr) {
+        state_->onGameKey = std::move(handler);
+    }
 }
 
 void UiLayer::onViewEvent(ViewEventHandler handler) {

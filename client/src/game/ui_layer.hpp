@@ -110,6 +110,14 @@ public:
 
     void onViewEvent(ViewEventHandler handler);
 
+    /// Что делать с клавишей, дошедшей до игры.
+    ///
+    /// Зовётся из потока перехвата ввода, поэтому обработчик обязан только
+    /// переложить сказанное и уйти.
+    using GameKeyHandler = std::function<void(unsigned key, bool down)>;
+
+    void onGameKey(GameKeyHandler handler);
+
     /// Хозяйство слоя.
     ///
     /// Объявлено, но не раскрыто: определение живёт в исходнике вместе с

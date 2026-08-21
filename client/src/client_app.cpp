@@ -1276,6 +1276,12 @@ void run() {
                                        std::string_view arguments) {
                 mail.deliverViewEvent(view, std::string{name}, std::string{arguments});
             });
+
+            // Клавиши — тем же порядком и по той же причине: перехват ввода
+            // живёт в своём потоке, а обработчик ресурса зовёт нативы.
+            layer->onGameKey([&mail](unsigned key, bool down) {
+                mail.postKey(static_cast<std::uint32_t>(key), down);
+            });
         }
     }
 
