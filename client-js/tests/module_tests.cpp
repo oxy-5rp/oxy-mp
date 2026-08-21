@@ -671,17 +671,91 @@ TEST_CASE("a timer fires when the engine is pumped", "[client][js]") {
     CHECK(said("таймер сработал"));
 }
 
-TEST_CASE("synced meta from the server reaches the client", "[client][js]") {
+// Доводы события сверены с `@altv/types-client`, а не вспомянуты: у общих
+// метаданных это `globalSyncedMetaChange(key, value, oldValue)` — без сущности
+// вовсе. Прежде отсюда уходило `syncedMetaChange` с родом и номером впереди, и
+// обработчик, написанный под alt:V, получал строку «global» там, где ждал игрока.
+TEST_CASE("global synced meta arrives without an entity", "[client][js]") {
     // Метаданные приходят служебным событием, а не своим сообщением: событие
     // уже умеет ходить, а сообщение стоило бы номера в протоколе.
     REQUIRE(run("meta", "const alt = require('alt-client');\n"
-                        "alt.on('syncedMetaChange', (род, номер, ключ, что) =>\n"
-                        "    alt.log(`меняли ${род}:${номер}.${ключ} = ${что}`));\n"));
+                        "alt.on('globalSyncedMetaChange', (ключ, что, было) =>\n"
+                        "    alt.log(`меняли ${ключ} = ${что}, было ${было}`));\n"
+                        "alt.on('syncedMetaChange', () =>\n"
+                        "    alt.logError('общие метаданные ушли не тем событием'));\n"));
 
-    Engine::instance()->dispatchServerEvent(text("__oxymp:meta"),
-                                            bytes("[\"global\",0,\"погода\",\"дождь\"]"));
+    Engine::instance()->dispatchServerEvent(
+        text("__oxymp:meta"), bytes("[\"global\",0,\"погода\",\"ясно\",false]"));
+    Engine::instance()->dispatchServerEvent(
+        text("__oxymp:meta"), bytes("[\"global\",0,\"погода\",\"дождь\",false]"));
 
-    CHECK(said("меняли global:0.погода = дождь"));
+    // Прежнее значение приходит четвёртым доводом, и снимать его нужно до
+    // записи: после присваивания взять его будет уже неоткуда.
+    CHECK(said("меняли погода = ясно, было undefined"));
+    CHECK(said("меняли погода = дождь, было ясно"));
+}
+
+// `syncedMetaChange(entity, key, value, oldValue)` — сущность первым доводом, а
+// не род с номером. Режим ждёт именно её: он читает у неё имя, положение и
+// прочие метаданные, а по числу не прочтёт ничего.
+TEST_CASE("synced meta of a player arrives as the player himself", "[client][js]") {
+    Recorder& kept = recorder();
+    kept.selfId = 7;
+    kept.players = {{7, 111}, {9, 222}};
+    kept.names = {{7, "oxy"}, {9, "сосед"}};
+
+    REQUIRE(run("metaentity",
+                "const alt = require('alt-client');\n"
+                "alt.on('syncedMetaChange', (кто, ключ, что) =>\n"
+                "    alt.log(`${кто instanceof alt.Player} ${кто.id} ${кто.name} ${ключ}=${что}`));\n"));
+
+    Engine::instance()->dispatchServerEvent(
+        text("__oxymp:meta"), bytes("[\"player\",9,\"звание\",\"старший\",false]"));
+
+    CHECK(said("true 9 сосед звание=старший"));
+}
+
+// Потоковые метаданные у alt:V ходят своим событием. Хранятся они у нас в одном
+// месте с обычными и доходят одинаково, и различает их признак в посылке: не
+// различай мы их, режим, подписанный на оба события, считал бы каждое изменение
+// дважды.
+TEST_CASE("stream synced meta has an event of its own", "[client][js]") {
+    Recorder& kept = recorder();
+    kept.selfId = 1;
+    kept.players = {{1, 100}};
+    kept.names = {{1, "я"}};
+
+    REQUIRE(run("metastream",
+                "const alt = require('alt-client');\n"
+                "alt.on('streamSyncedMetaChange', (кто, ключ, что) =>\n"
+                "    alt.log(`потоковая ${кто.id}.${ключ}=${что}`));\n"
+                "alt.on('syncedMetaChange', () =>\n"
+                "    alt.logError('потоковая ушла обычным событием'));\n"));
+
+    Engine::instance()->dispatchServerEvent(
+        text("__oxymp:meta"), bytes("[\"player\",1,\"метка\",\"своя\",true]"));
+
+    CHECK(said("потоковая 1.метка=своя"));
+}
+
+// Сущности у клиента может не быть вовсе: предмет и кукла по номеру сессии ему
+// не известны, а игрок мог ещё не быть объявлен. Событие тогда не объявляется —
+// объявить его не с чем, а сущностью первым доводом alt:V обещает именно
+// сущность, а не число.
+TEST_CASE("synced meta of an entity the client does not know announces nothing",
+          "[client][js]") {
+    REQUIRE(run("metaunknown",
+                "const alt = require('alt-client');\n"
+                "alt.on('syncedMetaChange', () =>\n"
+                "    alt.logError('событие объявлено без сущности'));\n"
+                "alt.onServer('прочти', () => alt.log('машина жива'));\n"));
+
+    Engine::instance()->dispatchServerEvent(
+        text("__oxymp:meta"), bytes("[\"ped\",3,\"роль\",\"охранник\",false]"));
+    Engine::instance()->dispatchServerEvent(text("прочти"), bytes("[]"));
+
+    // Незнакомый род не уронил машину: следующее событие дошло как обычно.
+    CHECK(said("машина жива"));
 }
 
 TEST_CASE("global synced meta is readable after it arrives", "[client][js]") {

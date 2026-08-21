@@ -339,8 +339,34 @@
         return found;
     }
 
+    /// Сущность сессии по роду и номеру, какими их называет сервер.
+    ///
+    /// Берётся у `alt.entities` на каждый вызов, а не через `entities` ниже по
+    /// файлу: тот объявлен позже, и обработчик, стоящий выше, полагался бы на
+    /// порядок исполнения внутри файла.
+    ///
+    /// Пусто — сущности у клиента нет, и причин тому две, обе законные: род,
+    /// которого клиент по номеру сессии не знает (предмет, кукла), либо игрок, о
+    /// котором сервер ещё не объявил. Метаданные при этом всё равно
+    /// запоминаются: `getSyncedMeta` отдаст их, когда сущность появится.
+    function entityOf(kind, id) {
+        if (kind === 'player') {
+            return alt.entities.playerById(id);
+        }
+        if (kind === 'vehicle') {
+            return alt.entities.vehicleById(id);
+        }
+
+        return null;
+    }
+
     native.on(`server:${kSyncedMetaEvent}`, (payload) => {
-        const [kind, id, key, value] = decodeArgs(payload);
+        const [kind, id, key, value, streamed] = decodeArgs(payload);
+
+        // Прежнее значение снимается до записи: alt:V отдаёт его четвёртым
+        // доводом, и после присваивания взять его будет уже неоткуда.
+        const previous = syncedFor(kind, id).get(key);
+        const fresh = value === null ? undefined : value;
 
         if (value === null) {
             syncedFor(kind, id).delete(key);
@@ -351,7 +377,24 @@
         // Ресурсам сообщается так же, как в alt:V: изменение — это событие, а не
         // только новое значение. Режим, рисующий имя над головой, перерисовывает
         // его по нему, а не опросом каждый кадр.
-        fire('syncedMetaChange', [kind, id, key, value === null ? undefined : value]);
+        //
+        // Доводы сверены с `@altv/types-client`, а не вспомянуты:
+        // `syncedMetaChange(entity, key, value, oldValue)`, а у общих —
+        // `globalSyncedMetaChange(key, value, oldValue)` без сущности вовсе.
+        // Прежде отсюда уходили род и номер вместо сущности, и обработчик,
+        // написанный под alt:V, получал число там, где ждал игрока.
+        if (kind === 'global') {
+            fire('globalSyncedMetaChange', [key, fresh, previous]);
+            return;
+        }
+
+        const entity = entityOf(kind, id);
+        if (entity === null) {
+            return;
+        }
+
+        fire(streamed === true ? 'streamSyncedMetaChange' : 'syncedMetaChange',
+             [entity, key, fresh, previous]);
     });
 
     bridged.add(`server:${kSyncedMetaEvent}`);

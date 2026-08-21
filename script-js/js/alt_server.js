@@ -530,8 +530,15 @@
     ///
     /// Всем, а не одному владельцу: `syncedMeta` на то и synced, что её видит
     /// каждый. Клиент, знающий чужое имя над головой, узнаёт его отсюда.
-    function publishSynced(kind, id, key, value) {
-        const payload = encodeArgs([kind, id, key, value === undefined ? null : value]);
+    ///
+    /// Пятым едет род метаданных — обычные или потоковые. Хранятся они у нас в
+    /// одном месте и доходят одинаково, но события у alt:V для них разные:
+    /// `syncedMetaChange` и `streamSyncedMetaChange`. Не различай мы их здесь,
+    /// клиенту пришлось бы либо молчать об одном из двух, либо объявлять оба —
+    /// и режим, подписанный на оба, считал бы каждое изменение дважды.
+    function publishSynced(kind, id, key, value, streamed) {
+        const payload = encodeArgs([kind, id, key, value === undefined ? null : value,
+                                    streamed === true]);
 
         for (const player of native.players()) {
             native.emitClient(player, kSyncedMetaEvent, payload);
@@ -550,7 +557,12 @@
             const id = Number(where.slice(split + 1));
 
             for (const [key, value] of values) {
-                native.emitClient(player, kSyncedMetaEvent, encodeArgs([kind, id, key, value]));
+                // Вошедшему всё уходит обычной synced: потоковую от обычной у
+                // накопленного не отличить — хранятся они в одном месте. Разница
+                // сказывается только на живом изменении, а его вошедший
+                // получит уже с признаком.
+                native.emitClient(player, kSyncedMetaEvent,
+                                  encodeArgs([kind, id, key, value, false]));
             }
         }
     }
@@ -595,7 +607,7 @@
             /// сказано здесь.
             setStreamSyncedMeta(key, value) {
                 syncedFor(kind, this.id).set(key, value);
-                publishSynced(kind, this.id, key, value);
+                publishSynced(kind, this.id, key, value, true);
             },
             getStreamSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
         });
