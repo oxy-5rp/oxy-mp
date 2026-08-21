@@ -22,6 +22,7 @@
 #include "game/script_tick.hpp"
 #include "game/story.hpp"
 #include "game/streaming.hpp"
+#include "game/streaming_files.hpp"
 #include "game/text_entry.hpp"
 #include "game/vehicles.hpp"
 #include "game/window.hpp"
@@ -107,6 +108,7 @@ public:
                                                              SessionMail& mail,
                                                              UiFeed& feed,
                                                              game::FileDevice* files,
+                                                             game::StreamingFiles* streamed,
                                                              std::string& error);
 
     ~GameSession();
@@ -130,7 +132,8 @@ public:
 private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
-                LocalState& localState, SessionMail& mail, UiFeed& feed, game::FileDevice* files);
+                LocalState& localState, SessionMail& mail, UiFeed& feed, game::FileDevice* files,
+                game::StreamingFiles* streamed);
 
     /// Вешает отложенные подмены файлов и один раз проверяет, что игра берёт
     /// файлы у нас.
@@ -273,6 +276,11 @@ private:
     /// Своё устройство файловой системы игры. Может не быть: клиент работает и
     /// без него, просто ничего не подменяет.
     game::FileDevice* files_ = nullptr;
+
+    /// Объявление игре своих моделей и текстур. Идёт следом за устройством и
+    /// только после него: объявляемый файл игра тут же открывает, а открыть его
+    /// может лишь через устройство.
+    game::StreamingFiles* streamed_ = nullptr;
 
     /// Чтение файлов средствами самой игры — им и проверяется, что подмена
     /// дошла до неё, а не осталась нашей выдумкой.

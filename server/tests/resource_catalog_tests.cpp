@@ -328,3 +328,34 @@ TEST_CASE("the alt:V dependency list is read", "[server][resources]") {
     REQUIRE(catalog.all().front().dependencies.size() == 2);
     CHECK(catalog.all().front().dependencies.front() == "core");
 }
+
+TEST_CASE("a resource that only hands out files needs no main") {
+    Sandbox sandbox;
+
+    // Так раздаются модели: каталог со `stream` внутри ничего не исполняет.
+    sandbox.write("cars/resource.toml", "type = 'js'\nclient-files = [ 'stream/amcj.yft' ]\n");
+    sandbox.write("cars/stream/amcj.yft", "RSC7");
+
+    ResourceCatalog catalog;
+    const std::vector<std::string> complaints = catalog.load(sandbox.root(), {"cars"});
+
+    CHECK(complaints.empty());
+    REQUIRE(catalog.all().size() == 1);
+
+    const ScriptResource& resource = catalog.all().front();
+
+    CHECK(resource.main.empty());
+    CHECK(resource.clientFiles == std::vector<std::string>{"stream/amcj.yft"});
+}
+
+TEST_CASE("a resource with nothing to run and nothing to hand out is a mistake") {
+    Sandbox sandbox;
+
+    sandbox.write("empty/resource.toml", "type = 'js'\n");
+
+    ResourceCatalog catalog;
+    const std::vector<std::string> complaints = catalog.load(sandbox.root(), {"empty"});
+
+    CHECK_FALSE(complaints.empty());
+    CHECK(catalog.all().empty());
+}

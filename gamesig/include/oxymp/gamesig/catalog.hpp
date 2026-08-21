@@ -609,6 +609,25 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
         .resolution = Resolution::Address,
         .expectedMatches = 1,
     },
+
+    // Стриминг: как объявить игре свой файл модели или текстуры.
+    //
+    // Подмены файлов для своих машин мало. Файл, лежащий в нашем устройстве,
+    // игра прочтёт — но искать его не станет: чтобы она узнала машину по имени,
+    // файл нужно объявить её стримингу, а описания — её загрузчику данных.
+    //
+    // Сигнатуры взяты у CitizenFX (`components/gta-streaming-five`) и проверены
+    // пробой на нашей сборке: совпадение ровно одно.
+    {
+        .id = "streaming_register_raw_file",
+        .description = "streaming::RegisterRawStreamingFile — объявляет игре отдельно лежащий "
+                       "файл: путь, имя, под которым его искать. Тем же вызовом свои модели "
+                       "объявляет и CitizenFX.",
+        .pattern = "B2 01 48 8B CD 45 8A E0 4D 0F 45 F9 E8",
+        .offset = -0x25,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
 });
 
 } // namespace detail

@@ -1338,22 +1338,32 @@ void Server::startResources() {
     ensureRuntimes();
 
     for (const ScriptResource& resource : catalog_.all()) {
-        // Машина выбирается по типу. О ресурсе на языке, которого сервер не
-        // понимает, говорится прямо, а не молчанием: молча пропущенный игровой
-        // режим хозяин будет искать долго.
-        Runtime* const runtime = runtimeFor(resource.type);
+        // Ресурс без main ничего не исполняет — он только раздаёт файлы.
+        //
+        // Так устроены ресурсы с моделями: каталог со `stream` внутри и
+        // описаниями рядом. Машину для него искать незачем, а найдя, она
+        // отказала бы «не задан main» — то есть пожаловалась бы на то, что не
+        // поломка.
+        const bool runs = !resource.main.empty();
 
-        if (runtime == nullptr) {
-            spdlog::error("ресурс \"{}\": машины для типа \"{}\" в сервере нет", resource.name,
-                          resource.type);
-            continue;
-        }
+        if (runs) {
+            // Машина выбирается по типу. О ресурсе на языке, которого сервер не
+            // понимает, говорится прямо, а не молчанием: молча пропущенный
+            // игровой режим хозяин будет искать долго.
+            Runtime* const runtime = runtimeFor(resource.type);
 
-        std::string error;
+            if (runtime == nullptr) {
+                spdlog::error("ресурс \"{}\": машины для типа \"{}\" в сервере нет",
+                              resource.name, resource.type);
+                continue;
+            }
 
-        if (!runtime->start(resource, error)) {
-            spdlog::error("ресурс \"{}\" не поднят: {}", resource.name, error);
-            continue;
+            std::string error;
+
+            if (!runtime->start(resource, error)) {
+                spdlog::error("ресурс \"{}\" не поднят: {}", resource.name, error);
+                continue;
+            }
         }
 
         // Клиентская половина уходит в раздачу под составным именем: одинаково
@@ -1365,8 +1375,13 @@ void Server::startResources() {
             }
         }
 
-        spdlog::info("ресурс \"{}\" поднят ({}), клиенту файлов: {}", resource.name, resource.type,
-                     resource.clientFiles.size());
+        if (runs) {
+            spdlog::info("ресурс \"{}\" поднят ({}), клиенту файлов: {}", resource.name,
+                         resource.type, resource.clientFiles.size());
+        } else {
+            spdlog::info("ресурс \"{}\" раздаёт файлы, не исполняя ничего: {}", resource.name,
+                         resource.clientFiles.size());
+        }
     }
 }
 

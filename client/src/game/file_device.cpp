@@ -15,6 +15,26 @@
 namespace oxymp::client::game {
 namespace {
 
+/// Заголовок ресурса игры — того, чем являются модели, текстуры и всё, что
+/// подгружается стримингом.
+///
+/// Простой файл от ресурса игра отличает по первым четырём байтам, а из
+/// следующих двенадцати узнаёт, сколько под него отвести памяти обычной и
+/// видео. Не ответив ей этого, мы получим отказ подгрузки: файл прочтётся,
+/// но игра не будет знать, куда его класть.
+struct ResourceHeader {
+    std::uint32_t magic = 0;
+    std::uint32_t version = 0;
+
+    /// Раскладка страниц. Имена — те же, что у CitizenFX: `flag1` в
+    /// `rage::ResourceFlags` это виртуальные страницы, `flag2` — физические.
+    std::uint32_t virtualPages = 0;
+    std::uint32_t physicalPages = 0;
+};
+
+/// «RSC7» младшим байтом вперёд.
+constexpr std::uint32_t kResourceMagic = 0x37435352;
+
 /// Что игра отдаёт вместо описателя, когда открыть не вышло.
 ///
 /// Все единицы, а не ноль: ноль у неё — законный описатель. Ошибка здесь тихая
@@ -261,12 +281,55 @@ struct FileDevice::Device {
 
     virtual bool WriteFull(std::uint64_t, void*, std::uint32_t) { return false; }
 
-    /// Признак ресурса игры: её собственный формат со своей версией.
+    /// Версия ресурса игры и раскладка его страниц.
     ///
-    /// Ноль означает «обычный файл», и для описаний и настроек это правда.
-    /// Модели и текстуры — ресурсы, и им это придётся считать из заголовка;
-    /// до них дело ещё не дошло.
-    virtual std::int32_t GetResourceVersion(const char*, void*) { return 0; }
+    /// Ноль означает «обычный файл» — и для описаний, настроек и разметки это
+    /// правда. Модели же и текстуры ресурсы, и без этого ответа игра их не
+    /// подгрузит: прочесть прочтёт, а сколько отвести памяти, знать не будет.
+    ///
+    /// Читается из первых шестнадцати байт самого файла: игра кладёт туда
+    /// метку, версию и число страниц. Так же поступает и CitizenFX
+    /// (`VFSRagePackfile::ExtensionCtl`).
+    virtual std::int32_t GetResourceVersion(const char* fileName, void* flags) {
+        auto* const out = static_cast<std::uint32_t*>(flags);
+
+        if (out != nullptr) {
+            out[0] = 0;
+            out[1] = 0;
+        }
+
+        const std::filesystem::path* const source = find(fileName);
+        if (source == nullptr) {
+            return 0;
+        }
+
+        const HANDLE handle =
+            ::CreateFileW(source->c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                          FILE_ATTRIBUTE_NORMAL, nullptr);
+
+        if (handle == INVALID_HANDLE_VALUE) {
+            return 0;
+        }
+
+        ResourceHeader header{};
+        DWORD read = 0;
+
+        const bool got = ::ReadFile(handle, &header, sizeof(header), &read, nullptr) != 0 &&
+                         read == sizeof(header);
+
+        ::CloseHandle(handle);
+
+        if (!got || header.magic != kResourceMagic) {
+            return 0;
+        }
+
+        if (out != nullptr) {
+            out[0] = header.virtualPages;
+            out[1] = header.physicalPages;
+        }
+
+        return static_cast<std::int32_t>(header.version);
+    }
 
     virtual std::int32_t m_yy() { return 0; }
     virtual std::int32_t m_yz(void*) { return 0; }

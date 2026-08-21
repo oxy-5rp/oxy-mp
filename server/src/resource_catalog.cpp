@@ -251,8 +251,21 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
             continue;
         }
 
-        if (resource.main.empty()) {
-            complaints.push_back(std::format("\"{}\": не сказано, что запускать (main)", name));
+        // Ресурс без main — законный ресурс, а не описка.
+        //
+        // Так раздаются модели: каталог со `stream` внутри ничего не исполняет,
+        // он только отдаёт файлы. Так же устроено и у alt:V, и требовать от
+        // такого ресурса пустой скрипт значило бы заставлять хозяина сервера
+        // класть файл ради того, чтобы его не запускали.
+        //
+        // А вот ресурс, которому нечего ни запустить, ни раздать, — это уже
+        // описка: он не делает ничего, и сказать об этом стоит.
+        if (resource.main.empty() && resource.clientFiles.empty() &&
+            resource.clientMain.empty()) {
+            complaints.push_back(
+                std::format("\"{}\": ресурсу нечего ни запустить (main), ни раздать "
+                            "(client-files)",
+                            name));
             continue;
         }
 

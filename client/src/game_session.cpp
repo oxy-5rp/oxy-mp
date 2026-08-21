@@ -111,7 +111,8 @@ bool pressedOnce(int key) {
 GameSession::GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
-                         UiFeed& feed, game::FileDevice* files)
+                         UiFeed& feed, game::FileDevice* files,
+                         game::StreamingFiles* streamed)
     : natives_(table),
       settings_(std::move(settings)),
       status_(status),
@@ -126,6 +127,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       world_(table),
       frontend_(table),
       files_(files),
+      streamed_(streamed),
       gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
@@ -153,6 +155,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  const RemoteRoster& roster,
                                                  LocalState& localState, SessionMail& mail,
                                                  UiFeed& feed, game::FileDevice* files,
+                                                 game::StreamingFiles* streamed,
                                                  std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
@@ -166,7 +169,8 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     }
 
     std::unique_ptr<GameSession> session{new GameSession{
-        addresses, table, std::move(settings), status, roster, localState, mail, feed, files}};
+        addresses, table, std::move(settings), status, roster, localState, mail, feed, files,
+        streamed}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -304,7 +308,16 @@ void GameSession::serveFiles() {
     // выделяет память её собственным аллокатором, а он у неё потоковый и в
     // чужих потоках попросту отсутствует. Вызов оттуда роняет игру внутри неё
     // самой — на разыменовании нуля в переходнике, достающем аллокатор.
-    if (files_->pump() == 0 || filesChecked_) {
+    const std::size_t mounted = files_->pump();
+
+    // Объявление стримингу — строго следом, и порядок этот обязателен:
+    // объявляемый файл игра тут же открывает, чтобы узнать его размер и
+    // раскладку страниц, а открыть его она может только через наше устройство.
+    if (streamed_ != nullptr) {
+        streamed_->pump();
+    }
+
+    if (mounted == 0 || filesChecked_) {
         return;
     }
 

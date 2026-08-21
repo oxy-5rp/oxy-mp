@@ -14,6 +14,7 @@
 #include "game/environment.hpp"
 #include "game/file_device.hpp"
 #include "game/file_system.hpp"
+#include "game/streaming_files.hpp"
 #include "game/focus_pause.hpp"
 #include "game/hook.hpp"
 #include "game/intro.hpp"
@@ -562,6 +563,32 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
     spdlog::info("файловая система игры доступна: {} — {} байт", kProbe, size);
 }
 
+/// Имя файла, если он лежит в каталоге моделей ресурса, — иначе пусто.
+///
+/// Имена ресурсов приходят составными: «ресурс/путь/к/файлу». Нас занимает
+/// ровно один вид — «ресурс/stream/имя»: так лежат модели и текстуры и у alt:V,
+/// и у FiveM, и договорённость эта старше нас обоих.
+///
+/// Вложенных каталогов внутри `stream` не бывает и быть не должно: игра ищет
+/// модель по имени, а не по пути, и два одинаковых имени в разных подкаталогах
+/// означали бы, что одна из моделей молча не найдётся.
+[[nodiscard]] std::string streamFileName(std::string_view resourceEntry) {
+    constexpr std::string_view kMarker = "/stream/";
+
+    const std::size_t marker = resourceEntry.find(kMarker);
+    if (marker == std::string_view::npos) {
+        return {};
+    }
+
+    const std::string_view tail = resourceEntry.substr(marker + kMarker.size());
+
+    if (tail.empty() || tail.find('/') != std::string_view::npos) {
+        return {};
+    }
+
+    return std::string{tail};
+}
+
 /// Кладёт рядом с клиентом файл, которым устройство себя проверяет.
 ///
 /// Сама проверка идёт позже и не здесь: спросить у игры можно только из потока
@@ -884,6 +911,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               const RemoteRoster& roster, LocalState& localState,
                                               SessionMail& mail, UiFeed& feed,
                                               game::FileDevice* files,
+                                              game::StreamingFiles* streamed,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -926,7 +954,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, files, error);
+                                       localState, mail, feed, files, streamed, error);
     if (session == nullptr) {
         spdlog::error("игровая сессия не создана: {}", error);
     }
@@ -1257,6 +1285,11 @@ void run() {
     // его каждым кадром, а разрушается всё здесь в обратном порядке объявления.
     std::unique_ptr<game::FileDevice> fileDevice;
 
+    // Вторая половина того же: отданный файл нужно ещё и объявить стримингу,
+    // иначе игра его не найдёт — она ищет не по путям, а по имени в своём
+    // списке подгружаемого.
+    std::unique_ptr<game::StreamingFiles> streamedFiles;
+
     std::unique_ptr<GameSession> session;
 
     if (engine != nullptr && hooksReady && probeNatives(*engine)) {
@@ -1280,12 +1313,19 @@ void run() {
             prepareFileDeviceProbe(*fileDevice);
         }
 
+        std::string streamingError;
+        streamedFiles = game::StreamingFiles::create(*engine, streamingError);
+
+        if (streamedFiles == nullptr) {
+            spdlog::warn("объявлять игре свои модели нечем: {}", streamingError);
+        }
+
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
         // происходящее в игре покадрово, а мы отсюда уже нет.
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   fileDevice.get(), scriptStartup);
+                                   fileDevice.get(), streamedFiles.get(), scriptStartup);
     }
 
     // Соединения нет, пока его не попросят, и это главная перемена устройства
@@ -1468,6 +1508,30 @@ void run() {
             for (const ResourceCache::Ready& item :
                  resources.sync(active.address, active.port, *offered, report)) {
                 feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
+            }
+
+            // Модели и текстуры ресурса отдаются игре.
+            //
+            // Узнаются они по каталогу `stream` внутри ресурса — ровно так же,
+            // как у alt:V и FiveM. Класть их куда-то ещё режим волен, но тогда
+            // это будут просто файлы: `stream` — то место, о котором обе стороны
+            // договорились без лишних объявлений.
+            if (fileDevice != nullptr) {
+                for (const shared::ResourceEntry& entry : *offered) {
+                    const std::string streamed = streamFileName(entry.name);
+                    if (streamed.empty()) {
+                        continue;
+                    }
+
+                    const std::string gamePath = std::format("oxymp:/stream/{}", streamed);
+
+                    fileDevice->serve(gamePath, resources.resourceRoot() / entry.name);
+                    fileDevice->mount("oxymp:/");
+
+                    if (streamedFiles != nullptr) {
+                        streamedFiles->add(gamePath, streamed);
+                    }
+                }
             }
 
             // Клиентские половины ресурсов уезжают в игровой поток.

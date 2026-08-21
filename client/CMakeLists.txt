@@ -74,6 +74,7 @@ if(WIN32)
         src/game/script_startup.cpp
         src/game/story.cpp
         src/game/streaming.cpp
+        src/game/streaming_files.cpp
         src/game/script_tick.cpp
         src/game/text_entry.cpp
         src/game/ui_layer.cpp
