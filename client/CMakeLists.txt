@@ -63,6 +63,7 @@ if(WIN32)
         src/game/network_bail.cpp
         src/game/network_game.cpp
         src/game/objects.cpp
+        src/game/peds.cpp
         src/game/nameplates.cpp
         src/game/online_map.cpp
         src/game/overlay_renderer.cpp

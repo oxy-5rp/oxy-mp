@@ -141,6 +141,29 @@ struct ObjectInfo {
     std::int32_t dimension = kDefaultDimension;
 };
 
+/// Что скрипт знает о прохожем.
+///
+/// Прохожий — кукла, которую ставит сервер: она стоит там, где её поставили, и
+/// сама не делает ничего. Тем и отличается от игрока, у которого есть хозяин, и
+/// от машины, у которой есть ведущий.
+struct PedInfo {
+    shared::PedId id = shared::kInvalidPedId;
+    std::uint32_t model = 0;
+
+    shared::Vec3 position;
+    shared::Vec3 rotation;
+
+    std::uint16_t health = 200;
+    std::uint16_t maxHealth = 200;
+    std::uint16_t armour = 0;
+
+    /// Хеш оружия в руках. Ноль — безоружный.
+    std::uint32_t weapon = 0;
+
+    /// В каком слое мира он стоит. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
+};
+
 /// Что скрипт знает о метке на карте.
 ///
 /// Состав взят у alt:V поле в поле: режим, написанный под него, задаёт ровно
@@ -509,6 +532,34 @@ public:
 
     /// Переставляет предмет в другой слой мира. false — предмета уже нет.
     virtual bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) = 0;
+
+    // --- Прохожие --------------------------------------------------------------
+
+    [[nodiscard]] virtual std::vector<PedInfo> peds() const = 0;
+    [[nodiscard]] virtual std::optional<PedInfo> ped(shared::PedId id) const = 0;
+
+    /// Ставит прохожего. kInvalidPedId — отказ: предел исчерпан или модель
+    /// негодная.
+    ///
+    /// Номер в переданном описании не читается: его назначает сервер.
+    [[nodiscard]] virtual shared::PedId createPed(const PedInfo& ped) = 0;
+
+    /// Правит прохожего целиком: место, поворот, здоровье, броню, оружие.
+    ///
+    /// Целиком, а не по полю, по той же причине, что и у метки: ресурс правит
+    /// куклу редко и сразу помногу, а поле за полем означало бы по сообщению на
+    /// каждое.
+    ///
+    /// Модель здесь не меняется: смена модели — не правка, а новое тело.
+    /// Названная другой, она молча не примется.
+    ///
+    /// false — прохожего уже нет.
+    virtual bool updatePed(shared::PedId id, const PedInfo& ped) = 0;
+
+    virtual bool removePed(shared::PedId id) = 0;
+
+    /// Переставляет прохожего в другой слой мира. false — его уже нет.
+    virtual bool setPedDimension(shared::PedId id, std::int32_t dimension) = 0;
 
     // --- Метки на карте --------------------------------------------------------
 

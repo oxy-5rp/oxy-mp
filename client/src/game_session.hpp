@@ -19,6 +19,7 @@
 #include "game/network_bail.hpp"
 #include "game/network_game.hpp"
 #include "game/objects.hpp"
+#include "game/peds.hpp"
 #include "game/online_map.hpp"
 #include "game/player.hpp"
 #include "game/remote_players.hpp"
@@ -387,6 +388,11 @@ private:
     /// Предметы, расставленные в мире. Ни от кого не зависят: у них нет ведущего
     /// и они не двигаются — оттого и стоят особняком от машин и людей.
     game::Objects objects_;
+
+    /// Прохожие: куклы, поставленные сервером. Отдельно от чужих игроков, потому
+    /// что за куклой не стоит живой человек — её не нужно ни догонять снимками,
+    /// ни сглаживать.
+    game::Peds peds_;
     game::Nameplates nameplates_;
 
     game::SessionState sessionState_;

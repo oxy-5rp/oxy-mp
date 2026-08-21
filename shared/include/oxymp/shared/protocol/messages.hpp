@@ -1412,6 +1412,57 @@ struct PlayerAnimation {
     [[nodiscard]] static PlayerAnimation read(ByteReader& reader);
 };
 
+/// Номер прохожего в сессии.
+using PedId = std::uint32_t;
+
+/// Прохожего нет. Ноль, как у машин и предметов: счётчик начинается с единицы.
+inline constexpr PedId kInvalidPedId = 0;
+
+/// Прохожий: кукла, которую ставит сервер.
+///
+/// Одним сообщением и на «заведи», и на «поправь» — как метка на карте. Разницы
+/// получателю нет, а нам не нужно помнить, знает он уже об этом прохожем или
+/// нет.
+///
+/// Ведущего у прохожего нет, и это решение, а не пробел. Прохожий здесь стоит
+/// там, где его поставили: он не ходит, не убегает от выстрелов и не садится за
+/// руль. Выдай мы ему ведущего — пришлось бы повторить всё устройство машин, а
+/// вместе с ним и его цену. Понадобится ходящий — это будет отдельная работа с
+/// отдельным решением, а не поле, дописанное сюда.
+struct PedState {
+    static constexpr MessageId kId = MessageId::PedState;
+
+    PedId id = kInvalidPedId;
+    std::uint32_t model = 0;
+
+    Vec3 position;
+
+    /// Поворот по трём осям в градусах, порядок игры (2).
+    Vec3 rotation;
+
+    std::uint16_t health = 200;
+    std::uint16_t maxHealth = 200;
+    std::uint16_t armour = 0;
+
+    /// Хеш оружия в руках. Ноль — безоружный.
+    std::uint32_t weapon = 0;
+
+    [[nodiscard]] bool operator==(const PedState& other) const = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PedState read(ByteReader& reader);
+};
+
+/// Прохожего больше нет — или он ушёл из виду.
+struct PedRemoved {
+    static constexpr MessageId kId = MessageId::PedRemoved;
+
+    PedId id = kInvalidPedId;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PedRemoved read(ByteReader& reader);
+};
+
 /// Какого рода сущность сессии.
 ///
 /// Понадобился он привязке: та связывает две сущности, и род у них может быть
@@ -1429,6 +1480,7 @@ enum class EntityKind : std::uint8_t {
     Player = 1,
     Vehicle = 2,
     Object = 3,
+    Ped = 4,
 };
 
 /// Сущность привязана к другой — или отвязана.

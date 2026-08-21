@@ -13,6 +13,7 @@ add_executable(oxymp_server_tests
     world_clock_tests.cpp
     ../src/config_file.cpp
     ../src/object_directory.cpp
+    ../src/ped_directory.cpp
     ../src/resource_catalog.cpp
     ../src/player_registry.cpp
     ../src/server_core.cpp

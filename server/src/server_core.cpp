@@ -109,6 +109,37 @@ namespace {
     return appearance;
 }
 
+/// Прохожий, каким его знает скрипт.
+[[nodiscard]] script::PedInfo describe(const PedDirectory::Ped& ped) {
+    return script::PedInfo{
+        .id = ped.state.id,
+        .model = ped.state.model,
+        .position = ped.state.position,
+        .rotation = ped.state.rotation,
+        .health = ped.state.health,
+        .maxHealth = ped.state.maxHealth,
+        .armour = ped.state.armour,
+        .weapon = ped.state.weapon,
+        .dimension = ped.dimension,
+    };
+}
+
+/// Он же, каким его понимает протокол.
+///
+/// Номер сюда не переносится нарочно: назначает его сервер, и позволить скрипту
+/// его подставить значило бы разрешить кукле стать другой куклой.
+[[nodiscard]] shared::PedState describe(const script::PedInfo& ped) {
+    return shared::PedState{
+        .model = ped.model,
+        .position = ped.position,
+        .rotation = ped.rotation,
+        .health = ped.health,
+        .maxHealth = ped.maxHealth,
+        .armour = ped.armour,
+        .weapon = ped.weapon,
+    };
+}
+
 /// Привязка, какой её знает скрипт.
 [[nodiscard]] script::AttachmentInfo describe(const shared::EntityAttachment& attachment) {
     return script::AttachmentInfo{
@@ -273,11 +304,11 @@ namespace {
 } // namespace
 
 ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles,
-                       ObjectDirectory& objects, BlipDirectory& blips, MarkerDirectory& markers,
-                       CheckpointDirectory& checkpoints, AttachmentDirectory& attachments,
-                       WorldClock& world, const Config& config, script::Events& events,
-                       CoreSink& sink) noexcept
-    : players_(&players), vehicles_(&vehicles), objects_(&objects), blips_(&blips),
+                       ObjectDirectory& objects, PedDirectory& peds, BlipDirectory& blips,
+                       MarkerDirectory& markers, CheckpointDirectory& checkpoints,
+                       AttachmentDirectory& attachments, WorldClock& world, const Config& config,
+                       script::Events& events, CoreSink& sink) noexcept
+    : players_(&players), vehicles_(&vehicles), objects_(&objects), peds_(&peds), blips_(&blips),
       markers_(&markers), checkpoints_(&checkpoints), attachments_(&attachments), world_(&world),
       config_(&config), events_(&events), sink_(&sink) {}
 
@@ -713,6 +744,8 @@ bool ServerCore::exists(script::EntityRef entity) const {
         return vehicles_->find(entity.id) != nullptr;
     case shared::EntityKind::Object:
         return objects_->find(entity.id) != nullptr;
+    case shared::EntityKind::Ped:
+        return peds_->find(entity.id) != nullptr;
     case shared::EntityKind::None:
         break;
     }
@@ -799,6 +832,70 @@ bool ServerCore::removeObject(shared::ObjectId id) {
     forgetAttachments(AttachmentDirectory::Ref{.kind = shared::EntityKind::Object, .id = id});
 
     sink_->objectRemoved(id);
+    return true;
+}
+
+// --- Прохожие ---------------------------------------------------------------
+
+std::vector<script::PedInfo> ServerCore::peds() const {
+    std::vector<script::PedInfo> everyone;
+    everyone.reserve(peds_->size());
+
+    for (const auto& [id, ped] : peds_->all()) {
+        everyone.push_back(describe(ped));
+    }
+
+    return everyone;
+}
+
+std::optional<script::PedInfo> ServerCore::ped(shared::PedId id) const {
+    const PedDirectory::Ped* const found = peds_->find(id);
+    return found == nullptr ? std::nullopt : std::optional{describe(*found)};
+}
+
+shared::PedId ServerCore::createPed(const script::PedInfo& ped) {
+    const shared::PedId id = peds_->add(describe(ped), config_->maxPeds);
+    if (id == shared::kInvalidPedId) {
+        return shared::kInvalidPedId;
+    }
+
+    (void)peds_->setDimension(id, ped.dimension);
+    sink_->pedChanged(id);
+
+    return id;
+}
+
+bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
+    if (!peds_->update(id, describe(ped))) {
+        return false;
+    }
+
+    (void)peds_->setDimension(id, ped.dimension);
+    sink_->pedChanged(id);
+
+    return true;
+}
+
+bool ServerCore::removePed(shared::PedId id) {
+    if (!peds_->remove(id)) {
+        return false;
+    }
+
+    forgetAttachments(AttachmentDirectory::Ref{.kind = shared::EntityKind::Ped, .id = id});
+
+    sink_->pedRemoved(id);
+    return true;
+}
+
+bool ServerCore::setPedDimension(shared::PedId id, std::int32_t dimension) {
+    if (!peds_->setDimension(id, dimension)) {
+        return false;
+    }
+
+    // Сказать нужно и здесь: слой мира решает, кому прохожего видно, а раздача
+    // сверяет слои на своём такте. Без повода она сделает это не раньше, чем
+    // игрок пройдёт полметра, — и всё это время кукла будет видна не тем.
+    sink_->pedChanged(id);
     return true;
 }
 

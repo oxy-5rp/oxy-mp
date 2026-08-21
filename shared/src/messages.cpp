@@ -19,6 +19,8 @@ namespace {
         return EntityKind::Vehicle;
     case EntityKind::Object:
         return EntityKind::Object;
+    case EntityKind::Ped:
+        return EntityKind::Ped;
     case EntityKind::None:
         break;
     }
@@ -924,6 +926,40 @@ PlayerAnimation PlayerAnimation::read(ByteReader& reader) {
     return message;
 }
 
+void PedState::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeU32(model);
+    writer.writeVec3(position);
+    writer.writeVec3(rotation);
+    writer.writeU16(health);
+    writer.writeU16(maxHealth);
+    writer.writeU16(armour);
+    writer.writeU32(weapon);
+}
+
+PedState PedState::read(ByteReader& reader) {
+    PedState message;
+    message.id = reader.readU32();
+    message.model = reader.readU32();
+    message.position = reader.readVec3();
+    message.rotation = reader.readVec3();
+    message.health = reader.readU16();
+    message.maxHealth = reader.readU16();
+    message.armour = reader.readU16();
+    message.weapon = reader.readU32();
+    return message;
+}
+
+void PedRemoved::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+}
+
+PedRemoved PedRemoved::read(ByteReader& reader) {
+    PedRemoved message;
+    message.id = reader.readU32();
+    return message;
+}
+
 void EntityAttachment::write(ByteWriter& writer) const {
     writer.writeU8(static_cast<std::uint8_t>(kind));
     writer.writeU32(id);
@@ -1015,6 +1051,8 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::CheckpointRemoved:
     case MessageId::PlayerAnimation:
     case MessageId::EntityAttachment:
+    case MessageId::PedState:
+    case MessageId::PedRemoved:
         return static_cast<MessageId>(packet.front());
     }
 

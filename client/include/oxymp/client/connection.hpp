@@ -267,6 +267,13 @@ public:
     ///
     /// Расстоянием их не отбирает сервер: у обоих своё поле видимости, и
     /// считает его тот, кто рисует.
+    /// Прохожие, о которых объявил сервер, и те, кого он убрал.
+    ///
+    /// Одним списком на «заведи» и «поправь»: сообщение у них одно, и разбирать
+    /// его надвое здесь незачем — знает ли клиент эту куклу, решает он сам.
+    [[nodiscard]] std::vector<shared::PedState> takePeds();
+    [[nodiscard]] std::vector<shared::PedId> takeRemovedPeds();
+
     /// Привязки сущностей, присланные сервером.
     ///
     /// Состояние, а не события, но забираются они списком: за один такт может
@@ -427,6 +434,8 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::PedState> peds_;
+    std::vector<shared::PedId> removedPeds_;
     std::vector<shared::EntityAttachment> attachments_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;

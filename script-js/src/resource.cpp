@@ -345,6 +345,15 @@ void Resource::setVehicleShape(v8::Local<v8::FunctionTemplate> value) {
     vehicleShape_.Reset(setup_->isolate(), value);
 }
 
+v8::Local<v8::FunctionTemplate> Resource::pedShape() const {
+    return pedShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
+                               : pedShape_.Get(setup_->isolate());
+}
+
+void Resource::setPedShape(v8::Local<v8::FunctionTemplate> value) {
+    pedShape_.Reset(setup_->isolate(), value);
+}
+
 void Resource::setObjectShape(v8::Local<v8::FunctionTemplate> value) {
     objectShape_.Reset(setup_->isolate(), value);
 }

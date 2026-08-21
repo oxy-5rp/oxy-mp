@@ -57,6 +57,9 @@ public:
         sent.push_back(std::format("attach {} {}", static_cast<int>(entity.kind), entity.id));
     }
 
+    void pedChanged(shared::PedId id) override { sent.push_back(std::format("ped {}", id)); }
+    void pedRemoved(shared::PedId id) override { sent.push_back(std::format("ped- {}", id)); }
+
     void seated(const Player& player, shared::VehicleId vehicle, std::int8_t seat) override {
         sent.push_back(std::format("seat {} {} {}", player.id, vehicle, seat));
     }
@@ -172,9 +175,10 @@ struct Session {
     script::Events events;
     FakeSink sink;
 
+    PedDirectory peds;
     AttachmentDirectory attachments;
-    ServerCore core{players,     vehicles, objects, blips,  markers, checkpoints,
-                    attachments, world,    config,  events, sink};
+    ServerCore core{players,      vehicles,     objects, peds,    blips,  markers,
+                    checkpoints,  attachments,  world,   config,  events, sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
         players.add(peer, std::move(nickname), 0);
@@ -966,4 +970,122 @@ TEST_CASE("detaching what hangs on nothing changes nothing", "[server][script]")
     CHECK(std::ranges::none_of(session.sink.sent, [](const std::string& line) {
         return line.starts_with("attach");
     }));
+}
+
+// --- Прохожие ----------------------------------------------------------------
+
+namespace {
+
+/// Кукла у начала координат: модель и здоровье, остального проверкам не нужно.
+script::PedInfo standing(std::uint32_t model) {
+    script::PedInfo ped;
+    ped.model = model;
+    ped.position = shared::Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+    return ped;
+}
+
+} // namespace
+
+TEST_CASE("a ped keeps the id the server gave it", "[server][script]") {
+    Session session;
+
+    const shared::PedId id = session.core.createPed(standing(0x9C9EFFD8));
+    REQUIRE(id != shared::kInvalidPedId);
+
+    const std::optional<script::PedInfo> got = session.core.ped(id);
+    REQUIRE(got.has_value());
+
+    CHECK(got->id == id);
+    CHECK(got->model == 0x9C9EFFD8);
+    CHECK(got->position.x == 1.0F);
+
+    CHECK(std::ranges::count(session.sink.sent, std::format("ped {}", id)) == 1);
+}
+
+TEST_CASE("a ped without a model is refused", "[server][script]") {
+    Session session;
+
+    // Отказ, а не пустая кукла: модель нулём — это не прохожий, и показать его
+    // будет нечем.
+    CHECK(session.core.createPed(standing(0)) == shared::kInvalidPedId);
+    CHECK(session.core.peds().empty());
+}
+
+TEST_CASE("a ped is healed and armed whole, not field by field", "[server][script]") {
+    Session session;
+
+    const shared::PedId id = session.core.createPed(standing(0x9C9EFFD8));
+    REQUIRE(id != shared::kInvalidPedId);
+
+    script::PedInfo changed = *session.core.ped(id);
+    changed.health = 150;
+    changed.armour = 50;
+    changed.weapon = 0x1B06D571;
+
+    REQUIRE(session.core.updatePed(id, changed));
+
+    const std::optional<script::PedInfo> got = session.core.ped(id);
+    REQUIRE(got.has_value());
+
+    CHECK(got->health == 150);
+    CHECK(got->armour == 50);
+    CHECK(got->weapon == 0x1B06D571);
+
+    // Второй раз: заведение и правка объявляются одинаково — получателю разницы
+    // нет, а нам не нужно помнить, знает он уже об этой кукле или нет.
+    CHECK(std::ranges::count(session.sink.sent, std::format("ped {}", id)) == 2);
+}
+
+// Смена модели — это не правка, а новое тело: получателю пришлось бы убрать
+// куклу и завести заново, а он об этом не узнает. Поэтому модель не меняется.
+TEST_CASE("a ped cannot be turned into a different model", "[server][script]") {
+    Session session;
+
+    const shared::PedId id = session.core.createPed(standing(0x9C9EFFD8));
+    REQUIRE(id != shared::kInvalidPedId);
+
+    script::PedInfo changed = *session.core.ped(id);
+    changed.model = 0xDEADBEEF;
+
+    REQUIRE(session.core.updatePed(id, changed));
+    CHECK(session.core.ped(id)->model == 0x9C9EFFD8);
+}
+
+TEST_CASE("a ped that is gone refuses both editing and removing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.updatePed(1, standing(0x9C9EFFD8)));
+    CHECK_FALSE(session.core.removePed(1));
+    CHECK_FALSE(session.core.setPedDimension(1, 5));
+    CHECK_FALSE(session.core.ped(1).has_value());
+}
+
+TEST_CASE("removing a ped loosens what hung on it", "[server][script]") {
+    Session session;
+
+    const shared::PedId guard = session.core.createPed(standing(0x9C9EFFD8));
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+
+    REQUIRE(guard != shared::kInvalidPedId);
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    script::AttachmentInfo worn;
+    worn.target = script::EntityRef{.kind = shared::EntityKind::Ped, .id = guard};
+
+    REQUIRE(session.core.attachEntity(
+        script::EntityRef{.kind = shared::EntityKind::Object, .id = box}, worn));
+
+    REQUIRE(session.core.removePed(guard));
+
+    CHECK_FALSE(session.core
+                    .attachment(script::EntityRef{.kind = shared::EntityKind::Object, .id = box})
+                    .has_value());
+}
+
+TEST_CASE("the session refuses more peds than it allows", "[server][script]") {
+    Session session;
+    session.config.maxPeds = 1;
+
+    CHECK(session.core.createPed(standing(0x9C9EFFD8)) != shared::kInvalidPedId);
+    CHECK(session.core.createPed(standing(0x9C9EFFD8)) == shared::kInvalidPedId);
 }

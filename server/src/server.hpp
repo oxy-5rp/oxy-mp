@@ -8,6 +8,7 @@
 #include "resource_store.hpp"
 #include "drawn_directory.hpp"
 #include "object_directory.hpp"
+#include "ped_directory.hpp"
 #include "runtime.hpp"
 #include "server_core.hpp"
 #include "state_bundler.hpp"
@@ -121,6 +122,11 @@ private:
     void attachmentChanged(AttachmentDirectory::Ref entity) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
+    void pedChanged(shared::PedId id) override;
+    void pedRemoved(shared::PedId id) override;
+
+    /// Раздаёт прохожих по расстоянию — тем же порядком, что и предметы.
+    void streamPeds();
     /// Рассказывает вошедшему обо всём нарисованном, что ему видно: о метках
     /// на карте, о маркерах и о контрольных точках.
     void sendDrawnTo(net::PeerId peer, std::int32_t dimension);
@@ -287,6 +293,10 @@ private:
     /// Что расставлено в мире руками.
     ObjectDirectory objects_;
 
+    /// Прохожие: куклы, поставленные сервером. Отдельно от предметов, потому что
+    /// у них есть здоровье, броня и оружие, а у ящика — только место.
+    PedDirectory peds_;
+
     /// Что нарисовано на карте.
     BlipDirectory blips_;
 
@@ -334,8 +344,8 @@ private:
     ///
     /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
     /// и быть не должно — они разошлись бы с настоящими молча.
-    ServerCore core_{players_,     vehicles_, objects_, blips_,  markers_, checkpoints_,
-                     attachments_, world_,    config_,  events_, *this};
+    ServerCore core_{players_,  vehicles_, objects_,     peds_,   blips_,   markers_,
+                     checkpoints_, attachments_, world_, config_, events_, *this};
 
     /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
     ResourceCatalog catalog_;

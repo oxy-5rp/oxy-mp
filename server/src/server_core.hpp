@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "drawn_directory.hpp"
 #include "object_directory.hpp"
+#include "ped_directory.hpp"
 #include "player_registry.hpp"
 #include "vehicle_directory.hpp"
 #include "world_clock.hpp"
@@ -103,6 +104,15 @@ public:
     virtual void objectAdded(shared::ObjectId id) = 0;
     virtual void objectRemoved(shared::ObjectId id) = 0;
 
+    /// Прохожий заведён или поправлен.
+    ///
+    /// Одним поводом на то и другое: получателю разницы нет, а раздача сама
+    /// решит, кому о нём рассказывать, — прохожие отбираются расстоянием, как
+    /// машины и предметы.
+    virtual void pedChanged(shared::PedId id) = 0;
+
+    virtual void pedRemoved(shared::PedId id) = 0;
+
     /// Метка заведена или поправлена — рассказать о ней всем, кто её видит.
     ///
     /// Одним поводом на то и другое: получателю разницы нет, а нам не нужно
@@ -157,9 +167,10 @@ protected:
 class ServerCore final : public script::Core {
 public:
     ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
-               BlipDirectory& blips, MarkerDirectory& markers, CheckpointDirectory& checkpoints,
-               AttachmentDirectory& attachments, WorldClock& world, const Config& config,
-               script::Events& events, CoreSink& sink) noexcept;
+               PedDirectory& peds, BlipDirectory& blips, MarkerDirectory& markers,
+               CheckpointDirectory& checkpoints, AttachmentDirectory& attachments,
+               WorldClock& world, const Config& config, script::Events& events,
+               CoreSink& sink) noexcept;
 
     // --- Игроки ----------------------------------------------------------------
 
@@ -232,6 +243,16 @@ public:
     bool removeObject(shared::ObjectId id) override;
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;
 
+    // --- Прохожие --------------------------------------------------------------
+
+    [[nodiscard]] std::vector<script::PedInfo> peds() const override;
+    [[nodiscard]] std::optional<script::PedInfo> ped(shared::PedId id) const override;
+
+    [[nodiscard]] shared::PedId createPed(const script::PedInfo& ped) override;
+    bool updatePed(shared::PedId id, const script::PedInfo& ped) override;
+    bool removePed(shared::PedId id) override;
+    bool setPedDimension(shared::PedId id, std::int32_t dimension) override;
+
     [[nodiscard]] std::vector<script::BlipInfo> blips() const override;
     [[nodiscard]] std::optional<script::BlipInfo> blip(shared::BlipId id) const override;
     [[nodiscard]] shared::BlipId createBlip(const script::BlipInfo& blip) override;
@@ -270,6 +291,7 @@ private:
     PlayerRegistry* players_ = nullptr;
     VehicleDirectory* vehicles_ = nullptr;
     ObjectDirectory* objects_ = nullptr;
+    PedDirectory* peds_ = nullptr;
     BlipDirectory* blips_ = nullptr;
     MarkerDirectory* markers_ = nullptr;
     CheckpointDirectory* checkpoints_ = nullptr;

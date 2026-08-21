@@ -475,6 +475,18 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PedState:
+        if (const auto ped = shared::decode<shared::PedState>(packet)) {
+            peds_.push_back(*ped);
+        }
+        return;
+
+    case shared::MessageId::PedRemoved:
+        if (const auto removed = shared::decode<shared::PedRemoved>(packet)) {
+            removedPeds_.push_back(removed->id);
+        }
+        return;
+
     case shared::MessageId::EntityAttachment:
         if (auto attachment = shared::decode<shared::EntityAttachment>(packet)) {
             attachments_.push_back(std::move(*attachment));
@@ -814,6 +826,14 @@ std::vector<shared::PlayerAnimation> Connection::takeAnimations() {
     return std::exchange(animations_, {});
 }
 
+std::vector<shared::PedState> Connection::takePeds() {
+    return std::exchange(peds_, {});
+}
+
+std::vector<shared::PedId> Connection::takeRemovedPeds() {
+    return std::exchange(removedPeds_, {});
+}
+
 std::vector<shared::EntityAttachment> Connection::takeAttachments() {
     return std::exchange(attachments_, {});
 }
@@ -983,6 +1003,8 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     removedBlips_.clear();
     animations_.clear();
     attachments_.clear();
+    peds_.clear();
+    removedPeds_.clear();
     seats_.clear();
     loadout_.reset();
     health_.reset();

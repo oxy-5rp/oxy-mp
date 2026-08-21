@@ -550,6 +550,9 @@ inline constexpr std::uint64_t kNewLoadSceneStop = 0X6981C3213B841071;
 /// SET_PED_ARMOUR, канонический хеш 0XCEA04D83135264CC.
 inline constexpr std::uint64_t kSetPedArmour = 0X10A676E622A468AA;
 
+/// SET_PED_MAX_HEALTH, канонический хеш 0XF5F6378C4F3419D3.
+inline constexpr std::uint64_t kSetPedMaxHealth = 0X36A20106D0B42723;
+
 /// CLEAR_PED_BLOOD_DAMAGE, канонический хеш 0X8FE22675A5A45817.
 inline constexpr std::uint64_t kClearPedBloodDamage = 0X8EA9C5E0178372E1;
 

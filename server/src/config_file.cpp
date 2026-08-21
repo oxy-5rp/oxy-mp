@@ -380,6 +380,8 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
             understood = number(value, config.maxVehicles);
         } else if (key == "maxobjects") {
             understood = number(value, config.maxObjects);
+        } else if (key == "maxpeds") {
+            understood = number(value, config.maxPeds);
         } else if (key == "maxblips") {
             understood = number(value, config.maxBlips);
         } else if (key == "maxmarkers") {

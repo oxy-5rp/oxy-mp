@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <set>
 #include <thread>
 #include <iostream>
 #include <memory>
@@ -101,11 +102,27 @@ struct Drawn {
     std::size_t attachments = 0;
     std::size_t detachments = 0;
 
+    /// Сколько прохожих сервер объявил и сколько сейчас на виду.
+    ///
+    /// Второе число меньше первого, когда куклу поправили: заведение и правка
+    /// приходят одним сообщением, и первое число считает оба.
+    std::size_t pedMessages = 0;
+    std::set<oxymp::shared::PedId> peds;
+
     void collect(oxymp::client::Connection& connection) {
         blips += connection.takeBlips().size();
         markers += connection.takeMarkers().size();
         checkpoints += connection.takeCheckpoints().size();
         animations += connection.takeAnimations().size();
+
+        for (const auto& ped : connection.takePeds()) {
+            ++pedMessages;
+            peds.insert(ped.id);
+        }
+
+        for (const oxymp::shared::PedId id : connection.takeRemovedPeds()) {
+            peds.erase(id);
+        }
 
         for (const auto& attachment : connection.takeAttachments()) {
             ++attachments;
@@ -442,6 +459,9 @@ int main(int argc, char** argv) {
 
                 spdlog::info("  привязок {}, из них отвязок {}", drawn.attachments,
                              drawn.detachments);
+
+                spdlog::info("  о прохожих сказано {} раз, на виду {}", drawn.pedMessages,
+                             drawn.peds.size());
 
                 // Главное доказательство работы мультиплеера: мы видим, где
                 // сейчас находятся другие игроки, и их положение меняется.

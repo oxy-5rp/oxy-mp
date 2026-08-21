@@ -8,6 +8,7 @@ add_executable(oxymp_server
     src/server.cpp
     src/server_core.cpp
     src/object_directory.cpp
+    src/ped_directory.cpp
     src/vehicle_directory.cpp
     src/world_clock.cpp
 )

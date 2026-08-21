@@ -170,6 +170,7 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         reassignVehicles();
         streamVehicles();
         streamObjects();
+        streamPeds();
         broadcastWorld();
         reviveDead();
 
@@ -913,6 +914,76 @@ void Server::streamObjects() {
             sendTo(peer, removed);
 
             it = player.streamedObjects.erase(it);
+        }
+    }
+}
+
+void Server::streamPeds() {
+    const float appears = config_.streamDistance * config_.streamDistance;
+    const float vanishes = appears * 1.21F;
+
+    for (auto& [peer, player] : players_) {
+        for (const auto& [id, ped] : peds_.all()) {
+            const bool nearby =
+                shared::distanceSquared(player.position, ped.state.position) <= appears &&
+                script::dimensionsMeet(player.dimension, ped.dimension);
+
+            if (!nearby || player.streamedPeds.contains(id)) {
+                continue;
+            }
+
+            sendTo(peer, ped.state);
+            player.streamedPeds.insert(id);
+        }
+
+        for (auto it = player.streamedPeds.begin(); it != player.streamedPeds.end();) {
+            const PedDirectory::Ped* const ped = peds_.find(*it);
+
+            const bool keep =
+                ped != nullptr &&
+                shared::distanceSquared(player.position, ped->state.position) <= vanishes &&
+                script::dimensionsMeet(player.dimension, ped->dimension);
+
+            if (keep) {
+                ++it;
+                continue;
+            }
+
+            shared::PedRemoved removed;
+            removed.id = *it;
+            sendTo(peer, removed);
+
+            it = player.streamedPeds.erase(it);
+        }
+    }
+}
+
+void Server::pedChanged(shared::PedId id) {
+    const PedDirectory::Ped* const ped = peds_.find(id);
+    if (ped == nullptr) {
+        return;
+    }
+
+    // Только тем, кому прохожий уже объявлен. Остальным его объявит раздача — и
+    // объявит вместе с этим же состоянием: оно у прохожего одно, второго нет.
+    // Разослав его всем, мы завели бы куклу у того, кто до неё ещё не дошёл, а
+    // раздача потом объявила бы её второй раз.
+    for (const auto& [peer, player] : players_) {
+        if (player.streamedPeds.contains(id)) {
+            sendTo(peer, ped->state);
+        }
+    }
+}
+
+void Server::pedRemoved(shared::PedId id) {
+    shared::PedRemoved removed;
+    removed.id = id;
+
+    // Только тем, кто его видел: остальным нечего убирать, а сообщение о
+    // незнакомом номере они молча проглотят — и это тем более незачем.
+    for (auto& [peer, player] : players_) {
+        if (player.streamedPeds.erase(id) != 0) {
+            sendTo(peer, removed);
         }
     }
 }

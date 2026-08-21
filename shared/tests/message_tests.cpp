@@ -1201,3 +1201,42 @@ TEST_CASE("an attachment to a kind we do not know reads as detached", "[messages
 TEST_CASE("an attachment is recognised by its message id", "[messages]") {
     CHECK(peekMessageId(encode(EntityAttachment{})) == MessageId::EntityAttachment);
 }
+
+TEST_CASE("a ped survives the round trip", "[messages]") {
+    PedState sent;
+    sent.id = 4;
+    sent.model = 0x9C9EFFD8;
+    sent.position = Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+    sent.rotation = Vec3{.x = 0.0F, .y = 0.0F, .z = 90.0F};
+    sent.health = 150;
+    sent.maxHealth = 300;
+    sent.armour = 50;
+    sent.weapon = 0x1B06D571;
+
+    const auto got = decode<PedState>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(*got == sent);
+}
+
+TEST_CASE("peds are recognised by their message ids", "[messages]") {
+    CHECK(peekMessageId(encode(PedState{})) == MessageId::PedState);
+    CHECK(peekMessageId(encode(PedRemoved{})) == MessageId::PedRemoved);
+}
+
+// Прохожий стал четвёртым родом сущности, и род этот ходит по сети числом.
+// Приписав его в конец, мы не тронули номеров остальных трёх — а тронув, сломали
+// бы всякую уже отправленную привязку.
+TEST_CASE("a ped is a kind an attachment can name", "[messages]") {
+    EntityAttachment sent;
+    sent.kind = EntityKind::Object;
+    sent.id = 1;
+    sent.targetKind = EntityKind::Ped;
+    sent.target = 7;
+
+    const auto got = decode<EntityAttachment>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->targetKind == EntityKind::Ped);
+    CHECK(got->target == 7);
+}

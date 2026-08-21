@@ -971,6 +971,200 @@ void vehicleSetAppearance(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().setVehicleAppearance(*id, *look));
 }
 
+// --- Прохожие ---------------------------------------------------------------
+//
+// Мост плоский, как у картинок: кукла приходит и уходит объектом с полями, а не
+// сущностью с методами. Сущностью её делает слой alt:V, поверх этого.
+
+[[nodiscard]] std::optional<PedInfo> pedFromJs(v8::Local<v8::Context> context,
+                                               v8::Local<v8::Value> value) {
+    const std::optional<Fields> fields = fieldsOf(context, value);
+    if (!fields) {
+        return std::nullopt;
+    }
+
+    PedInfo ped;
+    ped.model = static_cast<std::uint32_t>(fields->number("model", 0.0));
+    ped.position = fields->point("position", {});
+    ped.rotation = fields->point("rotation", {});
+
+    // Две сотни — не наша выдумка, а здоровье прохожего у самой игры: столько же
+    // ставит и alt:V тому, кто о здоровье не сказал ничего.
+    ped.health = static_cast<std::uint16_t>(fields->number("health", 200.0));
+    ped.maxHealth = static_cast<std::uint16_t>(fields->number("maxHealth", 200.0));
+    ped.armour = static_cast<std::uint16_t>(fields->number("armour", 0.0));
+    ped.weapon = static_cast<std::uint32_t>(fields->number("weapon", 0.0));
+    ped.dimension = static_cast<std::int32_t>(fields->number("dimension", 0.0));
+
+    return ped;
+}
+
+/// Свойство прохожего, взятое из его снимка.
+///
+/// Снимок берётся заново на каждое обращение — по тому же правилу, что и у
+/// игрока с машиной: слой не хранит правду о мире, она лежит в реестре сервера.
+template<auto Field>
+void pedField(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PedInfo> ped = resourceOf(isolate).core().ped(*id);
+    if (!ped) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    if constexpr (std::is_same_v<std::decay_t<decltype((*ped).*Field)>, shared::Vec3>) {
+        info.GetReturnValue().Set(toJs(isolate->GetCurrentContext(), (*ped).*Field));
+    } else {
+        info.GetReturnValue().Set(static_cast<double>((*ped).*Field));
+    }
+}
+
+/// Правит одно число у прохожего, оставляя остальное как есть.
+///
+/// Свой сеттер у каждого поля — не роскошь, а необходимость, и стоила она часа
+/// поисков. Свойство заготовки, объявленное одним геттером, присваиванием не
+/// отказывает: V8 кладёт на его место обычное значение, и оно закрывает собой
+/// геттер навсегда. Снаружи это выглядит так, будто присваивание удалось —
+/// прочитанное обратно отдаёт новое число, — а до ядра оно не дошло вовсе.
+///
+/// Ловится это только сравнением с тем, что видит клиент, и потому не ловится
+/// почти никогда.
+template<auto Field>
+void setPedField(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                 const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+    const std::optional<std::int64_t> fresh = intFromJs(isolate->GetCurrentContext(), value);
+
+    if (!id || !fresh) {
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    // Читается заново, а не берётся у скрипта: правится одно поле, а ядру нужно
+    // описание целиком — остальное обязано остаться тем, что есть сейчас, а не
+    // тем, что было, когда скрипт в последний раз смотрел.
+    std::optional<PedInfo> ped = core.ped(*id);
+    if (!ped) {
+        return;
+    }
+
+    using FieldType = std::decay_t<decltype((*ped).*Field)>;
+    (*ped).*Field = static_cast<FieldType>(*fresh);
+
+    (void)core.updatePed(*id, *ped);
+}
+
+void pedValid(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+
+    info.GetReturnValue().Set(id.has_value() &&
+                              resourceOf(info.GetIsolate()).core().ped(*id).has_value());
+}
+
+/// Правит прохожего целиком: описание приходит объектом.
+///
+/// Целиком, а не по полю, потому что целиком его правит и ядро: тюнинг куклы —
+/// здоровье, броня, оружие — уходит клиентам одним сообщением. Собирает полное
+/// описание слой alt:V: он читает свойства обратно и подменяет названное.
+void pedUpdate(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+    if (!id) {
+        fail(isolate, "update зовётся у прохожего");
+        return;
+    }
+
+    const std::optional<PedInfo> ped =
+        info.Length() >= 1 ? pedFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!ped) {
+        fail(isolate, "update ждёт описание прохожего объектом");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().updatePed(*id, *ped));
+}
+
+void pedDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+    if (!id) {
+        fail(isolate, "destroy зовётся у прохожего");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().removePed(*id));
+}
+
+void setPedDimensionValue(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                          const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PedId> id = idOf<shared::PedId>(info.This());
+    const std::optional<std::int64_t> dimension =
+        intFromJs(isolate->GetCurrentContext(), value);
+
+    if (!id || !dimension) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setPedDimension(*id,
+                                                     static_cast<std::int32_t>(*dimension));
+}
+
+void peds(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    Resource& resource = resourceOf(isolate);
+
+    const std::vector<PedInfo> all = resource.core().peds();
+    const v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int>(all.size()));
+
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        (void)array->Set(context, static_cast<std::uint32_t>(i),
+                         wrapPed(resource, context, all[i].id));
+    }
+
+    info.GetReturnValue().Set(array);
+}
+
+void createPed(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<PedInfo> ped =
+        info.Length() >= 1 ? pedFromJs(context, info[0]) : std::nullopt;
+
+    if (!ped) {
+        fail(isolate, "createPed ждёт описание прохожего объектом");
+        return;
+    }
+
+    Resource& resource = resourceOf(isolate);
+    const shared::PedId id = resource.core().createPed(*ped);
+
+    if (id == shared::kInvalidPedId) {
+        // Пустота, а не исключение: отказ здесь — обычный ход дела (исчерпан
+        // предел кукол в сессии), и обрывать им скрипт незачем.
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(wrapPed(resource, context, id));
+}
+
 // --- Привязка сущностей -----------------------------------------------------
 //
 // Мост плоский, как и у картинок: род и номер отдельными доводами, остальное —
@@ -987,6 +1181,9 @@ void vehicleSetAppearance(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
     if (word == "object") {
         return shared::EntityKind::Object;
+    }
+    if (word == "ped") {
+        return shared::EntityKind::Ped;
     }
 
     return shared::EntityKind::None;
@@ -1698,6 +1895,32 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     return shape;
 }
 
+[[nodiscard]] v8::Local<v8::FunctionTemplate> buildPedShape(v8::Local<v8::Context> context) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::FunctionTemplate> shape = entityTemplate(isolate, "Ped");
+
+    addGetter(isolate, shape, "id", pedField<&PedInfo::id>);
+    addGetter(isolate, shape, "model", pedField<&PedInfo::model>);
+    addGetter(isolate, shape, "position", pedField<&PedInfo::position>);
+    addGetter(isolate, shape, "rotation", pedField<&PedInfo::rotation>);
+    addGetter(isolate, shape, "health", pedField<&PedInfo::health>,
+              setPedField<&PedInfo::health>);
+    addGetter(isolate, shape, "maxHealth", pedField<&PedInfo::maxHealth>,
+              setPedField<&PedInfo::maxHealth>);
+    addGetter(isolate, shape, "armour", pedField<&PedInfo::armour>,
+              setPedField<&PedInfo::armour>);
+    addGetter(isolate, shape, "weapon", pedField<&PedInfo::weapon>,
+              setPedField<&PedInfo::weapon>);
+    addGetter(isolate, shape, "dimension", pedField<&PedInfo::dimension>,
+              setPedDimensionValue);
+    addGetter(isolate, shape, "valid", pedValid);
+
+    addMethod(isolate, shape, "destroy", pedDestroy);
+    addMethod(isolate, shape, "update", pedUpdate);
+
+    return shape;
+}
+
 void addFunction(v8::Local<v8::Context> context, const v8::Local<v8::Object>& object,
                  std::string_view name, v8::FunctionCallback callback) {
     v8::Isolate* const isolate = context->GetIsolate();
@@ -1745,16 +1968,23 @@ v8::Local<v8::Value> wrapObject(Resource& resource, v8::Local<v8::Context> conte
     return instantiate(context, resource.objectShape(), static_cast<std::uint32_t>(id));
 }
 
+v8::Local<v8::Value> wrapPed(Resource& resource, v8::Local<v8::Context> context,
+                             shared::PedId id) {
+    return instantiate(context, resource.pedShape(), static_cast<std::uint32_t>(id));
+}
+
 void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     v8::Isolate* const isolate = context->GetIsolate();
 
     const v8::Local<v8::FunctionTemplate> playerShape = buildPlayerShape(context);
     const v8::Local<v8::FunctionTemplate> vehicleShape = buildVehicleShape(context);
     const v8::Local<v8::FunctionTemplate> objectShape = buildObjectShape(context);
+    const v8::Local<v8::FunctionTemplate> pedShape = buildPedShape(context);
 
     resource.setPlayerShape(playerShape);
     resource.setVehicleShape(vehicleShape);
     resource.setObjectShape(objectShape);
+    resource.setPedShape(pedShape);
 
     const v8::Local<v8::Object> oxymp = v8::Object::New(isolate);
 
@@ -1773,6 +2003,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createObject", createObject);
     addFunction(context, oxymp, "playAnimation", playAnimation);
     addFunction(context, oxymp, "clearTasks", clearTasks);
+    addFunction(context, oxymp, "peds", peds);
+    addFunction(context, oxymp, "createPed", createPed);
     addFunction(context, oxymp, "attachEntity", attachEntity);
     addFunction(context, oxymp, "detachEntity", detachEntity);
     addFunction(context, oxymp, "createBlip", createBlip);
@@ -1795,6 +2027,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
                      vehicleShape->GetFunction(context).ToLocalChecked());
     (void)oxymp->Set(context, toJs(isolate, "Object"),
                      objectShape->GetFunction(context).ToLocalChecked());
+    (void)oxymp->Set(context, toJs(isolate, "Ped"),
+                     pedShape->GetFunction(context).ToLocalChecked());
 
     // Имя ресурса — чтобы он мог собрать путь к своим файлам и назвать себя в
     // событии клиенту.

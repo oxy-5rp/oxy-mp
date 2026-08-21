@@ -22,6 +22,7 @@ public:
     std::vector<PlayerInfo> playerList;
     std::vector<VehicleInfo> vehicleList;
     std::vector<ObjectInfo> objectList;
+    std::vector<PedInfo> pedList;
     std::vector<BlipInfo> blipList;
     std::vector<MarkerInfo> markerList;
     std::vector<CheckpointInfo> checkpointList;
@@ -37,6 +38,7 @@ public:
 
     shared::VehicleId nextVehicleId = 1;
     shared::ObjectId nextObjectId = 1;
+    shared::PedId nextPedId = 1;
     shared::BlipId nextBlipId = 1;
     shared::MarkerId nextMarkerId = 1;
     shared::CheckpointId nextCheckpointId = 1;
@@ -56,6 +58,8 @@ public:
                    vehicleList.end();
         case shared::EntityKind::Object:
             return std::ranges::find(objectList, entity.id, &ObjectInfo::id) != objectList.end();
+        case shared::EntityKind::Ped:
+            return std::ranges::find(pedList, entity.id, &PedInfo::id) != pedList.end();
         case shared::EntityKind::None:
             break;
         }
@@ -315,6 +319,61 @@ public:
     [[nodiscard]] std::optional<AttachmentInfo> attachment(EntityRef entity) const override {
         const auto found = attachments.find(nameOf(entity));
         return found == attachments.end() ? std::nullopt : std::optional{found->second};
+    }
+
+    [[nodiscard]] std::vector<PedInfo> peds() const override { return pedList; }
+
+    [[nodiscard]] std::optional<PedInfo> ped(shared::PedId id) const override {
+        const auto it = std::ranges::find(pedList, id, &PedInfo::id);
+        return it == pedList.end() ? std::nullopt : std::optional{*it};
+    }
+
+    [[nodiscard]] shared::PedId createPed(const PedInfo& ped) override {
+        if (ped.model == 0) {
+            return shared::kInvalidPedId;
+        }
+
+        PedInfo info = ped;
+        info.id = nextPedId++;
+        pedList.push_back(info);
+
+        said.push_back(std::format("ped {}", info.id));
+        return info.id;
+    }
+
+    bool updatePed(shared::PedId id, const PedInfo& ped) override {
+        const auto it = std::ranges::find(pedList, id, &PedInfo::id);
+        if (it == pedList.end()) {
+            return false;
+        }
+
+        const std::uint32_t model = it->model;
+
+        *it = ped;
+        it->id = id;
+        it->model = model;
+
+        said.push_back(std::format("ped {}", id));
+        return true;
+    }
+
+    bool removePed(shared::PedId id) override {
+        if (std::erase_if(pedList, [id](const PedInfo& info) { return info.id == id; }) == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("ped- {}", id));
+        return true;
+    }
+
+    bool setPedDimension(shared::PedId id, std::int32_t dimension) override {
+        const auto it = std::ranges::find(pedList, id, &PedInfo::id);
+        if (it == pedList.end()) {
+            return false;
+        }
+
+        it->dimension = dimension;
+        return true;
     }
 
     [[nodiscard]] std::vector<ObjectInfo> objects() const override { return objectList; }

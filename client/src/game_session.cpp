@@ -144,6 +144,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       vehicles_(table),
       remotePlayers_(table, vehicles_),
       objects_(table),
+      peds_(table),
       nameplates_(table, hud_),
       sessionState_(addresses),
       networkGame_(addresses),
@@ -775,6 +776,11 @@ void GameSession::forgetDrawnOnLeaving() {
     // Отвязывать при этом нечего: тела, к которым они вели, к этому мгновению
     // уже разобраны вместе с сессией.
     attachments_.clear();
+
+    // Прохожие — тоже. Они приходят событиями, и событий этих после разрыва не
+    // будет никогда: куклы прежнего сервера остались бы стоять в мире
+    // следующего.
+    peds_.clear();
 }
 
 /// Сколько ждать движение, прежде чем забыть его.
@@ -836,6 +842,8 @@ void GameSession::applyAttachments(int ped) {
             return vehicles_.handleFor(id);
         case shared::EntityKind::Object:
             return objects_.handleFor(id);
+        case shared::EntityKind::Ped:
+            return peds_.handleFor(id);
         case shared::EntityKind::None:
             break;
         }
@@ -898,6 +906,18 @@ void GameSession::applyServerEvents(int ped) {
     for (const shared::CheckpointState& checkpoint : mail_.takeCheckpoints()) {
         checkpoints_.apply(checkpoint);
     }
+
+    // Прохожие: убранные раньше объявленных, по той же причине, что и у меток.
+    // Кукла, снятая и поставленная в одном такте, должна остаться поставленной.
+    for (const shared::PedId id : mail_.takeRemovedPeds()) {
+        peds_.remove(id);
+    }
+
+    for (const shared::PedState& state : mail_.takePeds()) {
+        peds_.apply(state);
+    }
+
+    peds_.sync();
 
     // Привязки: запоминаются здесь, накладываются ниже. Разделено потому, что
     // накладывать их приходится не тогда, когда о них сказали: тел может не быть

@@ -606,6 +606,7 @@
     const Player = native.Player;
     const Vehicle = native.Vehicle;
     const WorldObject = native.Object;
+    const Ped = native.Ped;
 
     /// Угол поворота у alt:V — вектор в радианах, у oxyMP — один угол в градусах.
     ///
@@ -634,6 +635,9 @@
         }
         if (entity instanceof WorldObject) {
             return 'object';
+        }
+        if (entity instanceof Ped) {
+            return 'ped';
         }
 
         return '';
@@ -1146,8 +1150,166 @@
         },
     });
 
+    // --- Прохожие ------------------------------------------------------------
+    //
+    // Кукла правится целиком: её состояние уходит клиентам одним сообщением.
+    // Отсюда тот же приём, что и у внешности машины, — прочитать целиком,
+    // поправить названное, записать целиком. Читается заново на каждое
+    // обращение: слой не хранит правду о мире.
+
+    /// Уборка куклы у ядра: своя, перекрытая ниже, зовёт её.
+    const coreDestroyPed = Ped.prototype.destroy;
+
+    /// Описание куклы, каким его понимает ядро.
+    function shapeOfPed(ped) {
+        return {
+            model: ped.model,
+            position: ped.position,
+            rotation: ped.rotation,
+            health: ped.health,
+            maxHealth: ped.maxHealth,
+            armour: ped.armour,
+            weapon: ped.weapon,
+            dimension: ped.dimension,
+        };
+    }
+
+    /// Правит куклу и отдаёт, удалось ли. Куклы уже нет — не удалось.
+    function reshapePed(ped, change) {
+        if (!ped.valid) {
+            return false;
+        }
+
+        const wanted = shapeOfPed(ped);
+        change(wanted);
+
+        return ped.update(wanted);
+    }
+
+    Object.defineProperties(Ped.prototype, {
+        pos: {
+            get() { return new shared.Vector3(this.position); },
+            set(value) {
+                const point = new shared.Vector3(value);
+                reshapePed(this, (wanted) => { wanted.position = point; });
+            },
+        },
+        rot: {
+            get() {
+                const turn = new shared.Vector3(this.rotation);
+                return new shared.Vector3(turn.x * (Math.PI / 180), turn.y * (Math.PI / 180),
+                                          turn.z * (Math.PI / 180));
+            },
+            set(value) {
+                // Поворот у alt:V в радианах, у нас в градусах — как и везде.
+                const turn = new shared.Vector3(value);
+                const degrees = new shared.Vector3(turn.x * (180 / Math.PI),
+                                                   turn.y * (180 / Math.PI),
+                                                   turn.z * (180 / Math.PI));
+
+                reshapePed(this, (wanted) => { wanted.rotation = degrees; });
+            },
+        },
+
+        // Здоровье, броня и оружие здесь не переопределяются: они есть у ядра
+        // под теми же именами и с сеттерами. Объяви мы их ещё и здесь, у
+        // прототипа вышла бы вторая пара, которую свойство самого объекта всё
+        // равно закроет собой, — и присваивание уходило бы в никуда.
+        currentWeapon: {
+            get() { return this.weapon ?? 0; },
+            set(value) { this.weapon = Number(value) || 0; },
+        },
+
+        /// У alt:V статичная кукла — та, у которой нет сетевого владельца и
+        /// которой сервер распоряжается целиком. У нас других не бывает: кукла
+        /// стоит там, где её поставили, и ведущего у неё нет.
+        isStaticEntity: {
+            get() { return true; },
+            set: unperformed('ped.isStaticEntity',
+                             'куклы у нас все статичные — ведущего у них нет'),
+        },
+
+        netOwner: { get() { return null; } },
+
+        toString: {
+            value() { return `Ped{ id: ${this.id} }`; },
+        },
+
+        /// Уборка куклы забирает с собой и её метаданные.
+        ///
+        /// Отдельным перекрытием, потому что события `pedDestroy` у нас нет:
+        /// куклу убирает один-единственный вызов, и цепляться больше не за что.
+        /// У игрока и машины для этого есть события, и там метаданные забываются
+        /// последним подписчиком — обработчик вправе прочесть их напоследок.
+        destroy: {
+            value() {
+                const id = this.id;
+                const gone = coreDestroyPed.call(this);
+
+                if (gone) {
+                    forget('ped', id);
+                }
+
+                return gone;
+            },
+        },
+    });
+
+    Object.defineProperties(Ped, {
+        all: { get() { return native.peds(); } },
+        count: { get() { return native.peds().length; } },
+        getByID: {
+            value(id) {
+                return native.peds().find((ped) => ped.id === id) ?? null;
+            },
+        },
+    });
+
+    /// `new alt.Ped(...)` — так кукол и заводят в alt:V.
+    ///
+    /// Посредником над классом ядра, а не своим классом, и по той же причине,
+    /// что и у машины: `instanceof alt.Ped` обязан узнавать кукол, пришедших из
+    /// ядра, — а они приходят его классом.
+    const ConstructiblePed = new Proxy(Ped, {
+        construct(target, args) {
+            const [model, position, rotation, streamingDistance, isStatic] = args;
+
+            // Поводы разные, и ключи у них разные: warnOnce молчит о втором
+            // поводе, если первый уже сказан под тем же именем, — а это два
+            // разных умолчания, и знать о них нужно про оба.
+            if (streamingDistance !== undefined) {
+                warnOnce('alt.Ped.streamingDistance',
+                         'своей дальности видимости у куклы нет — её раздаёт сервер по общей');
+            }
+
+            if (isStatic === false) {
+                warnOnce('alt.Ped.isStaticEntity',
+                         'нестатичных кукол у нас нет: ведущего им никто не назначает');
+            }
+
+            const hashed = typeof model === 'string' ? shared.hash(model) : model;
+            const turn = rotation === undefined
+                ? new shared.Vector3(0, 0, 0)
+                : new shared.Vector3(rotation);
+
+            const ped = native.createPed({
+                model: hashed,
+                position: new shared.Vector3(position),
+                rotation: new shared.Vector3(turn.x * (180 / Math.PI), turn.y * (180 / Math.PI),
+                                             turn.z * (180 / Math.PI)),
+            });
+
+            if (ped === null) {
+                throw new Error(`alt.Ped: кукла модели ${hashed} не поставилась`);
+            }
+
+            return ped;
+        },
+    });
+
     addMeta(Player, 'player');
     addMeta(Vehicle, 'vehicle');
+    addMeta(Ped, 'ped');
 
     // Привязка — всем трём родам: у alt:V она объявлена у Entity, а Entity здесь
     // нет вовсе. Общего предка у наших классов не завести: они приходят из ядра
@@ -1156,6 +1318,7 @@
     addAttach(Player, 'player');
     addAttach(Vehicle, 'vehicle');
     addAttach(WorldObject, 'object');
+    addAttach(Ped, 'ped');
 
     // Метаданные вышедшего игрока убираются последним подписчиком, а не первым:
     // событие объявляется до уборки нарочно (см. CLAUDE.md), и ресурс вправе
@@ -1373,7 +1536,7 @@
         //
         // Метки, зоны, чекпоинты, маркеры и голосовые каналы кладёт сюда
         // alt_objects.js — он исполняется следом и заменяет их настоящими.
-        Ped: absent('alt.Ped'),
+        Ped: ConstructiblePed,
         Object: ConstructibleObject,
 
         /// Сетевой предмет — тот, которым игроки могут двигать друг у друга.

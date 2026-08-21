@@ -241,6 +241,28 @@ public:
     ///
     /// Тем же порядком, что и метки: пришедшее либо заводится, либо
     /// поправляется, а убранное приходит отдельным списком.
+    void deliverPeds(std::vector<shared::PedState> peds, std::vector<shared::PedId> removed) {
+        if (peds.empty() && removed.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+
+        peds_.insert(peds_.end(), std::make_move_iterator(peds.begin()),
+                     std::make_move_iterator(peds.end()));
+        removedPeds_.insert(removedPeds_.end(), removed.begin(), removed.end());
+    }
+
+    [[nodiscard]] std::vector<shared::PedState> takePeds() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(peds_, {});
+    }
+
+    [[nodiscard]] std::vector<shared::PedId> takeRemovedPeds() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(removedPeds_, {});
+    }
+
     void deliverAttachments(std::vector<shared::EntityAttachment> attachments) {
         if (attachments.empty()) {
             return;
@@ -535,6 +557,8 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::PedState> peds_;
+    std::vector<shared::PedId> removedPeds_;
     std::vector<shared::EntityAttachment> attachments_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;
