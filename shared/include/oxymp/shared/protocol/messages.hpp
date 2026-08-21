@@ -1204,6 +1204,160 @@ struct BlipRemoved {
     [[nodiscard]] static BlipRemoved read(ByteReader& reader);
 };
 
+/// Номер маркера в сессии.
+using MarkerId = std::uint32_t;
+
+/// Маркера нет. Ноль, как и у меток: счётчик начинается с единицы.
+inline constexpr MarkerId kInvalidMarkerId = 0;
+
+/// Чем маркер отличается от такого же, но выключенного.
+///
+/// Признаки живут в сообщении битами, а в самой структуре — обычными
+/// логическими полями. Это не двоемыслие: битами их возит протокол, потому что
+/// четыре байта ради четырёх бит — расточительство, а читает и пишет их
+/// скриптовый слой, которому удобнее имена.
+enum class MarkerFlag : std::uint8_t {
+    Visible = 1U << 0U,
+    BobUpAndDown = 1U << 1U,
+    FaceCamera = 1U << 2U,
+    Rotate = 1U << 3U,
+};
+
+[[nodiscard]] constexpr bool has(std::uint8_t flags, MarkerFlag flag) noexcept {
+    return (flags & static_cast<std::uint8_t>(flag)) != 0;
+}
+
+/// Фигура, нарисованная в мире.
+///
+/// Состав взят у alt:V поле в поле — вплоть до того, что цвет здесь разложен на
+/// четыре байта, а не сложен в число: именно так его задаёт режим, и складывать
+/// его, чтобы разложить обратно у рисующего, незачем.
+///
+/// Маркер игра у себя не помнит. Его рисуют заново каждый кадр, и оттого он
+/// умеет то, чего не умеет ничто другое в мире: вертеться, качаться и
+/// поворачиваться к камере. Отсюда и признаки — это не украшения, а способ,
+/// которым режим объясняет, как фигуру рисовать.
+struct MarkerState {
+    static constexpr MessageId kId = MessageId::MarkerState;
+
+    MarkerId id = kInvalidMarkerId;
+
+    /// Какая это фигура. Числа игры, у alt:V они те же: ноль — конус, единица —
+    /// цилиндр, двадцать восьмое — шар.
+    std::uint8_t type = 0;
+
+    Vec3 position;
+
+    /// Поворот в градусах и направление, куда фигура смотрит.
+    ///
+    /// Оба сразу, хотя задают одно и то же, и это не наша прихоть: игра
+    /// принимает и то и другое одним вызовом, а какое из них подействует,
+    /// зависит от фигуры. Стрелке нужно направление, кольцу — поворот.
+    Vec3 rotation;
+    Vec3 direction;
+
+    /// Во сколько раз фигура крупнее обычной, по каждой оси.
+    Vec3 scale{1.0F, 1.0F, 1.0F};
+
+    std::uint8_t red = 255;
+    std::uint8_t green = 255;
+    std::uint8_t blue = 255;
+    std::uint8_t alpha = 255;
+
+    /// Рисовать ли фигуру вообще.
+    ///
+    /// Признаком, а не снятием маркера, потому что так это устроено у alt:V:
+    /// режим гасит и зажигает фигуру по ходу дела, а заводить её заново значило
+    /// бы выдавать ей новый номер и терять всё, что режим о ней помнит.
+    bool visible = true;
+
+    /// Качается ли фигура вверх-вниз, вертится ли и поворачивается ли к камере.
+    bool bobUpAndDown = false;
+    bool faceCamera = false;
+    bool rotate = false;
+
+    /// С какого расстояния фигуру видно. Ноль — с любого.
+    ///
+    /// Считает его тот, кто рисует, а не сервер, и это решение. Отбирай маркеры
+    /// сервер, каждый шаг игрока через границу видимости стоил бы сообщения
+    /// «заведи» или «убери»; маркер же весит полсотни байт, и раздать их все
+    /// разом дешевле, чем ходить туда-сюда.
+    float streamingDistance = 0.0F;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static MarkerState read(ByteReader& reader);
+};
+
+/// Маркера больше нет.
+struct MarkerRemoved {
+    static constexpr MessageId kId = MessageId::MarkerRemoved;
+
+    MarkerId id = kInvalidMarkerId;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static MarkerRemoved read(ByteReader& reader);
+};
+
+/// Номер контрольной точки в сессии.
+using CheckpointId = std::uint32_t;
+
+inline constexpr CheckpointId kInvalidCheckpointId = 0;
+
+/// Контрольная точка: столб света с иконкой внутри.
+///
+/// Состав, как и у маркера, взят у alt:V поле в поле. На сервере она вдобавок
+/// зона (Colshape) — вход и выход в неё считаются там же, где и во все прочие
+/// зоны, и об этом сообщении не знают вовсе. Здесь только то, что видно
+/// глазами.
+struct CheckpointState {
+    static constexpr MessageId kId = MessageId::CheckpointState;
+
+    CheckpointId id = kInvalidCheckpointId;
+
+    /// Какая это точка: со стрелкой, с флажком, кольцом. Числа игры.
+    std::uint8_t type = 0;
+
+    Vec3 position;
+
+    /// Куда показывает стрелка внутри столба — обычно к следующей точке.
+    ///
+    /// Точка в мире, а не направление: игра принимает именно её и разворачивает
+    /// стрелку сама.
+    Vec3 nextPosition;
+
+    float radius = 1.0F;
+    float height = 2.0F;
+
+    /// Цвет столба и цвет иконки внутри него — разные, и у alt:V тоже.
+    std::uint8_t red = 255;
+    std::uint8_t green = 255;
+    std::uint8_t blue = 255;
+    std::uint8_t alpha = 255;
+
+    std::uint8_t iconRed = 255;
+    std::uint8_t iconGreen = 255;
+    std::uint8_t iconBlue = 255;
+    std::uint8_t iconAlpha = 255;
+
+    bool visible = true;
+
+    /// С какого расстояния точку видно. Ноль — с любого.
+    float streamingDistance = 0.0F;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static CheckpointState read(ByteReader& reader);
+};
+
+/// Контрольной точки больше нет.
+struct CheckpointRemoved {
+    static constexpr MessageId kId = MessageId::CheckpointRemoved;
+
+    CheckpointId id = kInvalidCheckpointId;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static CheckpointRemoved read(ByteReader& reader);
+};
+
 /// Переставить машину. Только от сервера и только её ведущему.
 ///
 /// Ведущему, а не всем: машина живёт в игре у него, и переставить её может

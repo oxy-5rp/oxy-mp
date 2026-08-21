@@ -7,9 +7,9 @@
 //
 // Так, зона (Colshape) здесь работает целиком: сервер знает, где стоят игроки,
 // и считает вход и выход сам — обработчики enterColshape и leaveColshape
-// получают настоящие события, а не тишину. А метка (Blip) на сервере
-// заводится, живёт и отдаётся скрипту, но игрок её пока не увидит, и об этом
-// сказано в журнале.
+// получают настоящие события, а не тишину. Метка, маркер и контрольная точка
+// уходят к клиенту и рисуются им. Не показывается пока только голос: звука
+// oxyMP не передаёт вовсе, и об этом сказано в журнале.
 //
 // Заглушки, молчащие о том, что ничего не делают, были бы хуже отсутствия: их
 // ищут часами. Поэтому здесь их нет.
@@ -98,6 +98,17 @@
 
     // --- Зоны ----------------------------------------------------------------
 
+    /// Видят ли друг друга те, кто в этих слоях мира.
+    ///
+    /// То же правило, что и на сервере (`script/dimension.hpp`): либо слой один,
+    /// либо хоть один из двоих в общем. Повторено здесь, а не спрошено у ядра,
+    /// потому что зоны считаются в скрипте целиком — сервер о них не знает.
+    function meet(left, right) {
+        return left === right || left === shared.globalDimension ||
+               right === shared.globalDimension;
+    }
+
+
     /// Зона в мире: сервер сам следит, кто в неё вошёл и кто вышел.
     ///
     /// Работает по-настоящему, и это возможно ровно потому, что положения
@@ -130,7 +141,12 @@
         /// Сверяет своё содержимое с положением игроков. Зовётся раз в такт.
         refresh(players) {
             for (const player of players) {
-                const here = this.isPointIn(player.pos);
+                // Слой мира сверяется наравне с местом: две одинаковые квартиры,
+                // стоящие в одной точке, — это и есть измерения, и зона одной из
+                // них не вправе ловить гостя другой. Без этого вход в зону
+                // объявлялся бы всем, кто прошёл мимо в любом из слоёв.
+                const here = meet(player.dimension, this.dimension) &&
+                             this.isPointIn(player.pos);
                 const was = this.#inside.has(player.id);
 
                 if (here && !was) {
@@ -290,16 +306,96 @@
     /// Чекпоинт — это зона, которая вдобавок рисуется.
     ///
     /// Наследование от зоны не для стройности: у alt:V чекпоинт и правда даёт
-    /// события входа и выхода, и режимы пользуются именно ими. Работать они будут
-    /// целиком; невидимой пока остаётся только сама нарисованная фигура.
+    /// события входа и выхода, и режимы пользуются именно ими. Считаются они
+    /// здесь же, на сервере; рисует столб света игра у игрока.
+    ///
+    /// Доводов конструктор принимает два набора, и оба — от alt:V: короткий, с
+    /// точкой и цветом объектами, и длинный, россыпью чисел. Отличаются они
+    /// вторым доводом: точка — объект, число — начало длинного набора.
     class Checkpoint extends ColshapeCylinder {
-        constructor(checkpointType, x, y, z, radius, height, r, g, b, a) {
-            super(x, y, z, radius, height);
+        /// Номер точки у сервера. Ноль — ещё не заведена или уже убрана.
+        #serverId = 0;
 
-            this.checkpointType = checkpointType;
-            this.color = new shared.RGBA(r, g, b, a);
+        constructor(checkpointType, ...rest) {
+            const short = typeof rest[0] === 'object' && rest[0] !== null;
 
-            warnOnce('чекпоинт');
+            const point = short ? new shared.Vector3(rest[0]) : new shared.Vector3(rest[0],
+                                                                                   rest[1],
+                                                                                   rest[2]);
+            const radius = short ? rest[1] : rest[3];
+            const height = short ? rest[2] : rest[4];
+
+            super(point.x, point.y, point.z, radius, height);
+
+            this.checkpointType = Number(checkpointType) || 0;
+
+            this.color = short ? new shared.RGBA(rest[3])
+                               : new shared.RGBA(rest[5], rest[6], rest[7], rest[8]);
+
+            // Цвет иконки внутри столба — свой, отдельно от цвета самого столба:
+            // так их и задаёт игра, двумя разными нативами.
+            this.iconColor = shared.RGBA.white;
+
+            // Куда показывает стрелка внутри. Нулевая точка означает «никуда», и
+            // так же её толкует игра: стрелки просто не будет.
+            this.nextPos = shared.Vector3.zero;
+
+            this.visible = true;
+            this.streamingDistance = Number(short ? rest[4] : rest[9]) || 0;
+
+            this.update();
+        }
+
+        #describe() {
+            return {
+                checkpointType: this.checkpointType,
+                position: this.pos,
+                nextPosition: this.nextPos,
+                radius: this.radius,
+                height: this.height,
+                red: this.color.r,
+                green: this.color.g,
+                blue: this.color.b,
+                alpha: this.color.a,
+                iconRed: this.iconColor.r,
+                iconGreen: this.iconColor.g,
+                iconBlue: this.iconColor.b,
+                iconAlpha: this.iconColor.a,
+                visible: this.visible,
+                streamingDistance: this.streamingDistance,
+                dimension: this.dimension,
+            };
+        }
+
+        /// Отдаёт серверу то, что ресурс успел поправить.
+        ///
+        /// Зовётся вручную, ровно как у метки, и по той же причине: точку правят
+        /// помногу сразу, и отправка на каждое поле означала бы четыре сообщения
+        /// вместо одного и точку, поправленную наполовину, у всех, кто её видит.
+        update() {
+            if (this.#serverId === 0) {
+                const id = native.createCheckpoint(this.#describe());
+
+                if (id === null) {
+                    server.logWarning('контрольная точка не поставлена: в сессии их столько, ' +
+                                      'сколько разрешено настройкой maxcheckpoints');
+                    return;
+                }
+
+                this.#serverId = id;
+                return;
+            }
+
+            native.updateCheckpoint(this.#serverId, this.#describe());
+        }
+
+        destroy() {
+            if (this.#serverId !== 0) {
+                native.removeCheckpoint(this.#serverId);
+                this.#serverId = 0;
+            }
+
+            super.destroy();
         }
     }
 
@@ -447,20 +543,80 @@
     }
 
     /// Маркер — фигура, нарисованная в мире.
+    ///
+    /// В отличие от метки и точки, игра его у себя не помнит: маркер рисуют
+    /// заново каждый кадр. Оттого он и умеет то, чего не умеет ничто другое —
+    /// качаться, вертеться и поворачиваться к камере.
     class Marker extends BaseObject {
-        constructor(markerType, pos, color) {
+        #serverId = 0;
+
+        constructor(markerType, pos, color, streamingDistance) {
             super('marker');
 
-            this.markerType = markerType;
+            this.markerType = Number(markerType) || 0;
             this.pos = new shared.Vector3(pos);
             this.color = color === undefined ? shared.RGBA.white : new shared.RGBA(color);
             this.dimension = 0;
             this.visible = true;
             this.scale = new shared.Vector3(1, 1, 1);
             this.rot = shared.Vector3.zero;
-            this.direction = shared.Vector3.zero;
 
-            warnOnce('маркер');
+            // Именно `dir`, а не `direction`: так это поле зовётся у alt:V, и
+            // режим, написанный под него, обратится по этому имени.
+            this.dir = shared.Vector3.zero;
+
+            this.faceCamera = false;
+            this.bobUpAndDown = false;
+            this.rotate = false;
+            this.streamingDistance = Number(streamingDistance) || 0;
+
+            this.update();
+        }
+
+        #describe() {
+            return {
+                markerType: this.markerType,
+                position: this.pos,
+                rotation: this.rot,
+                direction: this.dir,
+                scale: this.scale,
+                red: this.color.r,
+                green: this.color.g,
+                blue: this.color.b,
+                alpha: this.color.a,
+                visible: this.visible,
+                bobUpAndDown: this.bobUpAndDown,
+                faceCamera: this.faceCamera,
+                rotate: this.rotate,
+                streamingDistance: this.streamingDistance,
+                dimension: this.dimension,
+            };
+        }
+
+        update() {
+            if (this.#serverId === 0) {
+                const id = native.createMarker(this.#describe());
+
+                if (id === null) {
+                    server.logWarning('маркер не поставлен: в сессии их столько, ' +
+                                      'сколько разрешено настройкой maxmarkers');
+                    return;
+                }
+
+                this.#serverId = id;
+                return;
+            }
+
+            native.updateMarker(this.#serverId, this.#describe());
+        }
+
+        destroy() {
+            if (this.#serverId !== 0) {
+                native.removeMarker(this.#serverId);
+                this.#serverId = 0;
+            }
+
+            super.destroy();
         }
     }
 

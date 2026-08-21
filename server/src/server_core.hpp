@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.hpp"
-#include "blip_directory.hpp"
+#include "drawn_directory.hpp"
 #include "object_directory.hpp"
 #include "player_registry.hpp"
 #include "vehicle_directory.hpp"
@@ -92,6 +92,23 @@ public:
 
     virtual void blipRemoved(shared::BlipId id) = 0;
 
+    /// То же для маркера и контрольной точки: заведена или поправлена — сказать
+    /// всем, кто её видит.
+    virtual void markerChanged(shared::MarkerId id) = 0;
+    virtual void markerRemoved(shared::MarkerId id) = 0;
+
+    virtual void checkpointChanged(shared::CheckpointId id) = 0;
+    virtual void checkpointRemoved(shared::CheckpointId id) = 0;
+
+    /// Игрок перешёл в другой слой мира; было — previous.
+    ///
+    /// Всё, что отбирается расстоянием, разберётся само собой на ближайшей
+    /// раздаче: снимки чужих просто перестанут приходить, а машины и предметы
+    /// уедут за горизонт видимости. Нарисованное — не отбирается: метки,
+    /// маркеры и точки уходят один раз, при входе, и без этого повода игрок унёс
+    /// бы карту прежнего слоя с собой навсегда.
+    virtual void dimensionChanged(const Player& player, std::int32_t previous) = 0;
+
     /// Погода или время сменились и должны уйти немедленно.
     virtual void worldChanged() = 0;
 
@@ -114,8 +131,9 @@ protected:
 class ServerCore final : public script::Core {
 public:
     ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
-               BlipDirectory& blips, WorldClock& world, const Config& config,
-               script::Events& events, CoreSink& sink) noexcept;
+               BlipDirectory& blips, MarkerDirectory& markers, CheckpointDirectory& checkpoints,
+               WorldClock& world, const Config& config, script::Events& events,
+               CoreSink& sink) noexcept;
 
     // --- Игроки ----------------------------------------------------------------
 
@@ -169,6 +187,23 @@ public:
     bool updateBlip(shared::BlipId id, const script::BlipInfo& blip) override;
     bool removeBlip(shared::BlipId id) override;
 
+    // --- Нарисованное в мире ---------------------------------------------------
+
+    [[nodiscard]] std::vector<script::MarkerInfo> markers() const override;
+    [[nodiscard]] std::optional<script::MarkerInfo> marker(shared::MarkerId id) const override;
+    [[nodiscard]] shared::MarkerId createMarker(const script::MarkerInfo& marker) override;
+    bool updateMarker(shared::MarkerId id, const script::MarkerInfo& marker) override;
+    bool removeMarker(shared::MarkerId id) override;
+
+    [[nodiscard]] std::vector<script::CheckpointInfo> checkpoints() const override;
+    [[nodiscard]] std::optional<script::CheckpointInfo> checkpoint(
+        shared::CheckpointId id) const override;
+    [[nodiscard]] shared::CheckpointId createCheckpoint(
+        const script::CheckpointInfo& checkpoint) override;
+    bool updateCheckpoint(shared::CheckpointId id,
+                          const script::CheckpointInfo& checkpoint) override;
+    bool removeCheckpoint(shared::CheckpointId id) override;
+
     // --- Мир и общение ---------------------------------------------------------
 
     void broadcast(std::string_view text) override;
@@ -182,6 +217,8 @@ private:
     VehicleDirectory* vehicles_ = nullptr;
     ObjectDirectory* objects_ = nullptr;
     BlipDirectory* blips_ = nullptr;
+    MarkerDirectory* markers_ = nullptr;
+    CheckpointDirectory* checkpoints_ = nullptr;
     WorldClock* world_ = nullptr;
     const Config* config_ = nullptr;
     script::Events* events_ = nullptr;

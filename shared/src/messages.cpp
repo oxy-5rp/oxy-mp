@@ -768,6 +768,112 @@ BlipRemoved BlipRemoved::read(ByteReader& reader) {
     return message;
 }
 
+void MarkerState::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeU8(type);
+    writer.writeVec3(position);
+    writer.writeVec3(rotation);
+    writer.writeVec3(direction);
+    writer.writeVec3(scale);
+    writer.writeU8(red);
+    writer.writeU8(green);
+    writer.writeU8(blue);
+    writer.writeU8(alpha);
+
+    // Признаки — одним байтом, а не четырьмя: их четыре, и каждый занял бы
+    // целый байт ради одного бита.
+    std::uint8_t flags = 0;
+    flags |= visible ? static_cast<std::uint8_t>(MarkerFlag::Visible) : 0;
+    flags |= bobUpAndDown ? static_cast<std::uint8_t>(MarkerFlag::BobUpAndDown) : 0;
+    flags |= faceCamera ? static_cast<std::uint8_t>(MarkerFlag::FaceCamera) : 0;
+    flags |= rotate ? static_cast<std::uint8_t>(MarkerFlag::Rotate) : 0;
+
+    writer.writeU8(flags);
+    writer.writeFloat(streamingDistance);
+}
+
+MarkerState MarkerState::read(ByteReader& reader) {
+    MarkerState message;
+    message.id = reader.readU32();
+    message.type = reader.readU8();
+    message.position = reader.readVec3();
+    message.rotation = reader.readVec3();
+    message.direction = reader.readVec3();
+    message.scale = reader.readVec3();
+    message.red = reader.readU8();
+    message.green = reader.readU8();
+    message.blue = reader.readU8();
+    message.alpha = reader.readU8();
+    const std::uint8_t flags = reader.readU8();
+    message.visible = has(flags, MarkerFlag::Visible);
+    message.bobUpAndDown = has(flags, MarkerFlag::BobUpAndDown);
+    message.faceCamera = has(flags, MarkerFlag::FaceCamera);
+    message.rotate = has(flags, MarkerFlag::Rotate);
+
+    message.streamingDistance = reader.readFloat();
+    return message;
+}
+
+void MarkerRemoved::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+}
+
+MarkerRemoved MarkerRemoved::read(ByteReader& reader) {
+    MarkerRemoved message;
+    message.id = reader.readU32();
+    return message;
+}
+
+void CheckpointState::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeU8(type);
+    writer.writeVec3(position);
+    writer.writeVec3(nextPosition);
+    writer.writeFloat(radius);
+    writer.writeFloat(height);
+    writer.writeU8(red);
+    writer.writeU8(green);
+    writer.writeU8(blue);
+    writer.writeU8(alpha);
+    writer.writeU8(iconRed);
+    writer.writeU8(iconGreen);
+    writer.writeU8(iconBlue);
+    writer.writeU8(iconAlpha);
+    writer.writeU8(visible ? 1 : 0);
+    writer.writeFloat(streamingDistance);
+}
+
+CheckpointState CheckpointState::read(ByteReader& reader) {
+    CheckpointState message;
+    message.id = reader.readU32();
+    message.type = reader.readU8();
+    message.position = reader.readVec3();
+    message.nextPosition = reader.readVec3();
+    message.radius = reader.readFloat();
+    message.height = reader.readFloat();
+    message.red = reader.readU8();
+    message.green = reader.readU8();
+    message.blue = reader.readU8();
+    message.alpha = reader.readU8();
+    message.iconRed = reader.readU8();
+    message.iconGreen = reader.readU8();
+    message.iconBlue = reader.readU8();
+    message.iconAlpha = reader.readU8();
+    message.visible = reader.readU8() != 0;
+    message.streamingDistance = reader.readFloat();
+    return message;
+}
+
+void CheckpointRemoved::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+}
+
+CheckpointRemoved CheckpointRemoved::read(ByteReader& reader) {
+    CheckpointRemoved message;
+    message.id = reader.readU32();
+    return message;
+}
+
 void PlayerIntoVehicle::write(ByteWriter& writer) const {
     writer.writeU32(vehicle);
     writer.writeU8(static_cast<std::uint8_t>(seat));
@@ -820,6 +926,10 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::BlipState:
     case MessageId::BlipRemoved:
     case MessageId::PlayerIntoVehicle:
+    case MessageId::MarkerState:
+    case MessageId::MarkerRemoved:
+    case MessageId::CheckpointState:
+    case MessageId::CheckpointRemoved:
         return static_cast<MessageId>(packet.front());
     }
 

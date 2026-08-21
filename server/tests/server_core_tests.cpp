@@ -3,6 +3,7 @@
 
 #include "server_core.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -89,6 +90,26 @@ public:
         sent.push_back(std::format("blip- {}", id));
     }
 
+    void markerChanged(shared::MarkerId id) override {
+        sent.push_back(std::format("marker {}", id));
+    }
+
+    void markerRemoved(shared::MarkerId id) override {
+        sent.push_back(std::format("marker- {}", id));
+    }
+
+    void checkpointChanged(shared::CheckpointId id) override {
+        sent.push_back(std::format("checkpoint {}", id));
+    }
+
+    void checkpointRemoved(shared::CheckpointId id) override {
+        sent.push_back(std::format("checkpoint- {}", id));
+    }
+
+    void dimensionChanged(const Player& player, std::int32_t previous) override {
+        sent.push_back(std::format("dimension {} {}->{}", player.id, previous, player.dimension));
+    }
+
     void worldChanged() override { sent.emplace_back("world"); }
 
     void chatLine(shared::PlayerId to, std::string text) override {
@@ -130,12 +151,15 @@ struct Session {
     VehicleDirectory vehicles;
     ObjectDirectory objects;
     BlipDirectory blips;
+    MarkerDirectory markers;
+    CheckpointDirectory checkpoints;
     WorldClock world{"EXTRASUNNY", 12, 0};
     Config config;
     script::Events events;
     FakeSink sink;
 
-    ServerCore core{players, vehicles, objects, blips, world, config, events, sink};
+    ServerCore core{players, vehicles, objects,  blips,  markers, checkpoints,
+                    world,   config,   events,  sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
         players.add(peer, std::move(nickname), 0);
@@ -456,20 +480,25 @@ TEST_CASE("a player starts in the default dimension and can be moved out of it",
     CHECK(session.core.player(player.id)->dimension == 42);
 }
 
-TEST_CASE("moving a player between dimensions tells the clients nothing",
+TEST_CASE("moving a player between dimensions tells the others nothing",
           "[server][script]") {
-    // Клиент про измерения не знает вовсе, и рассылать ему тут нечего: перемена
-    // скажется сама собой — тем, кто его больше видеть не должен, снимки просто
-    // перестанут приходить. Не рассказать и есть единственный способ не дать
-    // увидеть.
+    // Клиент про измерения не знает вовсе, и номера слоя не узнаёт никогда:
+    // не рассказать и есть единственный способ не дать увидеть. Остальным о
+    // переходе не говорится ничего — перемена скажется сама собой: тем, кто его
+    // больше видеть не должен, снимки просто перестанут приходить.
+    //
+    // Единственное, чем перемена отзывается, — переспрос нарисованного у самого
+    // ушедшего: метки и фигуры уходят к нему один раз, при входе, и сами собой
+    // не разберутся.
     Session session;
-    Player& player = session.join(1, "игрок");
 
-    const std::size_t before = session.sink.sent.size();
+    Player& player = session.join(1, "игрок");
+    session.join(2, "сосед");
+    session.sink.sent.clear();
 
     REQUIRE(session.core.setDimension(player.id, 3));
 
-    CHECK(session.sink.sent.size() == before);
+    CHECK(session.sink.sent == std::vector<std::string>{"dimension 0 0->3"});
 }
 
 TEST_CASE("a dimension named for nobody changes nothing", "[server][script]") {
@@ -679,4 +708,72 @@ TEST_CASE("seating into a vehicle that is gone changes nothing", "[server][scrip
     Player& player = session.join(1, "игрок");
 
     CHECK_FALSE(session.core.setIntoVehicle(player.id, 1, shared::kNoSeat));
+}
+
+TEST_CASE("a marker keeps the id the server gave it", "[server][script]") {
+    Session session;
+
+    script::MarkerInfo marker;
+    marker.type = 27;
+    marker.position = shared::Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+    marker.red = 200;
+
+    const shared::MarkerId id = session.core.createMarker(marker);
+    REQUIRE(id != shared::kInvalidMarkerId);
+
+    // Номер назначает сервер, и попытка скрипта назвать свой ничего не меняет:
+    // иначе маркер мог бы стать другим маркером.
+    script::MarkerInfo pretender;
+    pretender.id = id + 100;
+    pretender.type = 1;
+    REQUIRE(session.core.updateMarker(id, pretender));
+
+    const auto shown = session.core.marker(id);
+    REQUIRE(shown);
+    CHECK(shown->id == id);
+    CHECK(shown->type == 1);
+
+    CHECK(session.core.removeMarker(id));
+    CHECK_FALSE(session.core.marker(id));
+    CHECK_FALSE(session.core.removeMarker(id));
+}
+
+TEST_CASE("a checkpoint keeps the id the server gave it", "[server][script]") {
+    Session session;
+
+    script::CheckpointInfo point;
+    point.type = 4;
+    point.radius = 5.0F;
+
+    const shared::CheckpointId id = session.core.createCheckpoint(point);
+    REQUIRE(id != shared::kInvalidCheckpointId);
+
+    const auto shown = session.core.checkpoint(id);
+    REQUIRE(shown);
+    CHECK(shown->radius == Catch::Approx(5.0F));
+
+    CHECK(session.core.removeCheckpoint(id));
+    CHECK_FALSE(session.core.checkpoint(id));
+}
+
+TEST_CASE("the session refuses more markers than it allows", "[server][script]") {
+    Session session;
+    session.config.maxMarkers = 1;
+
+    CHECK(session.core.createMarker({}) != shared::kInvalidMarkerId);
+    CHECK(session.core.createMarker({}) == shared::kInvalidMarkerId);
+}
+
+// Тот же слой — не перемена, и переспрашивать нарисованное незачем: режим,
+// ставящий измерение в цикле, иначе слал бы полную карту меток на каждый оборот.
+TEST_CASE("staying in the same dimension is not a move", "[server][script]") {
+    Session session;
+
+    Player& player = session.join(1, "игрок");
+    REQUIRE(session.core.setDimension(player.id, 7));
+
+    session.sink.sent.clear();
+    REQUIRE(session.core.setDimension(player.id, 7));
+
+    CHECK(session.sink.sent.empty());
 }

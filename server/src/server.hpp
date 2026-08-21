@@ -5,7 +5,7 @@
 #include "player_registry.hpp"
 #include "resource_catalog.hpp"
 #include "resource_store.hpp"
-#include "blip_directory.hpp"
+#include "drawn_directory.hpp"
 #include "object_directory.hpp"
 #include "runtime.hpp"
 #include "server_core.hpp"
@@ -118,11 +118,36 @@ private:
     void vehicleRepaired(shared::VehicleId id) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
-    /// Рассказывает вошедшему обо всех метках, которые ему видны.
-    void sendBlipsTo(net::PeerId peer, std::int32_t dimension);
+    /// Рассказывает вошедшему обо всём нарисованном, что ему видно: о метках
+    /// на карте, о маркерах и о контрольных точках.
+    void sendDrawnTo(net::PeerId peer, std::int32_t dimension);
+
+    /// Всё из одного реестра картинок — одному игроку.
+    template<typename Directory>
+    void sendKindTo(const Directory& directory, net::PeerId peer, std::int32_t dimension);
+
+    /// Одну картинку — всем, кто с ней в одном слое мира.
+    ///
+    /// Общее на три рода, потому что рассылаются они совершенно одинаково:
+    /// найти в реестре, обойти игроков, сверить слой, отправить. Разным их
+    /// делает только тип сообщения, а его выводит сам реестр.
+    template<typename Directory>
+    void broadcastDrawn(const Directory& directory, typename Directory::Id id);
 
     void blipChanged(shared::BlipId id) override;
     void blipRemoved(shared::BlipId id) override;
+
+    void markerChanged(shared::MarkerId id) override;
+    void markerRemoved(shared::MarkerId id) override;
+
+    void checkpointChanged(shared::CheckpointId id) override;
+    void checkpointRemoved(shared::CheckpointId id) override;
+
+    void dimensionChanged(const Player& player, std::int32_t previous) override;
+
+    /// Досылает и отзывает картинки одного рода после смены слоя мира.
+    template<typename Directory, typename Removed>
+    void redrawKindFor(const Directory& directory, const Player& player, std::int32_t previous);
     void worldChanged() override;
     void chatLine(shared::PlayerId to, std::string text) override;
 
@@ -251,6 +276,14 @@ private:
     /// Что нарисовано на карте.
     BlipDirectory blips_;
 
+    /// Что нарисовано в мире: фигуры под ногами и контрольные точки.
+    ///
+    /// Отдельно от предметов, хотя и стоят в тех же местах: у предмета есть
+    /// тело, его можно объехать и об него можно удариться, а эти двое —
+    /// картинки, сквозь которые проходят насквозь.
+    MarkerDirectory markers_;
+    CheckpointDirectory checkpoints_;
+
     /// Что сервер раздаёт клиентам сверх самой игры.
     ///
     /// Объявлен раньше раздачи и потому переживает её: раздача держит на него
@@ -280,8 +313,8 @@ private:
     ///
     /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
     /// и быть не должно — они разошлись бы с настоящими молча.
-    ServerCore core_{players_, vehicles_, objects_, blips_,  world_,
-                     config_,  events_,   *this};
+    ServerCore core_{players_, vehicles_, objects_, blips_,   markers_, checkpoints_,
+                     world_,   config_,   events_,  *this};
 
     /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
     ResourceCatalog catalog_;

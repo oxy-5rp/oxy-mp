@@ -105,6 +105,72 @@ struct BlipInfo {
     std::int32_t dimension = kDefaultDimension;
 };
 
+/// Что скрипт знает о маркере — фигуре, нарисованной в мире.
+///
+/// Состав, как и у метки, взят у alt:V поле в поле. Цвет разложен на четыре
+/// байта, а не сложен в число: именно так его задаёт режим.
+struct MarkerInfo {
+    shared::MarkerId id = shared::kInvalidMarkerId;
+
+    /// Какая это фигура. Числа игры, у alt:V они те же.
+    std::uint8_t type = 0;
+
+    shared::Vec3 position;
+    shared::Vec3 rotation;
+    shared::Vec3 direction;
+    shared::Vec3 scale{1.0F, 1.0F, 1.0F};
+
+    std::uint8_t red = 255;
+    std::uint8_t green = 255;
+    std::uint8_t blue = 255;
+    std::uint8_t alpha = 255;
+
+    bool visible = true;
+    bool bobUpAndDown = false;
+    bool faceCamera = false;
+    bool rotate = false;
+
+    /// С какого расстояния фигуру видно. Ноль — с любого.
+    float streamingDistance = 0.0F;
+
+    /// В каком слое мира она видна. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
+};
+
+/// Что скрипт знает о контрольной точке.
+///
+/// Только её вид. Вход и выход в неё считаются как во всякую зону — там же, где
+/// и все прочие зоны, и об этом описании не знают.
+struct CheckpointInfo {
+    shared::CheckpointId id = shared::kInvalidCheckpointId;
+
+    std::uint8_t type = 0;
+
+    shared::Vec3 position;
+
+    /// Куда показывает стрелка внутри столба — обычно к следующей точке.
+    shared::Vec3 nextPosition;
+
+    float radius = 1.0F;
+    float height = 2.0F;
+
+    std::uint8_t red = 255;
+    std::uint8_t green = 255;
+    std::uint8_t blue = 255;
+    std::uint8_t alpha = 255;
+
+    std::uint8_t iconRed = 255;
+    std::uint8_t iconGreen = 255;
+    std::uint8_t iconBlue = 255;
+    std::uint8_t iconAlpha = 255;
+
+    bool visible = true;
+
+    float streamingDistance = 0.0F;
+
+    std::int32_t dimension = kDefaultDimension;
+};
+
 /// Всё, до чего дотягивается скрипт.
 ///
 /// Объявлено интерфейсом, а не написано здесь же, и причина не в отвлечённой
@@ -291,6 +357,33 @@ public:
     virtual bool updateBlip(shared::BlipId id, const BlipInfo& blip) = 0;
 
     virtual bool removeBlip(shared::BlipId id) = 0;
+
+    // --- Нарисованное в мире ---------------------------------------------------
+    //
+    // Маркер и контрольная точка живут по тем же правилам, что и метка на
+    // карте: заводятся, правятся целиком и убираются. Отличие одно, и оно на
+    // стороне рисующего: у обоих есть своё поле видимости, и отбирает их по
+    // расстоянию не сервер, а клиент.
+
+    [[nodiscard]] virtual std::vector<MarkerInfo> markers() const = 0;
+    [[nodiscard]] virtual std::optional<MarkerInfo> marker(shared::MarkerId id) const = 0;
+
+    /// Ставит маркер. kInvalidMarkerId — отказ: предел исчерпан.
+    [[nodiscard]] virtual shared::MarkerId createMarker(const MarkerInfo& marker) = 0;
+
+    virtual bool updateMarker(shared::MarkerId id, const MarkerInfo& marker) = 0;
+    virtual bool removeMarker(shared::MarkerId id) = 0;
+
+    [[nodiscard]] virtual std::vector<CheckpointInfo> checkpoints() const = 0;
+    [[nodiscard]] virtual std::optional<CheckpointInfo> checkpoint(
+        shared::CheckpointId id) const = 0;
+
+    /// Ставит контрольную точку. kInvalidCheckpointId — отказ: предел исчерпан.
+    [[nodiscard]] virtual shared::CheckpointId createCheckpoint(
+        const CheckpointInfo& checkpoint) = 0;
+
+    virtual bool updateCheckpoint(shared::CheckpointId id, const CheckpointInfo& checkpoint) = 0;
+    virtual bool removeCheckpoint(shared::CheckpointId id) = 0;
 
     // --- Мир и общение ---------------------------------------------------------
 

@@ -10,7 +10,6 @@ add_executable(oxymp_server_tests
     state_bundler_tests.cpp
     vehicle_directory_tests.cpp
     world_clock_tests.cpp
-    ../src/blip_directory.cpp
     ../src/config_file.cpp
     ../src/object_directory.cpp
     ../src/resource_catalog.cpp

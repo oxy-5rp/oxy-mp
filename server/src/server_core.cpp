@@ -55,7 +55,7 @@ namespace {
 }
 
 /// Метка, какой её знает скрипт.
-[[nodiscard]] script::BlipInfo describe(const BlipDirectory::Blip& blip) {
+[[nodiscard]] script::BlipInfo describe(const BlipDirectory::Entry& blip) {
     return script::BlipInfo{
         .id = blip.state.id,
         .position = blip.state.position,
@@ -87,13 +87,102 @@ namespace {
     };
 }
 
+/// Маркер, каким его знает скрипт.
+[[nodiscard]] script::MarkerInfo describe(const MarkerDirectory::Entry& marker) {
+    return script::MarkerInfo{
+        .id = marker.state.id,
+        .type = marker.state.type,
+        .position = marker.state.position,
+        .rotation = marker.state.rotation,
+        .direction = marker.state.direction,
+        .scale = marker.state.scale,
+        .red = marker.state.red,
+        .green = marker.state.green,
+        .blue = marker.state.blue,
+        .alpha = marker.state.alpha,
+        .visible = marker.state.visible,
+        .bobUpAndDown = marker.state.bobUpAndDown,
+        .faceCamera = marker.state.faceCamera,
+        .rotate = marker.state.rotate,
+        .streamingDistance = marker.state.streamingDistance,
+        .dimension = marker.dimension,
+    };
+}
+
+/// Он же, каким его понимает протокол. Номер не переносится — назначает его
+/// сервер, как и метке.
+[[nodiscard]] shared::MarkerState describe(const script::MarkerInfo& marker) {
+    return shared::MarkerState{
+        .type = marker.type,
+        .position = marker.position,
+        .rotation = marker.rotation,
+        .direction = marker.direction,
+        .scale = marker.scale,
+        .red = marker.red,
+        .green = marker.green,
+        .blue = marker.blue,
+        .alpha = marker.alpha,
+        .visible = marker.visible,
+        .bobUpAndDown = marker.bobUpAndDown,
+        .faceCamera = marker.faceCamera,
+        .rotate = marker.rotate,
+        .streamingDistance = marker.streamingDistance,
+    };
+}
+
+/// Контрольная точка, какой её знает скрипт.
+[[nodiscard]] script::CheckpointInfo describe(const CheckpointDirectory::Entry& checkpoint) {
+    return script::CheckpointInfo{
+        .id = checkpoint.state.id,
+        .type = checkpoint.state.type,
+        .position = checkpoint.state.position,
+        .nextPosition = checkpoint.state.nextPosition,
+        .radius = checkpoint.state.radius,
+        .height = checkpoint.state.height,
+        .red = checkpoint.state.red,
+        .green = checkpoint.state.green,
+        .blue = checkpoint.state.blue,
+        .alpha = checkpoint.state.alpha,
+        .iconRed = checkpoint.state.iconRed,
+        .iconGreen = checkpoint.state.iconGreen,
+        .iconBlue = checkpoint.state.iconBlue,
+        .iconAlpha = checkpoint.state.iconAlpha,
+        .visible = checkpoint.state.visible,
+        .streamingDistance = checkpoint.state.streamingDistance,
+        .dimension = checkpoint.dimension,
+    };
+}
+
+/// Она же, какой её понимает протокол.
+[[nodiscard]] shared::CheckpointState describe(const script::CheckpointInfo& checkpoint) {
+    return shared::CheckpointState{
+        .type = checkpoint.type,
+        .position = checkpoint.position,
+        .nextPosition = checkpoint.nextPosition,
+        .radius = checkpoint.radius,
+        .height = checkpoint.height,
+        .red = checkpoint.red,
+        .green = checkpoint.green,
+        .blue = checkpoint.blue,
+        .alpha = checkpoint.alpha,
+        .iconRed = checkpoint.iconRed,
+        .iconGreen = checkpoint.iconGreen,
+        .iconBlue = checkpoint.iconBlue,
+        .iconAlpha = checkpoint.iconAlpha,
+        .visible = checkpoint.visible,
+        .streamingDistance = checkpoint.streamingDistance,
+    };
+}
+
 } // namespace
 
 ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles,
-                       ObjectDirectory& objects, BlipDirectory& blips, WorldClock& world,
-                       const Config& config, script::Events& events, CoreSink& sink) noexcept
+                       ObjectDirectory& objects, BlipDirectory& blips, MarkerDirectory& markers,
+                       CheckpointDirectory& checkpoints, WorldClock& world, const Config& config,
+                       script::Events& events, CoreSink& sink) noexcept
     : players_(&players), vehicles_(&vehicles), objects_(&objects), blips_(&blips),
-      world_(&world), config_(&config), events_(&events), sink_(&sink) {}
+      markers_(&markers), checkpoints_(&checkpoints), world_(&world), config_(&config),
+      events_(&events), sink_(&sink) {}
 
 std::vector<script::PlayerInfo> ServerCore::players() const {
     std::vector<script::PlayerInfo> everyone;
@@ -256,11 +345,18 @@ bool ServerCore::setDimension(shared::PlayerId id, std::int32_t dimension) {
         return false;
     }
 
+    const std::int32_t previous = player->dimension;
+    if (previous == dimension) {
+        return true;
+    }
+
     player->dimension = dimension;
 
-    // Рассказывать об этом клиентам нечем и незачем: они про измерения не знают
-    // вовсе. Перемена скажется сама собой на ближайшей рассылке — тем, кто его
-    // больше видеть не должен, снимки просто перестанут приходить.
+    // Про сами измерения клиенту по-прежнему не рассказывают: он о них не знает
+    // вовсе, и это решение (см. docs/altv-next.md). Но нарисованное — метки,
+    // маркеры, точки — уходит к нему один раз, при входе, и само собой не
+    // разберётся: без этого игрок унёс бы карту прежнего слоя с собой.
+    sink_->dimensionChanged(*player, previous);
     return true;
 }
 
@@ -508,7 +604,7 @@ std::vector<script::BlipInfo> ServerCore::blips() const {
 }
 
 std::optional<script::BlipInfo> ServerCore::blip(shared::BlipId id) const {
-    const BlipDirectory::Blip* const found = blips_->find(id);
+    const BlipDirectory::Entry* const found = blips_->find(id);
     return found == nullptr ? std::nullopt : std::optional{describe(*found)};
 }
 
@@ -542,6 +638,106 @@ bool ServerCore::removeBlip(shared::BlipId id) {
     }
 
     sink_->blipRemoved(id);
+    return true;
+}
+
+std::vector<script::MarkerInfo> ServerCore::markers() const {
+    std::vector<script::MarkerInfo> everything;
+    everything.reserve(markers_->size());
+
+    for (const auto& [id, marker] : markers_->all()) {
+        everything.push_back(describe(marker));
+    }
+
+    return everything;
+}
+
+std::optional<script::MarkerInfo> ServerCore::marker(shared::MarkerId id) const {
+    const MarkerDirectory::Entry* const found = markers_->find(id);
+    return found == nullptr ? std::nullopt : std::optional{describe(*found)};
+}
+
+shared::MarkerId ServerCore::createMarker(const script::MarkerInfo& marker) {
+    const shared::MarkerId id = markers_->add(describe(marker), config_->maxMarkers);
+
+    if (id == shared::kInvalidMarkerId) {
+        return shared::kInvalidMarkerId;
+    }
+
+    (void)markers_->setDimension(id, marker.dimension);
+
+    sink_->markerChanged(id);
+    return id;
+}
+
+bool ServerCore::updateMarker(shared::MarkerId id, const script::MarkerInfo& marker) {
+    if (!markers_->update(id, describe(marker))) {
+        return false;
+    }
+
+    (void)markers_->setDimension(id, marker.dimension);
+
+    sink_->markerChanged(id);
+    return true;
+}
+
+bool ServerCore::removeMarker(shared::MarkerId id) {
+    if (!markers_->remove(id)) {
+        return false;
+    }
+
+    sink_->markerRemoved(id);
+    return true;
+}
+
+std::vector<script::CheckpointInfo> ServerCore::checkpoints() const {
+    std::vector<script::CheckpointInfo> everything;
+    everything.reserve(checkpoints_->size());
+
+    for (const auto& [id, checkpoint] : checkpoints_->all()) {
+        everything.push_back(describe(checkpoint));
+    }
+
+    return everything;
+}
+
+std::optional<script::CheckpointInfo> ServerCore::checkpoint(shared::CheckpointId id) const {
+    const CheckpointDirectory::Entry* const found = checkpoints_->find(id);
+    return found == nullptr ? std::nullopt : std::optional{describe(*found)};
+}
+
+shared::CheckpointId ServerCore::createCheckpoint(const script::CheckpointInfo& checkpoint) {
+    const shared::CheckpointId id =
+        checkpoints_->add(describe(checkpoint), config_->maxCheckpoints);
+
+    if (id == shared::kInvalidCheckpointId) {
+        return shared::kInvalidCheckpointId;
+    }
+
+    (void)checkpoints_->setDimension(id, checkpoint.dimension);
+
+    sink_->checkpointChanged(id);
+    return id;
+}
+
+bool ServerCore::updateCheckpoint(shared::CheckpointId id,
+                                  const script::CheckpointInfo& checkpoint) {
+    if (!checkpoints_->update(id, describe(checkpoint))) {
+        return false;
+    }
+
+    (void)checkpoints_->setDimension(id, checkpoint.dimension);
+
+    sink_->checkpointChanged(id);
+    return true;
+}
+
+bool ServerCore::removeCheckpoint(shared::CheckpointId id) {
+    if (!checkpoints_->remove(id)) {
+        return false;
+    }
+
+    sink_->checkpointRemoved(id);
     return true;
 }
 

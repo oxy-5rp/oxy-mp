@@ -652,59 +652,178 @@ void objectDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
 //
 // Сущностью её делает слой alt:V, поверх этого.
 
-[[nodiscard]] std::optional<BlipInfo> blipFromJs(v8::Local<v8::Context> context,
-                                                 v8::Local<v8::Value> value) {
-    if (value.IsEmpty() || !value->IsObject()) {
-        return std::nullopt;
-    }
+/// Чтение полей описания, присланного скриптом.
+///
+/// Заведено на три рода картинок сразу — метку, маркер и точку, — и это не
+/// обобщение ради обобщения: читаются они совершенно одинаково, а отсутствующее
+/// поле у всех троих означает «как принято у alt:V», а не ошибку. Ресурс волен
+/// задать три поля из пятнадцати, и остальные обязаны встать сами.
+class Fields {
+public:
+    Fields(v8::Local<v8::Context> context, v8::Local<v8::Object> object) noexcept
+        : context_(context), object_(object) {}
 
-    v8::Isolate* const isolate = context->GetIsolate();
-    const v8::Local<v8::Object> object = value.As<v8::Object>();
-
-    const auto number = [&](const char* name, double fallback) {
+    /// Число. Нечисло и бесконечность считаются отсутствием: пришедший оттуда
+    /// NaN разошёлся бы по протоколу и всплыл бы у рисующего.
+    [[nodiscard]] double number(const char* name, double fallback) const {
         v8::Local<v8::Value> field;
 
-        if (!object->Get(context, toJs(isolate, name)).ToLocal(&field)) {
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field)) {
             return fallback;
         }
 
         double got = fallback;
-        (void)field->NumberValue(context).To(&got);
+        (void)field->NumberValue(context_).To(&got);
 
         return std::isfinite(got) ? got : fallback;
-    };
+    }
 
-    const auto flag = [&](const char* name) {
+    [[nodiscard]] std::uint8_t byte(const char* name, double fallback) const {
+        return static_cast<std::uint8_t>(std::clamp(number(name, fallback), 0.0, 255.0));
+    }
+
+    /// Признак. Отсутствующий — ложь, как и у alt:V.
+    [[nodiscard]] bool flag(const char* name) const {
         v8::Local<v8::Value> field;
 
-        if (!object->Get(context, toJs(isolate, name)).ToLocal(&field)) {
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field)) {
             return false;
         }
 
-        return field->BooleanValue(isolate);
-    };
+        return field->BooleanValue(context_->GetIsolate());
+    }
+
+    /// Признак, которого у alt:V по умолчанию нет: `visible` там истина.
+    [[nodiscard]] bool flagOr(const char* name, bool fallback) const {
+        v8::Local<v8::Value> field;
+
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field) ||
+            field->IsUndefined()) {
+            return fallback;
+        }
+
+        return field->BooleanValue(context_->GetIsolate());
+    }
+
+    [[nodiscard]] shared::Vec3 point(const char* name, const shared::Vec3& fallback) const {
+        v8::Local<v8::Value> field;
+
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field)) {
+            return fallback;
+        }
+
+        return vec3FromJs(context_, field).value_or(fallback);
+    }
+
+    [[nodiscard]] std::string text(const char* name) const {
+        v8::Local<v8::Value> field;
+
+        if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field) ||
+            field->IsUndefined()) {
+            return {};
+        }
+
+        return fromJs(context_->GetIsolate(), field);
+    }
+
+private:
+    v8::Local<v8::Context> context_;
+    v8::Local<v8::Object> object_;
+};
+
+/// Описание картинки объектом, каким его прислал скрипт. Пусто — не объект.
+[[nodiscard]] std::optional<Fields> fieldsOf(v8::Local<v8::Context> context,
+                                             v8::Local<v8::Value> value) {
+    if (value.IsEmpty() || !value->IsObject()) {
+        return std::nullopt;
+    }
+
+    return Fields{context, value.As<v8::Object>()};
+}
+
+[[nodiscard]] std::optional<BlipInfo> blipFromJs(v8::Local<v8::Context> context,
+                                                 v8::Local<v8::Value> value) {
+    const std::optional<Fields> fields = fieldsOf(context, value);
+    if (!fields) {
+        return std::nullopt;
+    }
 
     BlipInfo blip;
-
-    v8::Local<v8::Value> position;
-    if (object->Get(context, toJs(isolate, "position")).ToLocal(&position)) {
-        blip.position = vec3FromJs(context, position).value_or(shared::Vec3{});
-    }
-
-    blip.sprite = static_cast<std::uint16_t>(number("sprite", 1));
-    blip.colour = static_cast<std::uint8_t>(number("color", 0));
-    blip.alpha = static_cast<std::uint8_t>(number("alpha", 255));
-    blip.display = static_cast<std::uint8_t>(number("display", 2));
-    blip.scale = static_cast<float>(number("scale", 1.0));
-    blip.dimension = static_cast<std::int32_t>(number("dimension", 0));
-    blip.shortRange = flag("shortRange");
-
-    v8::Local<v8::Value> name;
-    if (object->Get(context, toJs(isolate, "name")).ToLocal(&name) && !name->IsUndefined()) {
-        blip.name = fromJs(isolate, name);
-    }
+    blip.position = fields->point("position", {});
+    blip.sprite = static_cast<std::uint16_t>(fields->number("sprite", 1));
+    blip.colour = fields->byte("color", 0);
+    blip.alpha = fields->byte("alpha", 255);
+    blip.display = fields->byte("display", 2);
+    blip.scale = static_cast<float>(fields->number("scale", 1.0));
+    blip.dimension = static_cast<std::int32_t>(fields->number("dimension", 0));
+    blip.shortRange = fields->flag("shortRange");
+    blip.name = fields->text("name");
 
     return blip;
+}
+
+[[nodiscard]] std::optional<MarkerInfo> markerFromJs(v8::Local<v8::Context> context,
+                                                     v8::Local<v8::Value> value) {
+    const std::optional<Fields> fields = fieldsOf(context, value);
+    if (!fields) {
+        return std::nullopt;
+    }
+
+    MarkerInfo marker;
+    marker.type = fields->byte("markerType", 0);
+    marker.position = fields->point("position", {});
+    marker.rotation = fields->point("rotation", {});
+    marker.direction = fields->point("direction", {});
+
+    // Единица по всем осям, а не ноль: маркер размера ноль не рисуется вовсе, и
+    // режим, не назвавший размера, увидел бы пустое место.
+    marker.scale = fields->point("scale", shared::Vec3{1.0F, 1.0F, 1.0F});
+
+    marker.red = fields->byte("red", 255);
+    marker.green = fields->byte("green", 255);
+    marker.blue = fields->byte("blue", 255);
+    marker.alpha = fields->byte("alpha", 255);
+
+    marker.visible = fields->flagOr("visible", true);
+    marker.bobUpAndDown = fields->flag("bobUpAndDown");
+    marker.faceCamera = fields->flag("faceCamera");
+    marker.rotate = fields->flag("rotate");
+
+    marker.streamingDistance = static_cast<float>(fields->number("streamingDistance", 0.0));
+    marker.dimension = static_cast<std::int32_t>(fields->number("dimension", 0));
+
+    return marker;
+}
+
+[[nodiscard]] std::optional<CheckpointInfo> checkpointFromJs(v8::Local<v8::Context> context,
+                                                             v8::Local<v8::Value> value) {
+    const std::optional<Fields> fields = fieldsOf(context, value);
+    if (!fields) {
+        return std::nullopt;
+    }
+
+    CheckpointInfo point;
+    point.type = fields->byte("checkpointType", 0);
+    point.position = fields->point("position", {});
+    point.nextPosition = fields->point("nextPosition", {});
+    point.radius = static_cast<float>(fields->number("radius", 1.0));
+    point.height = static_cast<float>(fields->number("height", 2.0));
+
+    point.red = fields->byte("red", 255);
+    point.green = fields->byte("green", 255);
+    point.blue = fields->byte("blue", 255);
+    point.alpha = fields->byte("alpha", 255);
+
+    point.iconRed = fields->byte("iconRed", 255);
+    point.iconGreen = fields->byte("iconGreen", 255);
+    point.iconBlue = fields->byte("iconBlue", 255);
+    point.iconAlpha = fields->byte("iconAlpha", 255);
+
+    point.visible = fields->flagOr("visible", true);
+    point.streamingDistance = static_cast<float>(fields->number("streamingDistance", 0.0));
+    point.dimension = static_cast<std::int32_t>(fields->number("dimension", 0));
+
+    return point;
 }
 
 void createBlip(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -759,6 +878,121 @@ void removeBlip(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     info.GetReturnValue().Set(
         resourceOf(isolate).core().removeBlip(static_cast<shared::BlipId>(*id)));
+}
+
+// --- Нарисованное в мире ----------------------------------------------------
+//
+// Маркер и контрольная точка ходят тем же плоским мостом, что и метка, и по той
+// же причине: правят их целиком, а не по полю.
+
+void createMarker(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<MarkerInfo> marker =
+        info.Length() >= 1 ? markerFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!marker) {
+        fail(isolate, "createMarker ждёт описание маркера объектом");
+        return;
+    }
+
+    const shared::MarkerId id = resourceOf(isolate).core().createMarker(*marker);
+
+    if (id == shared::kInvalidMarkerId) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(id));
+}
+
+void updateMarker(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    const std::optional<MarkerInfo> marker =
+        info.Length() >= 2 ? markerFromJs(isolate->GetCurrentContext(), info[1]) : std::nullopt;
+
+    if (!id || !marker) {
+        fail(isolate, "updateMarker ждёт номер маркера и его описание");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().updateMarker(static_cast<shared::MarkerId>(*id), *marker));
+}
+
+void removeMarker(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!id) {
+        fail(isolate, "removeMarker ждёт номер маркера");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeMarker(static_cast<shared::MarkerId>(*id)));
+}
+
+void createCheckpoint(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<CheckpointInfo> point =
+        info.Length() >= 1 ? checkpointFromJs(isolate->GetCurrentContext(), info[0])
+                           : std::nullopt;
+
+    if (!point) {
+        fail(isolate, "createCheckpoint ждёт описание точки объектом");
+        return;
+    }
+
+    const shared::CheckpointId id = resourceOf(isolate).core().createCheckpoint(*point);
+
+    if (id == shared::kInvalidCheckpointId) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(id));
+}
+
+void updateCheckpoint(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    const std::optional<CheckpointInfo> point =
+        info.Length() >= 2 ? checkpointFromJs(isolate->GetCurrentContext(), info[1])
+                           : std::nullopt;
+
+    if (!id || !point) {
+        fail(isolate, "updateCheckpoint ждёт номер точки и её описание");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().updateCheckpoint(
+        static_cast<shared::CheckpointId>(*id), *point));
+}
+
+void removeCheckpoint(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!id) {
+        fail(isolate, "removeCheckpoint ждёт номер точки");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeCheckpoint(static_cast<shared::CheckpointId>(*id)));
 }
 
 // --- Объект oxymp -----------------------------------------------------------
@@ -1208,6 +1442,12 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createBlip", createBlip);
     addFunction(context, oxymp, "updateBlip", updateBlip);
     addFunction(context, oxymp, "removeBlip", removeBlip);
+    addFunction(context, oxymp, "createMarker", createMarker);
+    addFunction(context, oxymp, "updateMarker", updateMarker);
+    addFunction(context, oxymp, "removeMarker", removeMarker);
+    addFunction(context, oxymp, "createCheckpoint", createCheckpoint);
+    addFunction(context, oxymp, "updateCheckpoint", updateCheckpoint);
+    addFunction(context, oxymp, "removeCheckpoint", removeCheckpoint);
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
 

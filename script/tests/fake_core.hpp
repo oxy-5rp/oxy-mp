@@ -22,6 +22,8 @@ public:
     std::vector<VehicleInfo> vehicleList;
     std::vector<ObjectInfo> objectList;
     std::vector<BlipInfo> blipList;
+    std::vector<MarkerInfo> markerList;
+    std::vector<CheckpointInfo> checkpointList;
 
     /// Что ядру велели сделать. Проверки смотрят сюда вместо сети.
     std::vector<std::string> said;
@@ -29,6 +31,8 @@ public:
     shared::VehicleId nextVehicleId = 1;
     shared::ObjectId nextObjectId = 1;
     shared::BlipId nextBlipId = 1;
+    shared::MarkerId nextMarkerId = 1;
+    shared::CheckpointId nextCheckpointId = 1;
 
     [[nodiscard]] std::vector<PlayerInfo> players() const override { return playerList; }
 
@@ -291,6 +295,78 @@ public:
 
     bool removeBlip(shared::BlipId id) override {
         return std::erase_if(blipList, [id](const BlipInfo& info) { return info.id == id; }) != 0;
+    }
+
+    // --- Нарисованное в мире ----------------------------------------------
+
+    [[nodiscard]] std::vector<MarkerInfo> markers() const override { return markerList; }
+
+    [[nodiscard]] std::optional<MarkerInfo> marker(shared::MarkerId id) const override {
+        const auto it = std::ranges::find(markerList, id, &MarkerInfo::id);
+        return it == markerList.end() ? std::nullopt : std::optional{*it};
+    }
+
+    [[nodiscard]] shared::MarkerId createMarker(const MarkerInfo& marker) override {
+        MarkerInfo kept = marker;
+        kept.id = nextMarkerId++;
+
+        markerList.push_back(kept);
+        said.push_back(std::format("marker {} type {}", kept.id, kept.type));
+
+        return kept.id;
+    }
+
+    bool updateMarker(shared::MarkerId id, const MarkerInfo& marker) override {
+        const auto it = std::ranges::find(markerList, id, &MarkerInfo::id);
+        if (it == markerList.end()) {
+            return false;
+        }
+
+        *it = marker;
+        it->id = id;
+        return true;
+    }
+
+    bool removeMarker(shared::MarkerId id) override {
+        return std::erase_if(markerList,
+                             [id](const MarkerInfo& info) { return info.id == id; }) != 0;
+    }
+
+    [[nodiscard]] std::vector<CheckpointInfo> checkpoints() const override {
+        return checkpointList;
+    }
+
+    [[nodiscard]] std::optional<CheckpointInfo> checkpoint(
+        shared::CheckpointId id) const override {
+        const auto it = std::ranges::find(checkpointList, id, &CheckpointInfo::id);
+        return it == checkpointList.end() ? std::nullopt : std::optional{*it};
+    }
+
+    [[nodiscard]] shared::CheckpointId createCheckpoint(
+        const CheckpointInfo& checkpoint) override {
+        CheckpointInfo kept = checkpoint;
+        kept.id = nextCheckpointId++;
+
+        checkpointList.push_back(kept);
+        said.push_back(std::format("checkpoint {} type {}", kept.id, kept.type));
+
+        return kept.id;
+    }
+
+    bool updateCheckpoint(shared::CheckpointId id, const CheckpointInfo& checkpoint) override {
+        const auto it = std::ranges::find(checkpointList, id, &CheckpointInfo::id);
+        if (it == checkpointList.end()) {
+            return false;
+        }
+
+        *it = checkpoint;
+        it->id = id;
+        return true;
+    }
+
+    bool removeCheckpoint(shared::CheckpointId id) override {
+        return std::erase_if(checkpointList,
+                             [id](const CheckpointInfo& info) { return info.id == id; }) != 0;
     }
 
     void broadcast(std::string_view text) override {

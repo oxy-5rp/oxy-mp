@@ -968,3 +968,122 @@ TEST_CASE("a removed blip survives the round trip", "[messages]") {
     REQUIRE(got);
     CHECK(got->id == sent.id);
 }
+
+TEST_CASE("a marker survives the round trip", "[messages]") {
+    MarkerState sent;
+    sent.id = 3;
+    sent.type = 27;
+    sent.position = Vec3{.x = 10.0F, .y = 20.0F, .z = 30.0F};
+    sent.rotation = Vec3{.x = 0.0F, .y = 0.0F, .z = 90.0F};
+    sent.direction = Vec3{.x = 1.0F, .y = 0.0F, .z = 0.0F};
+    sent.scale = Vec3{.x = 2.0F, .y = 2.0F, .z = 1.5F};
+    sent.red = 10;
+    sent.green = 20;
+    sent.blue = 30;
+    sent.alpha = 40;
+    sent.visible = true;
+    sent.bobUpAndDown = true;
+    sent.faceCamera = false;
+    sent.rotate = true;
+    sent.streamingDistance = 75.0F;
+
+    const auto packet = encode(sent);
+    const auto got = decode<MarkerState>(packet);
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+    CHECK(got->type == sent.type);
+    CHECK(got->position.z == Catch::Approx(sent.position.z));
+    CHECK(got->rotation.z == Catch::Approx(sent.rotation.z));
+    CHECK(got->direction.x == Catch::Approx(sent.direction.x));
+    CHECK(got->scale.y == Catch::Approx(sent.scale.y));
+    CHECK(got->red == sent.red);
+    CHECK(got->green == sent.green);
+    CHECK(got->blue == sent.blue);
+    CHECK(got->alpha == sent.alpha);
+    CHECK(got->streamingDistance == Catch::Approx(sent.streamingDistance));
+}
+
+// Признаки едут одним байтом, и перепутать их местами легче всего именно там.
+// Проверяется каждый по отдельности: набор, где все четыре подняты, прошёл бы и
+// при перепутанных битах.
+TEST_CASE("marker flags do not bleed into each other", "[messages]") {
+    MarkerState sent;
+    sent.visible = false;
+    sent.bobUpAndDown = false;
+    sent.faceCamera = true;
+    sent.rotate = false;
+
+    const auto got = decode<MarkerState>(encode(sent));
+
+    REQUIRE(got);
+    CHECK_FALSE(got->visible);
+    CHECK_FALSE(got->bobUpAndDown);
+    CHECK(got->faceCamera);
+    CHECK_FALSE(got->rotate);
+}
+
+TEST_CASE("a removed marker survives the round trip", "[messages]") {
+    MarkerRemoved sent;
+    sent.id = 11;
+
+    const auto got = decode<MarkerRemoved>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+}
+
+TEST_CASE("a checkpoint survives the round trip", "[messages]") {
+    CheckpointState sent;
+    sent.id = 5;
+    sent.type = 4;
+    sent.position = Vec3{.x = -100.0F, .y = 50.0F, .z = 12.5F};
+    sent.nextPosition = Vec3{.x = -80.0F, .y = 50.0F, .z = 12.5F};
+    sent.radius = 4.5F;
+    sent.height = 3.0F;
+    sent.red = 1;
+    sent.green = 2;
+    sent.blue = 3;
+    sent.alpha = 4;
+    sent.iconRed = 5;
+    sent.iconGreen = 6;
+    sent.iconBlue = 7;
+    sent.iconAlpha = 8;
+    sent.visible = false;
+    sent.streamingDistance = 120.0F;
+
+    const auto got = decode<CheckpointState>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+    CHECK(got->type == sent.type);
+    CHECK(got->position.x == Catch::Approx(sent.position.x));
+    CHECK(got->nextPosition.x == Catch::Approx(sent.nextPosition.x));
+    CHECK(got->radius == Catch::Approx(sent.radius));
+    CHECK(got->height == Catch::Approx(sent.height));
+    CHECK(got->red == sent.red);
+    CHECK(got->iconRed == sent.iconRed);
+    CHECK(got->iconAlpha == sent.iconAlpha);
+    CHECK_FALSE(got->visible);
+    CHECK(got->streamingDistance == Catch::Approx(sent.streamingDistance));
+}
+
+TEST_CASE("a removed checkpoint survives the round trip", "[messages]") {
+    CheckpointRemoved sent;
+    sent.id = 9;
+
+    const auto got = decode<CheckpointRemoved>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+}
+
+// Номер сообщения читается прежде его полей, и по нему получатель решает, чем
+// разбирать пришедшее. Незнакомый номер здесь — это не ошибка разбора, а тихо
+// потерянное сообщение.
+TEST_CASE("markers and checkpoints are recognised by their message id", "[messages]") {
+    CHECK(peekMessageId(encode(MarkerState{})) == MessageId::MarkerState);
+    CHECK(peekMessageId(encode(MarkerRemoved{})) == MessageId::MarkerRemoved);
+    CHECK(peekMessageId(encode(CheckpointState{})) == MessageId::CheckpointState);
+    CHECK(peekMessageId(encode(CheckpointRemoved{})) == MessageId::CheckpointRemoved);
+}
