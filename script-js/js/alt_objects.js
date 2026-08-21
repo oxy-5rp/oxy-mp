@@ -307,6 +307,17 @@
 
     /// Метка на карте.
     class Blip extends BaseObject {
+        /// Номер метки у сервера. Ноль — метка ещё не заведена или уже убрана.
+        ///
+        /// Свой, отдельно от `id`: тот принадлежит BaseObject и сквозной для
+        /// всех родов, как и у alt:V, а этим меткой распоряжается сервер.
+        #serverId = 0;
+
+        /// Пока метка собирается, отправлять нечего: конструктор наследника
+        /// допишет ей размер или радиус, и уехавшая раньше метка мигнула бы у
+        /// всех дважды.
+        #settled = false;
+
         constructor(x, y, z) {
             super('blip');
 
@@ -324,8 +335,75 @@
             this.route = false;
             this.routeColor = 0;
             this.display = 2;
+        }
 
-            warnOnce('метка на карте');
+        /// Отдаёт метку серверу: заводит или поправляет.
+        ///
+        /// Зовётся вручную, а не из присваивания каждому полю, и это не
+        /// небрежность. Ресурс правит метку помногу сразу — покрасил,
+        /// переименовал, подвинул, — и отправка на каждое поле означала бы
+        /// четыре сообщения вместо одного и метку, поправленную наполовину,
+        /// у всех, кто её видит.
+        ///
+        /// Наблюдать за полями через посредника мы не стали намеренно: alt:V
+        /// отдаёт метку обычным объектом, и всякий, кто её у себя сохранит,
+        /// сравнит или положит ключом, ждёт именно объекта.
+        settle() {
+            this.#settled = true;
+            this.#send();
+        }
+
+        #describe() {
+            return {
+                position: this.pos,
+                sprite: this.sprite,
+                color: this.color,
+                alpha: this.alpha,
+                display: this.display,
+                scale: this.scale,
+                shortRange: this.shortRange,
+                name: this.name,
+                dimension: this.dimension,
+            };
+        }
+
+        #send() {
+            if (!this.#settled) {
+                return;
+            }
+
+            if (this.#serverId === 0) {
+                const id = native.createBlip(this.#describe());
+
+                if (id === null) {
+                    server.logWarning('метка не поставлена: в сессии их столько, ' +
+                                      'сколько разрешено настройкой maxblips');
+                    return;
+                }
+
+                this.#serverId = id;
+                return;
+            }
+
+            native.updateBlip(this.#serverId, this.#describe());
+        }
+
+        /// Отдаёт серверу то, что ресурс успел поправить.
+        ///
+        /// У alt:V метка обновляется сама, потому что живёт у него объектом с
+        /// наблюдаемыми полями. Здесь она обычный объект, и о правке нужно
+        /// сказать — иначе она останется у ресурса и никуда не уедет.
+        update() {
+            this.#send();
+        }
+
+        destroy() {
+            if (this.#serverId !== 0) {
+                native.removeBlip(this.#serverId);
+                this.#serverId = 0;
+            }
+
+            super.destroy();
         }
 
         attachTo() {
@@ -341,10 +419,12 @@
             if (typeof x === 'object' && x !== null) {
                 const point = new shared.Vector3(x);
                 super(point.x, point.y, point.z);
+                this.settle();
                 return;
             }
 
             super(x, y, z);
+            this.settle();
         }
     }
 
@@ -353,6 +433,7 @@
             super(x, y, z);
 
             this.scaleXY = new shared.Vector2(width, height);
+            this.settle();
         }
     }
 
@@ -361,6 +442,7 @@
             super(x, y, z);
 
             this.radius = Number(radius) || 0;
+            this.settle();
         }
     }
 

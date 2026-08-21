@@ -126,6 +126,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       story_(table),
       world_(table),
       frontend_(table),
+      blips_(table),
       files_(files),
       streamed_(streamed),
       described_(described),
@@ -751,6 +752,17 @@ void GameSession::applyServerEvents(int ped) {
             player_.teleport(ped, destination);
             spdlog::info("сервер перенёс нас");
         }
+    }
+
+    // Метки на карте — тем же порядком: сервер их назначает, рисует игра.
+    // Убранные раньше назначенных: метка, снятая и поставленная в одном такте,
+    // должна остаться поставленной.
+    for (const shared::BlipId id : mail_.takeRemovedBlips()) {
+        blips_.remove(id);
+    }
+
+    for (const shared::BlipState& blip : mail_.takeBlips()) {
+        blips_.apply(blip);
     }
 
     // Распоряжения о машинах исполняет тоже игра, и тоже потому, что больше

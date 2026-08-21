@@ -500,6 +500,19 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     (void)player;
 }
 
+/// Рассказывает вошедшему обо всех метках, которые ему видны.
+///
+/// Раздачей, как машины и предметы, метки не ходят: они не отбираются
+/// расстоянием, и рассказывать о них по мере приближения не о чем. Поэтому —
+/// один раз, целиком, при входе.
+void Server::sendBlipsTo(net::PeerId peer, std::int32_t dimension) {
+    for (const auto& [id, blip] : blips_.all()) {
+        if (script::dimensionsMeet(dimension, blip.dimension)) {
+            sendTo(peer, blip.state);
+        }
+    }
+}
+
 void Server::announcePlayerReady(Player& player) {
     if (player.scriptsReady) {
         return;
@@ -508,6 +521,11 @@ void Server::announcePlayerReady(Player& player) {
     player.scriptsReady = true;
 
     const shared::PlayerId joined = player.id;
+
+    // Метки — раньше обработчиков входа: те вправе поставить свои, и поставленная
+    // ими метка должна лечь поверх уже имеющихся, а не быть перекрыта рассылкой
+    // старых.
+    sendBlipsTo(player.peer, player.dimension);
 
     // Обработчик вправе тут же выдать оружие или поставить машину, и его
     // распоряжения должны лечь поверх наших, а не под них.
@@ -1318,6 +1336,33 @@ void Server::objectRemoved(shared::ObjectId id) {
     for (auto& [peer, player] : players_) {
         player.streamedObjects.erase(id);
     }
+}
+
+void Server::blipChanged(shared::BlipId id) {
+    const BlipDirectory::Blip* const blip = blips_.find(id);
+    if (blip == nullptr) {
+        return;
+    }
+
+    // Всем, кто в том же слое мира, и без оглядки на расстояние: метка на то и
+    // метка, что видна на карте целиком, а не когда до неё дошли.
+    //
+    // Надёжным каналом: потерянная метка не заменится следующей — она больше не
+    // изменится, и карта останется без неё до конца сессии.
+    for (const auto& [peer, player] : players_) {
+        if (script::dimensionsMeet(player.dimension, blip->dimension)) {
+            sendTo(peer, blip->state);
+        }
+    }
+}
+
+void Server::blipRemoved(shared::BlipId id) {
+    shared::BlipRemoved message;
+    message.id = id;
+
+    // Всем без разбора слоёв: у тех, кто метки не видел, её и так нет, а
+    // выяснять, кто видел, значило бы помнить это на каждого.
+    broadcast(message);
 }
 
 void Server::worldChanged() {

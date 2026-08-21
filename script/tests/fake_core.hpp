@@ -21,12 +21,14 @@ public:
     std::vector<PlayerInfo> playerList;
     std::vector<VehicleInfo> vehicleList;
     std::vector<ObjectInfo> objectList;
+    std::vector<BlipInfo> blipList;
 
     /// Что ядру велели сделать. Проверки смотрят сюда вместо сети.
     std::vector<std::string> said;
 
     shared::VehicleId nextVehicleId = 1;
     shared::ObjectId nextObjectId = 1;
+    shared::BlipId nextBlipId = 1;
 
     [[nodiscard]] std::vector<PlayerInfo> players() const override { return playerList; }
 
@@ -244,6 +246,40 @@ public:
 
         it->dimension = dimension;
         return true;
+    }
+
+    // --- Метки на карте ---------------------------------------------------
+
+    [[nodiscard]] std::vector<BlipInfo> blips() const override { return blipList; }
+
+    [[nodiscard]] std::optional<BlipInfo> blip(shared::BlipId id) const override {
+        const auto it = std::ranges::find(blipList, id, &BlipInfo::id);
+        return it == blipList.end() ? std::nullopt : std::optional{*it};
+    }
+
+    [[nodiscard]] shared::BlipId createBlip(const BlipInfo& blip) override {
+        BlipInfo kept = blip;
+        kept.id = nextBlipId++;
+
+        blipList.push_back(kept);
+        said.push_back(std::format("blip {} {}", kept.id, kept.name));
+
+        return kept.id;
+    }
+
+    bool updateBlip(shared::BlipId id, const BlipInfo& blip) override {
+        const auto it = std::ranges::find(blipList, id, &BlipInfo::id);
+        if (it == blipList.end()) {
+            return false;
+        }
+
+        *it = blip;
+        it->id = id;
+        return true;
+    }
+
+    bool removeBlip(shared::BlipId id) override {
+        return std::erase_if(blipList, [id](const BlipInfo& info) { return info.id == id; }) != 0;
     }
 
     void broadcast(std::string_view text) override {

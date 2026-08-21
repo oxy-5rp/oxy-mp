@@ -35,6 +35,7 @@ if(WIN32)
         src/ui_feed.cpp
         src/game/appearance.cpp
         src/game/bink_sound.cpp
+        src/game/blips.cpp
         src/game/controls.cpp
         src/game/code_patch.cpp
         src/game/crash_log.cpp

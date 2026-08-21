@@ -54,13 +54,46 @@ namespace {
     };
 }
 
+/// Метка, какой её знает скрипт.
+[[nodiscard]] script::BlipInfo describe(const BlipDirectory::Blip& blip) {
+    return script::BlipInfo{
+        .id = blip.state.id,
+        .position = blip.state.position,
+        .sprite = blip.state.sprite,
+        .colour = blip.state.colour,
+        .alpha = blip.state.alpha,
+        .display = blip.state.display,
+        .shortRange = blip.state.shortRange,
+        .scale = blip.state.scale,
+        .name = blip.state.name,
+        .dimension = blip.dimension,
+    };
+}
+
+/// Она же, какой её понимает протокол.
+///
+/// Номер сюда не переносится нарочно: назначает его сервер, и позволить скрипту
+/// его подставить значило бы разрешить метке стать другой меткой.
+[[nodiscard]] shared::BlipState describe(const script::BlipInfo& blip) {
+    return shared::BlipState{
+        .position = blip.position,
+        .sprite = blip.sprite,
+        .colour = blip.colour,
+        .alpha = blip.alpha,
+        .display = blip.display,
+        .shortRange = blip.shortRange,
+        .scale = blip.scale,
+        .name = blip.name,
+    };
+}
+
 } // namespace
 
-ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
-                       WorldClock& world, const Config& config, script::Events& events,
-                       CoreSink& sink) noexcept
-    : players_(&players), vehicles_(&vehicles), objects_(&objects), world_(&world),
-      config_(&config), events_(&events), sink_(&sink) {}
+ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles,
+                       ObjectDirectory& objects, BlipDirectory& blips, WorldClock& world,
+                       const Config& config, script::Events& events, CoreSink& sink) noexcept
+    : players_(&players), vehicles_(&vehicles), objects_(&objects), blips_(&blips),
+      world_(&world), config_(&config), events_(&events), sink_(&sink) {}
 
 std::vector<script::PlayerInfo> ServerCore::players() const {
     std::vector<script::PlayerInfo> everyone;
@@ -445,6 +478,55 @@ bool ServerCore::tell(shared::PlayerId id, std::string_view text) {
     }
 
     sink_->chatLine(id, std::string{text});
+    return true;
+}
+
+std::vector<script::BlipInfo> ServerCore::blips() const {
+    std::vector<script::BlipInfo> everything;
+    everything.reserve(blips_->size());
+
+    for (const auto& [id, blip] : blips_->all()) {
+        everything.push_back(describe(blip));
+    }
+
+    return everything;
+}
+
+std::optional<script::BlipInfo> ServerCore::blip(shared::BlipId id) const {
+    const BlipDirectory::Blip* const found = blips_->find(id);
+    return found == nullptr ? std::nullopt : std::optional{describe(*found)};
+}
+
+shared::BlipId ServerCore::createBlip(const script::BlipInfo& blip) {
+    const shared::BlipId id = blips_->add(describe(blip), config_->maxBlips);
+
+    if (id == shared::kInvalidBlipId) {
+        return shared::kInvalidBlipId;
+    }
+
+    (void)blips_->setDimension(id, blip.dimension);
+
+    sink_->blipChanged(id);
+    return id;
+}
+
+bool ServerCore::updateBlip(shared::BlipId id, const script::BlipInfo& blip) {
+    if (!blips_->update(id, describe(blip))) {
+        return false;
+    }
+
+    (void)blips_->setDimension(id, blip.dimension);
+
+    sink_->blipChanged(id);
+    return true;
+}
+
+bool ServerCore::removeBlip(shared::BlipId id) {
+    if (!blips_->remove(id)) {
+        return false;
+    }
+
+    sink_->blipRemoved(id);
     return true;
 }
 

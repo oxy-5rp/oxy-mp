@@ -81,6 +81,30 @@ struct ObjectInfo {
     std::int32_t dimension = kDefaultDimension;
 };
 
+/// Что скрипт знает о метке на карте.
+///
+/// Состав взят у alt:V поле в поле: режим, написанный под него, задаёт ровно
+/// это. Отдельной структурой, а не сообщением протокола, по той же причине, что
+/// и остальные: слой не должен знать про устройство передачи.
+struct BlipInfo {
+    shared::BlipId id = shared::kInvalidBlipId;
+
+    shared::Vec3 position;
+
+    std::uint16_t sprite = 1;
+    std::uint8_t colour = 0;
+    std::uint8_t alpha = 255;
+    std::uint8_t display = 2;
+
+    bool shortRange = false;
+    float scale = 1.0F;
+
+    std::string name;
+
+    /// В каком слое мира метка видна. См. dimension.hpp.
+    std::int32_t dimension = kDefaultDimension;
+};
+
 /// Всё, до чего дотягивается скрипт.
 ///
 /// Объявлено интерфейсом, а не написано здесь же, и причина не в отвлечённой
@@ -233,6 +257,28 @@ public:
 
     /// Переставляет предмет в другой слой мира. false — предмета уже нет.
     virtual bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) = 0;
+
+    // --- Метки на карте --------------------------------------------------------
+
+    [[nodiscard]] virtual std::vector<BlipInfo> blips() const = 0;
+    [[nodiscard]] virtual std::optional<BlipInfo> blip(shared::BlipId id) const = 0;
+
+    /// Ставит метку. kInvalidBlipId — отказ: предел исчерпан.
+    ///
+    /// Номер в переданном описании не читается: его назначает сервер.
+    [[nodiscard]] virtual shared::BlipId createBlip(const BlipInfo& blip) = 0;
+
+    /// Правит метку целиком: цвет, значок, подпись, место, слой мира.
+    ///
+    /// Целиком, а не по полю, и это не грубость. Ресурс правит метку редко и
+    /// сразу помногу — покрасил, переименовал, подвинул, — а поле за полем
+    /// означало бы по сообщению на каждое, и получатель увидел бы метку
+    /// поправленной наполовину.
+    ///
+    /// false — метки уже нет.
+    virtual bool updateBlip(shared::BlipId id, const BlipInfo& blip) = 0;
+
+    virtual bool removeBlip(shared::BlipId id) = 0;
 
     // --- Мир и общение ---------------------------------------------------------
 

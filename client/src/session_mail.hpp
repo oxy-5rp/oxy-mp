@@ -188,6 +188,36 @@ public:
         return std::exchange(vehicleRepairs_, {});
     }
 
+    /// Метки на карте, назначенные сервером.
+    void deliverBlips(std::vector<shared::BlipState> blips) {
+        if (blips.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        blips_.insert(blips_.end(), std::make_move_iterator(blips.begin()),
+                      std::make_move_iterator(blips.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::BlipState> takeBlips() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(blips_, {});
+    }
+
+    void deliverRemovedBlips(std::vector<shared::BlipId> blips) {
+        if (blips.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        removedBlips_.insert(removedBlips_.end(), blips.begin(), blips.end());
+    }
+
+    [[nodiscard]] std::vector<shared::BlipId> takeRemovedBlips() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(removedBlips_, {});
+    }
+
     /// Именованные события от сервера.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь они
@@ -390,6 +420,8 @@ private:
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
+    std::vector<shared::BlipState> blips_;
+    std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::VehicleAppearance> incomingAppearances_;
     std::vector<shared::PlayerAppearance> incomingPlayerAppearances_;
     std::optional<shared::PlayerAppearance> outgoingAppearance_;

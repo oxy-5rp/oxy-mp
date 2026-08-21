@@ -548,6 +548,41 @@ inline constexpr std::uint64_t kGetBlipInfoIdCoord = 0X7DFE6973AE84B6ED;
 /// DOES_BLIP_EXIST, канонический хеш 0XA6DB27D19ECBB7DA.
 inline constexpr std::uint64_t kDoesBlipExist = 0XC450B06E5AAA0985;
 
+// --- Метки на карте ----------------------------------------------------------
+//
+// Ставит их сервер, а рисует игра, и другого пути к её карте нет: метка — не
+// сущность мира, а строчка в её собственном списке.
+
+/// ADD_BLIP_FOR_COORD, канонический хеш 0X5A039BB0BCA604B6.
+inline constexpr std::uint64_t kAddBlipForCoord = 0X34864AB7DA700AA6;
+
+/// REMOVE_BLIP, канонический хеш 0X86A652570E5F25DD.
+inline constexpr std::uint64_t kRemoveBlip = 0XFE54B8568B2ABD12;
+
+/// SET_BLIP_SPRITE, канонический хеш 0XDF735600A4696DAF.
+inline constexpr std::uint64_t kSetBlipSprite = 0X4C905FB262965D5D;
+
+/// SET_BLIP_COLOUR, канонический хеш 0X03D7FB09E75D6B7E.
+inline constexpr std::uint64_t kSetBlipColour = 0X61183D6239A9D7B8;
+
+/// SET_BLIP_ALPHA, канонический хеш 0X45FF974EEE1C8734.
+inline constexpr std::uint64_t kSetBlipAlpha = 0XF42EBD7CD0682A8B;
+
+/// SET_BLIP_SCALE, канонический хеш 0XD38744167B2FA257.
+inline constexpr std::uint64_t kSetBlipScale = 0X5D3946F818C6B331;
+
+/// SET_BLIP_DISPLAY, канонический хеш 0X9029B2F3DA924928.
+inline constexpr std::uint64_t kSetBlipDisplay = 0XF55F62DA99DB0C2F;
+
+/// SET_BLIP_AS_SHORT_RANGE, канонический хеш 0XBE8BE4FE60E27B72.
+inline constexpr std::uint64_t kSetBlipAsShortRange = 0X360B279488A775FC;
+
+/// BEGIN_TEXT_COMMAND_SET_BLIP_NAME, канонический хеш 0XF9113A30DE5C6670.
+inline constexpr std::uint64_t kBeginTextCommandSetBlipName = 0XF3D182B81172EAB6;
+
+/// END_TEXT_COMMAND_SET_BLIP_NAME, канонический хеш 0XBC38B49BCB83BC9B.
+inline constexpr std::uint64_t kEndTextCommandSetBlipName = 0XFB605529038475D2;
+
 /// SET_VEHICLE_FIXED, канонический хеш 0X115722B1B9C14C1C.
 inline constexpr std::uint64_t kSetVehicleFixed = 0XF698038C13845696;
 

@@ -9,6 +9,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -604,6 +605,124 @@ void objectDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(info.GetIsolate()).core().removeObject(*id));
 }
 
+// --- Метка на карте ---------------------------------------------------------
+//
+// Мост нарочно плоский: метка приходит и уходит объектом с полями, а не
+// сущностью с методами. Причина в том, что метку правят целиком и редко —
+// покрасил, переименовал, подвинул, — а поле за полем означало бы по сообщению
+// клиенту на каждое, и он увидел бы метку поправленной наполовину.
+//
+// Сущностью её делает слой alt:V, поверх этого.
+
+[[nodiscard]] std::optional<BlipInfo> blipFromJs(v8::Local<v8::Context> context,
+                                                 v8::Local<v8::Value> value) {
+    if (value.IsEmpty() || !value->IsObject()) {
+        return std::nullopt;
+    }
+
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Object> object = value.As<v8::Object>();
+
+    const auto number = [&](const char* name, double fallback) {
+        v8::Local<v8::Value> field;
+
+        if (!object->Get(context, toJs(isolate, name)).ToLocal(&field)) {
+            return fallback;
+        }
+
+        double got = fallback;
+        (void)field->NumberValue(context).To(&got);
+
+        return std::isfinite(got) ? got : fallback;
+    };
+
+    const auto flag = [&](const char* name) {
+        v8::Local<v8::Value> field;
+
+        if (!object->Get(context, toJs(isolate, name)).ToLocal(&field)) {
+            return false;
+        }
+
+        return field->BooleanValue(isolate);
+    };
+
+    BlipInfo blip;
+
+    v8::Local<v8::Value> position;
+    if (object->Get(context, toJs(isolate, "position")).ToLocal(&position)) {
+        blip.position = vec3FromJs(context, position).value_or(shared::Vec3{});
+    }
+
+    blip.sprite = static_cast<std::uint16_t>(number("sprite", 1));
+    blip.colour = static_cast<std::uint8_t>(number("color", 0));
+    blip.alpha = static_cast<std::uint8_t>(number("alpha", 255));
+    blip.display = static_cast<std::uint8_t>(number("display", 2));
+    blip.scale = static_cast<float>(number("scale", 1.0));
+    blip.dimension = static_cast<std::int32_t>(number("dimension", 0));
+    blip.shortRange = flag("shortRange");
+
+    v8::Local<v8::Value> name;
+    if (object->Get(context, toJs(isolate, "name")).ToLocal(&name) && !name->IsUndefined()) {
+        blip.name = fromJs(isolate, name);
+    }
+
+    return blip;
+}
+
+void createBlip(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<BlipInfo> blip =
+        info.Length() >= 1 ? blipFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!blip) {
+        fail(isolate, "createBlip ждёт описание метки объектом");
+        return;
+    }
+
+    const shared::BlipId id = resourceOf(isolate).core().createBlip(*blip);
+
+    if (id == shared::kInvalidBlipId) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(id));
+}
+
+void updateBlip(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    const std::optional<BlipInfo> blip =
+        info.Length() >= 2 ? blipFromJs(isolate->GetCurrentContext(), info[1]) : std::nullopt;
+
+    if (!id || !blip) {
+        fail(isolate, "updateBlip ждёт номер метки и её описание");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().updateBlip(static_cast<shared::BlipId>(*id), *blip));
+}
+
+void removeBlip(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!id) {
+        fail(isolate, "removeBlip ждёт номер метки");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeBlip(static_cast<shared::BlipId>(*id)));
+}
+
 // --- Объект oxymp -----------------------------------------------------------
 
 void onEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -1047,6 +1166,9 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createVehicle", createVehicle);
     addFunction(context, oxymp, "objects", objects);
     addFunction(context, oxymp, "createObject", createObject);
+    addFunction(context, oxymp, "createBlip", createBlip);
+    addFunction(context, oxymp, "updateBlip", updateBlip);
+    addFunction(context, oxymp, "removeBlip", removeBlip);
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
 

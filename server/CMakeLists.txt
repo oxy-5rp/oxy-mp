@@ -1,4 +1,5 @@
 add_executable(oxymp_server
+    src/blip_directory.cpp
     src/config_file.cpp
     src/http_server.cpp
     src/main.cpp

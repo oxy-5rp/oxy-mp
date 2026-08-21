@@ -457,6 +457,18 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::BlipState:
+        if (auto blip = shared::decode<shared::BlipState>(packet)) {
+            blips_.push_back(std::move(*blip));
+        }
+        return;
+
+    case shared::MessageId::BlipRemoved:
+        if (const auto removed = shared::decode<shared::BlipRemoved>(packet)) {
+            removedBlips_.push_back(removed->id);
+        }
+        return;
+
     case shared::MessageId::ServerEvent:
         if (auto event = shared::decode<shared::ServerEvent>(packet)) {
             serverEvents_.push_back(std::move(*event));
@@ -748,6 +760,14 @@ std::vector<shared::VehicleRepair> Connection::takeVehicleRepairs() {
     return std::exchange(vehicleRepairs_, {});
 }
 
+std::vector<shared::BlipState> Connection::takeBlips() {
+    return std::exchange(blips_, {});
+}
+
+std::vector<shared::BlipId> Connection::takeRemovedBlips() {
+    return std::exchange(removedBlips_, {});
+}
+
 std::vector<shared::ServerEvent> Connection::takeServerEvents() {
     return std::exchange(serverEvents_, {});
 }
@@ -889,6 +909,8 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     removedObjects_.clear();
     vehicleTeleports_.clear();
     vehicleRepairs_.clear();
+    blips_.clear();
+    removedBlips_.clear();
     loadout_.reset();
     health_.reset();
     latency_.reset();

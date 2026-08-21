@@ -732,6 +732,42 @@ VehicleRepair VehicleRepair::read(ByteReader& reader) {
     return message;
 }
 
+void BlipState::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeVec3(position);
+    writer.writeU16(sprite);
+    writer.writeU8(colour);
+    writer.writeU8(alpha);
+    writer.writeU8(display);
+    writer.writeU8(shortRange ? 1 : 0);
+    writer.writeFloat(scale);
+    writer.writeString(name);
+}
+
+BlipState BlipState::read(ByteReader& reader) {
+    BlipState message;
+    message.id = reader.readU32();
+    message.position = reader.readVec3();
+    message.sprite = reader.readU16();
+    message.colour = reader.readU8();
+    message.alpha = reader.readU8();
+    message.display = reader.readU8();
+    message.shortRange = reader.readU8() != 0;
+    message.scale = reader.readFloat();
+    message.name = reader.readString();
+    return message;
+}
+
+void BlipRemoved::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+}
+
+BlipRemoved BlipRemoved::read(ByteReader& reader) {
+    BlipRemoved message;
+    message.id = reader.readU32();
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -769,6 +805,8 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::PlayerStates:
     case MessageId::VehicleTeleport:
     case MessageId::VehicleRepair:
+    case MessageId::BlipState:
+    case MessageId::BlipRemoved:
         return static_cast<MessageId>(packet.front());
     }
 

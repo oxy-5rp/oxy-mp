@@ -256,6 +256,13 @@ public:
     [[nodiscard]] std::vector<shared::VehicleTeleport> takeVehicleTeleports();
     [[nodiscard]] std::vector<shared::VehicleRepair> takeVehicleRepairs();
 
+    /// Метки на карте: какими их задал сервер и какие он убрал.
+    ///
+    /// Расстоянием не отбираются: метка на то и метка, что видна на карте
+    /// целиком. Сервер шлёт их разом при входе, а дальше — по изменению.
+    [[nodiscard]] std::vector<shared::BlipState> takeBlips();
+    [[nodiscard]] std::vector<shared::BlipId> takeRemovedBlips();
+
     /// Забирает пришедшие от сервера именованные события.
     ///
     /// Клиент их не толкует: имя и нагрузку сочиняет ресурс сервера, а здесь
@@ -392,6 +399,8 @@ private:
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
+    std::vector<shared::BlipState> blips_;
+    std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::ServerEvent> serverEvents_;
     std::vector<shared::VehicleAppearance> vehicleAppearances_;
 

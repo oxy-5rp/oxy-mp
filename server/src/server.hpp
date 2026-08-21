@@ -5,6 +5,7 @@
 #include "player_registry.hpp"
 #include "resource_catalog.hpp"
 #include "resource_store.hpp"
+#include "blip_directory.hpp"
 #include "object_directory.hpp"
 #include "runtime.hpp"
 #include "server_core.hpp"
@@ -115,6 +116,11 @@ private:
     void vehicleRepaired(shared::VehicleId id) override;
     void objectAdded(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
+    /// Рассказывает вошедшему обо всех метках, которые ему видны.
+    void sendBlipsTo(net::PeerId peer, std::int32_t dimension);
+
+    void blipChanged(shared::BlipId id) override;
+    void blipRemoved(shared::BlipId id) override;
     void worldChanged() override;
     void chatLine(shared::PlayerId to, std::string text) override;
 
@@ -240,6 +246,9 @@ private:
     /// Что расставлено в мире руками.
     ObjectDirectory objects_;
 
+    /// Что нарисовано на карте.
+    BlipDirectory blips_;
+
     /// Что сервер раздаёт клиентам сверх самой игры.
     ///
     /// Объявлен раньше раздачи и потому переживает её: раздача держит на него
@@ -269,7 +278,8 @@ private:
     ///
     /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
     /// и быть не должно — они разошлись бы с настоящими молча.
-    ServerCore core_{players_, vehicles_, objects_, world_, config_, events_, *this};
+    ServerCore core_{players_, vehicles_, objects_, blips_,  world_,
+                     config_,  events_,   *this};
 
     /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
     ResourceCatalog catalog_;

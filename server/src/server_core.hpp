@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hpp"
+#include "blip_directory.hpp"
 #include "object_directory.hpp"
 #include "player_registry.hpp"
 #include "vehicle_directory.hpp"
@@ -80,6 +81,14 @@ public:
     virtual void objectAdded(shared::ObjectId id) = 0;
     virtual void objectRemoved(shared::ObjectId id) = 0;
 
+    /// Метка заведена или поправлена — рассказать о ней всем, кто её видит.
+    ///
+    /// Одним поводом на то и другое: получателю разницы нет, а нам не нужно
+    /// помнить, кому о какой метке уже сказано.
+    virtual void blipChanged(shared::BlipId id) = 0;
+
+    virtual void blipRemoved(shared::BlipId id) = 0;
+
     /// Погода или время сменились и должны уйти немедленно.
     virtual void worldChanged() = 0;
 
@@ -102,8 +111,8 @@ protected:
 class ServerCore final : public script::Core {
 public:
     ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
-               WorldClock& world, const Config& config, script::Events& events,
-               CoreSink& sink) noexcept;
+               BlipDirectory& blips, WorldClock& world, const Config& config,
+               script::Events& events, CoreSink& sink) noexcept;
 
     // --- Игроки ----------------------------------------------------------------
 
@@ -149,6 +158,12 @@ public:
     bool removeObject(shared::ObjectId id) override;
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;
 
+    [[nodiscard]] std::vector<script::BlipInfo> blips() const override;
+    [[nodiscard]] std::optional<script::BlipInfo> blip(shared::BlipId id) const override;
+    [[nodiscard]] shared::BlipId createBlip(const script::BlipInfo& blip) override;
+    bool updateBlip(shared::BlipId id, const script::BlipInfo& blip) override;
+    bool removeBlip(shared::BlipId id) override;
+
     // --- Мир и общение ---------------------------------------------------------
 
     void broadcast(std::string_view text) override;
@@ -161,6 +176,7 @@ private:
     PlayerRegistry* players_ = nullptr;
     VehicleDirectory* vehicles_ = nullptr;
     ObjectDirectory* objects_ = nullptr;
+    BlipDirectory* blips_ = nullptr;
     WorldClock* world_ = nullptr;
     const Config* config_ = nullptr;
     script::Events* events_ = nullptr;

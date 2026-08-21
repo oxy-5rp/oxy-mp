@@ -930,3 +930,41 @@ TEST_CASE("a vehicle command is recognised by its first byte", "[messages]") {
     CHECK(peekMessageId(teleport) == MessageId::VehicleTeleport);
     CHECK(peekMessageId(repair) == MessageId::VehicleRepair);
 }
+
+TEST_CASE("a blip survives the round trip", "[messages]") {
+    BlipState sent;
+    sent.id = 7;
+    sent.position = Vec3{.x = 100.5F, .y = -200.25F, .z = 30.0F};
+    sent.sprite = 402;
+    sent.colour = 5;
+    sent.alpha = 200;
+    sent.display = 4;
+    sent.shortRange = true;
+    sent.scale = 0.8F;
+    sent.name = "Банк";
+
+    const auto packet = encode(sent);
+    const auto got = decode<BlipState>(packet);
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+    CHECK(got->position.x == Catch::Approx(sent.position.x));
+    CHECK(got->sprite == sent.sprite);
+    CHECK(got->colour == sent.colour);
+    CHECK(got->alpha == sent.alpha);
+    CHECK(got->display == sent.display);
+    CHECK(got->shortRange == sent.shortRange);
+    CHECK(got->scale == Catch::Approx(sent.scale));
+    CHECK(got->name == sent.name);
+}
+
+TEST_CASE("a removed blip survives the round trip", "[messages]") {
+    BlipRemoved sent;
+    sent.id = 42;
+
+    const auto packet = encode(sent);
+    const auto got = decode<BlipRemoved>(packet);
+
+    REQUIRE(got);
+    CHECK(got->id == sent.id);
+}

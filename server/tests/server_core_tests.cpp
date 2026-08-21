@@ -77,6 +77,14 @@ public:
         sent.push_back(std::format("object- {}", id));
     }
 
+    void blipChanged(shared::BlipId id) override {
+        sent.push_back(std::format("blip {}", id));
+    }
+
+    void blipRemoved(shared::BlipId id) override {
+        sent.push_back(std::format("blip- {}", id));
+    }
+
     void worldChanged() override { sent.emplace_back("world"); }
 
     void chatLine(shared::PlayerId to, std::string text) override {
@@ -117,12 +125,13 @@ struct Session {
     PlayerRegistry players;
     VehicleDirectory vehicles;
     ObjectDirectory objects;
+    BlipDirectory blips;
     WorldClock world{"EXTRASUNNY", 12, 0};
     Config config;
     script::Events events;
     FakeSink sink;
 
-    ServerCore core{players, vehicles, objects, world, config, events, sink};
+    ServerCore core{players, vehicles, objects, blips, world, config, events, sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
         players.add(peer, std::move(nickname), 0);
@@ -573,4 +582,72 @@ TEST_CASE("a command for a vehicle that is gone changes nothing", "[server][scri
 
     CHECK_FALSE(session.core.teleportVehicle(1, shared::Vec3{}, 0.0F));
     CHECK_FALSE(session.core.repairVehicle(1));
+}
+
+TEST_CASE("a blip is handed a number by the server, not by the script", "[server][script]") {
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.position = shared::Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+    wanted.sprite = 402;
+    wanted.name = "Банк";
+
+    // Номер, подставленный скриптом, не читается: назначает его сервер, и
+    // позволить метке назвать себя чужим номером значило бы разрешить ей стать
+    // другой меткой.
+    wanted.id = 999;
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+
+    REQUIRE(id != shared::kInvalidBlipId);
+    CHECK(id != 999);
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->id == id);
+    CHECK(got->sprite == 402);
+    CHECK(got->name == "Банк");
+    CHECK(session.sink.sent.back() == std::format("blip {}", id));
+}
+
+TEST_CASE("a blip is edited whole, and the clients hear about it", "[server][script]") {
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.name = "Было";
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    script::BlipInfo changed = wanted;
+    changed.name = "Стало";
+    changed.colour = 3;
+    changed.dimension = 5;
+
+    REQUIRE(session.core.updateBlip(id, changed));
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->name == "Стало");
+    CHECK(got->colour == 3);
+    CHECK(got->dimension == 5);
+    CHECK(session.sink.sent.back() == std::format("blip {}", id));
+}
+
+TEST_CASE("a blip that is gone refuses both editing and removing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.updateBlip(1, script::BlipInfo{}));
+    CHECK_FALSE(session.core.removeBlip(1));
+}
+
+TEST_CASE("blips stop being handed out once the limit is reached", "[server][script]") {
+    Session session;
+    session.config.maxBlips = 2;
+
+    CHECK(session.core.createBlip(script::BlipInfo{}) != shared::kInvalidBlipId);
+    CHECK(session.core.createBlip(script::BlipInfo{}) != shared::kInvalidBlipId);
+    CHECK(session.core.createBlip(script::BlipInfo{}) == shared::kInvalidBlipId);
 }

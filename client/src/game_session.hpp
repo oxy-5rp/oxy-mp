@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/appearance.hpp"
+#include "game/blips.hpp"
 #include "game/ped_appearance.hpp"
 #include "game/controls.hpp"
 #include "game/data_files.hpp"
@@ -274,6 +275,9 @@ private:
     game::Story story_;
     game::World world_;
     game::Frontend frontend_;
+
+    /// Метки на карте, поставленные сервером.
+    game::Blips blips_;
 
     /// Своё устройство файловой системы игры. Может не быть: клиент работает и
     /// без него, просто ничего не подменяет.

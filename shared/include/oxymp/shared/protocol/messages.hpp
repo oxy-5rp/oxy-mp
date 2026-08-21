@@ -1153,6 +1153,57 @@ struct ResourceList {
     [[nodiscard]] static ResourceList read(ByteReader& reader);
 };
 
+using BlipId = std::uint32_t;
+
+/// Метки нет. Ноль, как и у предметов: счётчик начинается с единицы.
+inline constexpr BlipId kInvalidBlipId = 0;
+
+/// Метка на карте, какой её задал сервер.
+///
+/// Состав взят у alt:V поле в поле: режим, написанный под него, задаёт ровно
+/// это и ждёт, что оно подействует.
+struct BlipState {
+    static constexpr MessageId kId = MessageId::BlipState;
+
+    BlipId id = kInvalidBlipId;
+
+    Vec3 position;
+
+    /// Какой значок. Единица — обычная белая точка, и это же значение по
+    /// умолчанию у alt:V.
+    std::uint16_t sprite = 1;
+
+    /// Цвет из палитры игры и прозрачность.
+    std::uint8_t colour = 0;
+    std::uint8_t alpha = 255;
+
+    /// Как метка показывается: только на карте, только на радаре, и там и там.
+    /// Числа игры, у alt:V они те же.
+    std::uint8_t display = 2;
+
+    /// Видна ли метка только вблизи.
+    bool shortRange = false;
+
+    /// Размер значка. Единица — обычный.
+    float scale = 1.0F;
+
+    /// Подпись в списке на карте. Пустая — игра подпишет метку сама.
+    std::string name;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static BlipState read(ByteReader& reader);
+};
+
+/// Метки больше нет.
+struct BlipRemoved {
+    static constexpr MessageId kId = MessageId::BlipRemoved;
+
+    BlipId id = kInvalidBlipId;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static BlipRemoved read(ByteReader& reader);
+};
+
 /// Переставить машину. Только от сервера и только её ведущему.
 ///
 /// Ведущему, а не всем: машина живёт в игре у него, и переставить её может
