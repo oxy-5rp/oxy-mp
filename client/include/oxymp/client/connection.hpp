@@ -273,6 +273,12 @@ public:
     [[nodiscard]] std::vector<shared::CheckpointState> takeCheckpoints();
     [[nodiscard]] std::vector<shared::CheckpointId> takeRemovedCheckpoints();
 
+    /// Движения, которые сервер велел сыграть.
+    ///
+    /// Приходят и про нас самих, и про чужих: персонаж живёт в игре у хозяина,
+    /// но показан он у каждого — куклой, которую ведут снимки.
+    [[nodiscard]] std::vector<shared::PlayerAnimation> takeAnimations();
+
     /// Куда сервер велел сесть. Приходит только нам самим.
     [[nodiscard]] std::vector<shared::PlayerIntoVehicle> takeSeats();
 
@@ -414,6 +420,7 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::PlayerAnimation> animations_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;
     std::vector<shared::CheckpointState> checkpoints_;

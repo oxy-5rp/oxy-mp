@@ -126,6 +126,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       story_(table),
       world_(table),
       frontend_(table),
+      pedAnimation_(table),
       blips_(table),
       markers_(table),
       checkpoints_(table),
@@ -770,8 +771,53 @@ void GameSession::forgetDrawnOnLeaving() {
     checkpoints_.clear();
 }
 
+/// Сколько ждать движение, прежде чем забыть его.
+///
+/// Столько же, сколько PedAnimation ждёт набор движений: дольше ждать нечего —
+/// набор, не загрузившийся за это время, не загрузится вовсе, а движение,
+/// сыгранное минутой позже, уже не то движение.
+constexpr auto kAnimationPatience = std::chrono::seconds{5};
+
+void GameSession::applyAnimations(int ped) {
+    for (shared::PlayerAnimation& animation : mail_.takeAnimations()) {
+        pendingAnimations_.push_back(
+            PendingAnimation{.animation = std::move(animation), .since = Clock::now()});
+    }
+
+    if (pendingAnimations_.empty()) {
+        return;
+    }
+
+    const shared::PlayerId self = status_.snapshot().playerId;
+    const Clock::time_point now = Clock::now();
+
+    std::erase_if(pendingAnimations_, [&](const PendingAnimation& pending) {
+        // Своё движение играет собственный персонаж, чужое — кукла. Куклы может
+        // не быть вовсе: игрок далеко или его модель ещё грузится.
+        const int target = pending.animation.playerId == self && self != shared::kInvalidPlayerId
+                               ? ped
+                               : remotePlayers_.handleFor(pending.animation.playerId);
+
+        if (target != 0) {
+            // Пустой набор означает «снять задачи»: у alt:V это отдельный вызов
+            // clearTasks, а по сети — то же самое распоряжение.
+            if (pending.animation.dictionary.empty()) {
+                pedAnimation_.clearTasks(target);
+                return true;
+            }
+
+            if (pedAnimation_.playNamed(target, pending.animation)) {
+                return true;
+            }
+        }
+
+        return now - pending.since >= kAnimationPatience;
+    });
+}
+
 void GameSession::applyServerEvents(int ped) {
     forgetDrawnOnLeaving();
+    applyAnimations(ped);
 
     // Перенос — единственное распоряжение сервера, которое исполняет игра:
     // персонаж живёт здесь, и переставить его больше некому.

@@ -100,6 +100,13 @@ public:
     virtual void checkpointChanged(shared::CheckpointId id) = 0;
     virtual void checkpointRemoved(shared::CheckpointId id) = 0;
 
+    /// Персонажу играть движение — рассказать всем, кто игрока видит.
+    ///
+    /// Всем, а не одному хозяину: у остальных персонаж показан куклой, и
+    /// молчащая кукла осталась бы стоять столбом, пока хозяин отыгрывает.
+    virtual void animationPlayed(const Player& player,
+                                 const shared::PlayerAnimation& animation) = 0;
+
     /// Игрок перешёл в другой слой мира; было — previous.
     ///
     /// Всё, что отбирается расстоянием, разберётся само собой на ближайшей
@@ -150,6 +157,8 @@ public:
                     std::uint8_t texture, std::uint8_t palette) override;
     bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
                  std::int8_t texture) override;
+    bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
+    bool clearTasks(shared::PlayerId id) override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;

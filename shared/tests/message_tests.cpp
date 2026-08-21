@@ -1087,3 +1087,49 @@ TEST_CASE("markers and checkpoints are recognised by their message id", "[messag
     CHECK(peekMessageId(encode(CheckpointState{})) == MessageId::CheckpointState);
     CHECK(peekMessageId(encode(CheckpointRemoved{})) == MessageId::CheckpointRemoved);
 }
+
+TEST_CASE("an animation survives the round trip", "[messages]") {
+    PlayerAnimation sent;
+    sent.playerId = 4;
+    sent.dictionary = "amb@world_human_hang_out_street@male_c@base";
+    sent.name = "base";
+    sent.blendIn = 4.0F;
+    sent.blendOut = -4.0F;
+    sent.duration = 5000;
+    sent.flags = 1;
+    sent.playbackRate = 0.5F;
+    sent.locks = static_cast<std::uint8_t>(AnimationLock::X) |
+                 static_cast<std::uint8_t>(AnimationLock::Z);
+
+    const auto got = decode<PlayerAnimation>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->playerId == sent.playerId);
+    CHECK(got->dictionary == sent.dictionary);
+    CHECK(got->name == sent.name);
+    CHECK(got->blendIn == Catch::Approx(sent.blendIn));
+    CHECK(got->blendOut == Catch::Approx(sent.blendOut));
+    CHECK(got->duration == sent.duration);
+    CHECK(got->flags == sent.flags);
+    CHECK(got->playbackRate == Catch::Approx(sent.playbackRate));
+    CHECK(has(got->locks, AnimationLock::X));
+    CHECK_FALSE(has(got->locks, AnimationLock::Y));
+    CHECK(has(got->locks, AnimationLock::Z));
+}
+
+// Минус единица в длительности означает «до конца», и через сеть она ходит
+// беззнаковой. Перепутанное знаковое расширение превратило бы её в четыре
+// миллиарда миллисекунд — то есть в движение длиной в полтора месяца.
+TEST_CASE("an endless animation keeps its minus one", "[messages]") {
+    PlayerAnimation sent;
+    sent.duration = -1;
+
+    const auto got = decode<PlayerAnimation>(encode(sent));
+
+    REQUIRE(got);
+    CHECK(got->duration == -1);
+}
+
+TEST_CASE("an animation is recognised by its message id", "[messages]") {
+    CHECK(peekMessageId(encode(PlayerAnimation{})) == MessageId::PlayerAnimation);
+}

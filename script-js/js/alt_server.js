@@ -691,7 +691,38 @@
         /// У alt:V место называется вторым доводом, и минус единица означает
         /// «за руль». У нас так же — нумерация взята у самой игры.
         addWeaponComponent: { value: unperformed('player.addWeaponComponent', 'обвесы оружия не передаются') },
-        playAnimation: { value: unperformed('player.playAnimation', 'движения по слову сервера не проигрываются') },
+        /// Велит персонажу играть движение.
+        ///
+        /// Доводы — те же и в том же порядке, что у alt:V. Уходит оно не одному
+        /// хозяину персонажа, а всем, кто игрока видит: у остальных он показан
+        /// куклой, и молчащая кукла осталась бы стоять столбом.
+        ///
+        /// Движение спорит с задачами, которыми ведутся куклы: идущему оно
+        /// достанется наполовину — его тело в это время ведёт задача ходьбы.
+        /// Стоящему — целиком, и это тот случай, ради которого движения и зовут.
+        playAnimation: {
+            value(dictionary, name, blendIn, blendOut, duration, flags, playbackRate,
+                  lockX, lockY, lockZ) {
+                return native.playAnimation(this.id, {
+                    dictionary: String(dictionary ?? ''),
+                    name: String(name ?? ''),
+                    blendIn: blendIn === undefined ? 8 : Number(blendIn),
+                    blendOut: blendOut === undefined ? 8 : Number(blendOut),
+                    duration: duration === undefined ? -1 : Number(duration),
+                    flags: Number(flags) || 0,
+                    playbackRate: playbackRate === undefined ? 1 : Number(playbackRate),
+                    lockX: Boolean(lockX),
+                    lockY: Boolean(lockY),
+                    lockZ: Boolean(lockZ),
+                });
+            },
+        },
+        /// Снимает с персонажа все задачи, включая начатое движение.
+        clearTasks: {
+            value() {
+                return native.clearTasks(this.id);
+            },
+        },
         attachTo: { value: unperformed('player.attachTo', 'привязка сущностей друг к другу не передаётся') },
     });
 
@@ -908,6 +939,19 @@
         once,
         off,
         emit,
+
+        /// Объявить событие только своему ресурсу, минуя ядро.
+        ///
+        /// Наружу не отдаётся: это не часть API alt:V, а внутренний ход для
+        /// alt_objects.js. Нужен ему затем, что зона — обычный объект JavaScript
+        /// внутри одного изолята, и через ядро она пройти не может: доводы
+        /// укладываются в JSON, и с той стороны от зоны остаётся безымянный
+        /// слепок. Ресурс же сравнивает её через `===` со своей — так написаны
+        /// все режимы, — и сравнение это не сошлось бы никогда.
+        ///
+        /// Слышат событие оттого только подписчики своего ресурса, и иначе быть
+        /// не может: у чужого ресурса этой зоны нет вовсе.
+        fireLocal: fire,
         onClient,
         offClient,
         emitClient,

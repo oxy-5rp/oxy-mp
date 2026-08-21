@@ -1429,6 +1429,17 @@ void Server::redrawKindFor(const Directory& directory, const Player& player,
     }
 }
 
+void Server::animationPlayed(const Player& player, const shared::PlayerAnimation& animation) {
+    // Всем, кто рядом и в том же слое, включая самого игрока: у него движение
+    // играет настоящий персонаж, у остальных — кукла.
+    //
+    // Надёжным каналом: движение — это событие, и потерянное не повторится.
+    // Дальним не шлём вовсе — куклы у них нет, а начатое движение к их приезду
+    // всё равно кончится.
+    broadcastNear(player.position, shared::Channel::Control, animation, player.dimension,
+                  net::kInvalidPeerId);
+}
+
 void Server::dimensionChanged(const Player& player, std::int32_t previous) {
     redrawKindFor<BlipDirectory, shared::BlipRemoved>(blips_, player, previous);
     redrawKindFor<MarkerDirectory, shared::MarkerRemoved>(markers_, player, previous);

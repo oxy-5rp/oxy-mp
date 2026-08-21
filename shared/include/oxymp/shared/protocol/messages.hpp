@@ -1358,6 +1358,60 @@ struct CheckpointRemoved {
     [[nodiscard]] static CheckpointRemoved read(ByteReader& reader);
 };
 
+/// По каким осям движению не позволено возить персонажа.
+///
+/// Битами в сообщении, отдельными полями в структуре — по той же причине, что и
+/// у маркера: возит их протокол, а читает и пишет скриптовый слой.
+enum class AnimationLock : std::uint8_t {
+    X = 1U << 0U,
+    Y = 1U << 1U,
+    Z = 1U << 2U,
+};
+
+[[nodiscard]] constexpr bool has(std::uint8_t flags, AnimationLock lock) noexcept {
+    return (flags & static_cast<std::uint8_t>(lock)) != 0;
+}
+
+/// Персонажу играть движение.
+///
+/// Состав взят у alt:V поле в поле: режим зовёт `player.playAnimation` ровно с
+/// этими доводами и в этом порядке.
+///
+/// Пустой набор означает не «движение без имени», а «снять задачи»: у alt:V это
+/// отдельный вызов `player.clearTasks`, но по сети это одно и то же
+/// распоряжение — «перестань делать то, что делаешь». Заводить ему второе
+/// сообщение значило бы возить по сети два номера ради одного смысла.
+struct PlayerAnimation {
+    static constexpr MessageId kId = MessageId::PlayerAnimation;
+
+    /// Чей это персонаж.
+    PlayerId playerId = kInvalidPlayerId;
+
+    /// Набор движений игры и движение в нём. Пустой набор — снять задачи.
+    std::string dictionary;
+    std::string name;
+
+    /// Насколько плавно движение входит и выходит. Больше — резче.
+    float blendIn = 8.0F;
+    float blendOut = 8.0F;
+
+    /// Сколько движению отведено, в миллисекундах. Минус единица — до конца.
+    std::int32_t duration = -1;
+
+    /// Признаки проигрывания в нумерации игры: повтор, только верх тела,
+    /// оставить позу по окончании.
+    std::int32_t flags = 0;
+
+    /// Скорость проигрывания. Единица — обычная.
+    float playbackRate = 1.0F;
+
+    /// Набор AnimationLock.
+    std::uint8_t locks = 0;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerAnimation read(ByteReader& reader);
+};
+
 /// Переставить машину. Только от сервера и только её ведущему.
 ///
 /// Ведущему, а не всем: машина живёт в игре у него, и переставить её может

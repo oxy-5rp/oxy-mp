@@ -218,6 +218,25 @@ public:
         return std::exchange(removedBlips_, {});
     }
 
+    /// Движения, которые сервер велел сыграть.
+    ///
+    /// Событиями: движение — это действие, и потерять его нельзя. Исполняет их
+    /// поток игры — телом распоряжается только она.
+    void deliverAnimations(std::vector<shared::PlayerAnimation> animations) {
+        if (animations.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        animations_.insert(animations_.end(), std::make_move_iterator(animations.begin()),
+                           std::make_move_iterator(animations.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerAnimation> takeAnimations() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(animations_, {});
+    }
+
     /// Маркеры и контрольные точки, назначенные сервером.
     ///
     /// Тем же порядком, что и метки: пришедшее либо заводится, либо
@@ -500,6 +519,7 @@ private:
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
+    std::vector<shared::PlayerAnimation> animations_;
     std::vector<shared::MarkerState> markers_;
     std::vector<shared::MarkerId> removedMarkers_;
     std::vector<shared::CheckpointState> checkpoints_;

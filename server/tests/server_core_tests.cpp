@@ -106,6 +106,12 @@ public:
         sent.push_back(std::format("checkpoint- {}", id));
     }
 
+    void animationPlayed(const Player& player,
+                         const shared::PlayerAnimation& animation) override {
+        sent.push_back(std::format("anim {} {}/{}", player.id, animation.dictionary,
+                                   animation.name));
+    }
+
     void dimensionChanged(const Player& player, std::int32_t previous) override {
         sent.push_back(std::format("dimension {} {}->{}", player.id, previous, player.dimension));
     }
@@ -776,4 +782,33 @@ TEST_CASE("staying in the same dimension is not a move", "[server][script]") {
     REQUIRE(session.core.setDimension(player.id, 7));
 
     CHECK(session.sink.sent.empty());
+}
+
+// Движение уходит всем, кто игрока видит, а не одному хозяину: у остальных
+// персонаж показан куклой, и молчащая кукла осталась бы стоять столбом.
+TEST_CASE("an animation is told about, not just performed", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+    session.sink.sent.clear();
+
+    script::AnimationInfo animation;
+    animation.dictionary = "amb@world_human_smoking@male@male_a@base";
+    animation.name = "base";
+
+    REQUIRE(session.core.playAnimation(player.id, animation));
+    CHECK(session.sink.sent ==
+          std::vector<std::string>{"anim 0 amb@world_human_smoking@male@male_a@base/base"});
+
+    // Снятие задач — то же распоряжение с пустым набором: по сети это одно и то
+    // же «перестань делать то, что делаешь».
+    session.sink.sent.clear();
+    REQUIRE(session.core.clearTasks(player.id));
+    CHECK(session.sink.sent == std::vector<std::string>{"anim 0 /"});
+}
+
+TEST_CASE("an animation for nobody changes nothing", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.playAnimation(7, {}));
+    CHECK_FALSE(session.core.clearTasks(7));
 }

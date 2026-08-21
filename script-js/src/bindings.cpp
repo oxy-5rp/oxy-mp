@@ -643,21 +643,17 @@ void objectDestroy(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(info.GetIsolate()).core().removeObject(*id));
 }
 
-// --- Метка на карте ---------------------------------------------------------
+// --- Описания объектом ------------------------------------------------------
 //
-// Мост нарочно плоский: метка приходит и уходит объектом с полями, а не
-// сущностью с методами. Причина в том, что метку правят целиком и редко —
-// покрасил, переименовал, подвинул, — а поле за полем означало бы по сообщению
-// клиенту на каждое, и он увидел бы метку поправленной наполовину.
-//
-// Сущностью её делает слой alt:V, поверх этого.
+// Всё, у чего доводов больше пяти, скрипт задаёт объектом, а не россыпью:
+// движение, метка, маркер, контрольная точка. Читаются они одинаково, и читает
+// их одно и то же.
 
 /// Чтение полей описания, присланного скриптом.
 ///
-/// Заведено на три рода картинок сразу — метку, маркер и точку, — и это не
-/// обобщение ради обобщения: читаются они совершенно одинаково, а отсутствующее
-/// поле у всех троих означает «как принято у alt:V», а не ошибку. Ресурс волен
-/// задать три поля из пятнадцати, и остальные обязаны встать сами.
+/// Заведено на всех сразу, и это не обобщение ради обобщения: отсутствующее
+/// поле у любого из них означает «как принято у alt:V», а не ошибку. Ресурс
+/// волен задать три поля из пятнадцати, и остальные обязаны встать сами.
 class Fields {
 public:
     Fields(v8::Local<v8::Context> context, v8::Local<v8::Object> object) noexcept
@@ -740,6 +736,71 @@ private:
 
     return Fields{context, value.As<v8::Object>()};
 }
+
+// --- Движения персонажа -----------------------------------------------------
+
+void playAnimation(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(context, info[0]) : std::nullopt;
+
+    const std::optional<Fields> fields =
+        info.Length() >= 2 ? fieldsOf(context, info[1]) : std::nullopt;
+
+    if (!id || !fields) {
+        fail(isolate, "playAnimation ждёт номер игрока и описание движения объектом");
+        return;
+    }
+
+    AnimationInfo animation;
+    animation.dictionary = fields->text("dictionary");
+    animation.name = fields->text("name");
+
+    // Восьмёрка по умолчанию — не наша выдумка, а значение alt:V: режим,
+    // назвавший только набор и движение, ждёт именно такого перехода.
+    animation.blendIn = static_cast<float>(fields->number("blendIn", 8.0));
+    animation.blendOut = static_cast<float>(fields->number("blendOut", 8.0));
+    animation.duration = static_cast<std::int32_t>(fields->number("duration", -1.0));
+    animation.flags = static_cast<std::int32_t>(fields->number("flags", 0.0));
+    animation.playbackRate = static_cast<float>(fields->number("playbackRate", 1.0));
+    animation.lockX = fields->flag("lockX");
+    animation.lockY = fields->flag("lockY");
+    animation.lockZ = fields->flag("lockZ");
+
+    if (animation.dictionary.empty() || animation.name.empty()) {
+        fail(isolate, "playAnimation ждёт непустые набор движений и имя движения");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().playAnimation(
+        static_cast<shared::PlayerId>(*id), animation));
+}
+
+void clearTasks(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(isolate->GetCurrentContext(), info[0]) : std::nullopt;
+
+    if (!id) {
+        fail(isolate, "clearTasks ждёт номер игрока");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().clearTasks(static_cast<shared::PlayerId>(*id)));
+}
+
+// --- Метка на карте ---------------------------------------------------------
+//
+// Мост нарочно плоский: метка приходит и уходит объектом с полями, а не
+// сущностью с методами. Причина в том, что метку правят целиком и редко —
+// покрасил, переименовал, подвинул, — а поле за полем означало бы по сообщению
+// клиенту на каждое, и он увидел бы метку поправленной наполовину.
+//
+// Сущностью её делает слой alt:V, поверх этого.
 
 [[nodiscard]] std::optional<BlipInfo> blipFromJs(v8::Local<v8::Context> context,
                                                  v8::Local<v8::Value> value) {
@@ -1439,6 +1500,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createVehicle", createVehicle);
     addFunction(context, oxymp, "objects", objects);
     addFunction(context, oxymp, "createObject", createObject);
+    addFunction(context, oxymp, "playAnimation", playAnimation);
+    addFunction(context, oxymp, "clearTasks", clearTasks);
     addFunction(context, oxymp, "createBlip", createBlip);
     addFunction(context, oxymp, "updateBlip", updateBlip);
     addFunction(context, oxymp, "removeBlip", removeBlip);

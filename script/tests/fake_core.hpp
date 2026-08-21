@@ -41,6 +41,24 @@ public:
         return it == playerList.end() ? std::nullopt : std::optional{*it};
     }
 
+    bool playAnimation(shared::PlayerId id, const AnimationInfo& animation) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("anim {} {}/{}", id, animation.dictionary, animation.name));
+        return true;
+    }
+
+    bool clearTasks(shared::PlayerId id) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("anim- {}", id));
+        return true;
+    }
+
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override {
         const auto it = std::ranges::find(playerList, id, &PlayerInfo::id);
         if (it == playerList.end()) {

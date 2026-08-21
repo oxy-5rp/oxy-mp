@@ -56,7 +56,8 @@ PedAnimation::PedAnimation(const NativeTable& table) noexcept
       hasDict_(table.handlerFor(natives::kHasAnimDictLoaded)),
       playAnim_(table.handlerFor(natives::kTaskPlayAnim)),
       stealthMovement_(table.handlerFor(natives::kSetPedStealthMovement)),
-      gameTimer_(table.handlerFor(natives::kGetGameTimer)) {}
+      gameTimer_(table.handlerFor(natives::kGetGameTimer)),
+      clearTasks_(table.handlerFor(natives::kClearPedTasks)) {}
 
 PedAnimation::Clip PedAnimation::clipFor(shared::PedAction action) {
     switch (action) {
@@ -95,12 +96,12 @@ bool PedAnimation::ready(std::string_view dictionary) {
     }
 
     const auto now = invokeNative<std::int32_t>(gameTimer_);
-    const auto [entry, added] = requestedAt_.try_emplace(dictionary, now);
+    const auto [entry, added] = requestedAt_.try_emplace(name, now);
 
     if (!added && now - entry->second >= kLoadPatience) {
-        spdlog::warn("набор движений \"{}\" не загружается — чужие игроки не покажут удары",
+        spdlog::warn("набор движений \"{}\" не загружается — движение не покажется",
                      dictionary);
-        complained_.insert(dictionary);
+        complained_.insert(name);
     }
 
     return false;
@@ -121,6 +122,37 @@ void PedAnimation::applyPosture(int ped, std::uint32_t flags, std::uint32_t prev
     // строка означает «взять обычный», и другого нам не нужно: своей походки мы
     // персонажу не придумываем, а повторяем ту, которой идёт его хозяин.
     invokeNative<void>(stealthMovement_, ped, crouching ? kStealthOn : kStealthOff, "");
+}
+
+bool PedAnimation::playNamed(int ped, const shared::PlayerAnimation& animation) {
+    if (ped == 0 || playAnim_ == nullptr || animation.dictionary.empty() ||
+        animation.name.empty()) {
+        return false;
+    }
+
+    if (!ready(animation.dictionary)) {
+        return false;
+    }
+
+    // Признаки проигрывания и запреты по осям — от ресурса, а не наши. У alt:V
+    // это доводы `player.playAnimation`, и подставить вместо них свои значило бы
+    // решать за режим, как выглядит его отыгрыш.
+    invokeNative<void>(playAnim_, ped, animation.dictionary.c_str(), animation.name.c_str(),
+                       animation.blendIn, animation.blendOut, animation.duration,
+                       animation.flags, animation.playbackRate,
+                       shared::has(animation.locks, shared::AnimationLock::X),
+                       shared::has(animation.locks, shared::AnimationLock::Y),
+                       shared::has(animation.locks, shared::AnimationLock::Z));
+
+    return true;
+}
+
+void PedAnimation::clearTasks(int ped) const {
+    if (ped == 0 || clearTasks_ == nullptr) {
+        return;
+    }
+
+    invokeNative<void>(clearTasks_, ped);
 }
 
 bool PedAnimation::play(int ped, shared::PedAction action) {

@@ -288,6 +288,14 @@ inline constexpr std::uint64_t kFlushNotifications = 0XC138265FD0CDEA4E;
 /// CLEAR_PED_TASKS_IMMEDIATELY, канонический хеш 0XAAA34F8A7CB32098.
 inline constexpr std::uint64_t kClearPedTasksImmediately = 0X19626F992DC71FB9;
 
+/// CLEAR_PED_TASKS, канонический хеш 0XE1EF3C1216AFF2CD.
+///
+/// Отдельно от «немедленно», и разница не в скорости, а в виде. Немедленный
+/// обрывает движение на полукадре — тело дёргается; обычный доводит его до
+/// конца перехода. Куклам нужен первый: их положение мы задаём сами, и ждать
+/// перехода незачем. Движению, снятому по слову сервера, — второй.
+inline constexpr std::uint64_t kClearPedTasks = 0X974022927CB47E68;
+
 /// DISPLAY_HUD, канонический хеш 0XA6294919E56FF02A.
 inline constexpr std::uint64_t kDisplayHud = 0X747786364137DC63;
 

@@ -143,6 +143,9 @@ private:
     void checkpointChanged(shared::CheckpointId id) override;
     void checkpointRemoved(shared::CheckpointId id) override;
 
+    void animationPlayed(const Player& player,
+                         const shared::PlayerAnimation& animation) override;
+
     void dimensionChanged(const Player& player, std::int32_t previous) override;
 
     /// Досылает и отзывает картинки одного рода после смены слоя мира.

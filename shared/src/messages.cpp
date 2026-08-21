@@ -874,6 +874,32 @@ CheckpointRemoved CheckpointRemoved::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerAnimation::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeString(dictionary);
+    writer.writeString(name);
+    writer.writeFloat(blendIn);
+    writer.writeFloat(blendOut);
+    writer.writeU32(static_cast<std::uint32_t>(duration));
+    writer.writeU32(static_cast<std::uint32_t>(flags));
+    writer.writeFloat(playbackRate);
+    writer.writeU8(locks);
+}
+
+PlayerAnimation PlayerAnimation::read(ByteReader& reader) {
+    PlayerAnimation message;
+    message.playerId = reader.readU32();
+    message.dictionary = reader.readString();
+    message.name = reader.readString();
+    message.blendIn = reader.readFloat();
+    message.blendOut = reader.readFloat();
+    message.duration = static_cast<std::int32_t>(reader.readU32());
+    message.flags = static_cast<std::int32_t>(reader.readU32());
+    message.playbackRate = reader.readFloat();
+    message.locks = reader.readU8();
+    return message;
+}
+
 void PlayerIntoVehicle::write(ByteWriter& writer) const {
     writer.writeU32(vehicle);
     writer.writeU8(static_cast<std::uint8_t>(seat));
@@ -930,6 +956,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::MarkerRemoved:
     case MessageId::CheckpointState:
     case MessageId::CheckpointRemoved:
+    case MessageId::PlayerAnimation:
         return static_cast<MessageId>(packet.front());
     }
 

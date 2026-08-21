@@ -339,6 +339,45 @@ bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int8_t dr
     return true;
 }
 
+bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::PlayerAnimation message;
+    message.playerId = id;
+    message.dictionary = animation.dictionary;
+    message.name = animation.name;
+    message.blendIn = animation.blendIn;
+    message.blendOut = animation.blendOut;
+    message.duration = animation.duration;
+    message.flags = animation.flags;
+    message.playbackRate = animation.playbackRate;
+
+    message.locks |= animation.lockX ? static_cast<std::uint8_t>(shared::AnimationLock::X) : 0;
+    message.locks |= animation.lockY ? static_cast<std::uint8_t>(shared::AnimationLock::Y) : 0;
+    message.locks |= animation.lockZ ? static_cast<std::uint8_t>(shared::AnimationLock::Z) : 0;
+
+    sink_->animationPlayed(*player, message);
+    return true;
+}
+
+bool ServerCore::clearTasks(shared::PlayerId id) {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Пустой набор означает «снять задачи»: по сети это то же самое
+    // распоряжение — «перестань делать то, что делаешь».
+    shared::PlayerAnimation message;
+    message.playerId = id;
+
+    sink_->animationPlayed(*player, message);
+    return true;
+}
+
 bool ServerCore::setDimension(shared::PlayerId id, std::int32_t dimension) {
     Player* const player = players_->findById(id);
     if (player == nullptr) {

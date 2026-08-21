@@ -82,10 +82,15 @@ struct Drawn {
     std::size_t markers = 0;
     std::size_t checkpoints = 0;
 
+    /// Сколько движений велел сыграть сервер. Играть их боту нечем — тела у
+    /// него нет, — но по счётчику видно, что распоряжение дошло.
+    std::size_t animations = 0;
+
     void collect(oxymp::client::Connection& connection) {
         blips += connection.takeBlips().size();
         markers += connection.takeMarkers().size();
         checkpoints += connection.takeCheckpoints().size();
+        animations += connection.takeAnimations().size();
 
         // Снятое вычитается: метка, поставленная и убранная, у игрока не
         // осталась бы, и счётчик, который об этом не знает, врёт.
@@ -393,8 +398,9 @@ int main(int argc, char** argv) {
 
                 const Drawn& drawn = herd.front().drawn;
 
-                spdlog::info("  сервер нарисовал: меток {}, маркеров {}, точек {}", drawn.blips,
-                             drawn.markers, drawn.checkpoints);
+                spdlog::info("  сервер нарисовал: меток {}, маркеров {}, точек {}; "
+                             "движений велел {}",
+                             drawn.blips, drawn.markers, drawn.checkpoints, drawn.animations);
 
                 // Главное доказательство работы мультиплеера: мы видим, где
                 // сейчас находятся другие игроки, и их положение меняется.

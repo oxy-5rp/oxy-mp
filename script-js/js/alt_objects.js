@@ -149,12 +149,20 @@
                              this.isPointIn(player.pos);
                 const was = this.#inside.has(player.id);
 
+                // Событие объявляется своему ресурсу, а не через ядро, и это
+                // не срезание угла. Через ядро доводы уходят в JSON, и с той
+                // стороны от зоны остаётся безымянный слепок; ресурс же
+                // сравнивает её через `===` со своей — так написаны все
+                // режимы, — и сравнение не сошлось бы никогда. Проверено:
+                // обработчик звался, а `зона === точка` было ложью.
+                //
+                // Чужим ресурсам эта зона и не нужна: у них её нет вовсе.
                 if (here && !was) {
                     this.#inside.add(player.id);
-                    server.emit('enterColshape', this, player);
+                    server.fireLocal('enterColshape', [this, player]);
                 } else if (!here && was) {
                     this.#inside.delete(player.id);
-                    server.emit('leaveColshape', this, player);
+                    server.fireLocal('leaveColshape', [this, player]);
                 }
             }
 
