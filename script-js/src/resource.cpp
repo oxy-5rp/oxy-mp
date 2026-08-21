@@ -340,6 +340,31 @@ void Resource::setVehicleShape(v8::Local<v8::FunctionTemplate> value) {
     vehicleShape_.Reset(setup_->isolate(), value);
 }
 
+void Resource::deliver(std::string_view name, std::string_view payload) {
+    if (setup_ == nullptr || name.empty()) {
+        return;
+    }
+
+    v8::Isolate* const isolate = setup_->isolate();
+
+    const v8::Locker locker{isolate};
+    const v8::Isolate::Scope isolateScope{isolate};
+    const v8::HandleScope handles{isolate};
+    const v8::Local<v8::Context> context = setup_->context();
+    const v8::Context::Scope contextScope{context};
+
+    // Ловушка на всё, что здесь происходит, по той же причине, что и в
+    // dispatch: исключение, брошенное вне её, Node считает роковым и завершает
+    // процесс вместе с сессией.
+    const v8::TryCatch caught{isolate};
+
+    std::vector<v8::Local<v8::Value>> arguments{toJs(isolate, payload)};
+
+    // Отмены здесь нет и быть не может: событие придумал ресурс, отменять его
+    // некому и нечего.
+    (void)call(context, name, arguments);
+}
+
 bool Resource::dispatch(const Event& event) {
     if (setup_ == nullptr) {
         return true;

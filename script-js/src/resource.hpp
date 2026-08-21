@@ -7,6 +7,7 @@
 #include <v8.h>
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -53,6 +54,29 @@ public:
     /// false — обработчик отменил происходящее. Считается это только у реплики
     /// в чате: остальное отменять нечему и незачем.
     [[nodiscard]] bool dispatch(const Event& event);
+
+    /// Отдаёт подписчикам событие, названное скриптом.
+    ///
+    /// Тем, чем ресурсы говорят друг с другом: у alt:V это `alt.emit`, и там
+    /// его слышат все ресурсы сразу. Доводы приходят уложенными в строку —
+    /// иначе никак: у каждого ресурса свой изолят, и значение одного в чужом не
+    /// живёт вовсе.
+    void deliver(std::string_view name, std::string_view payload);
+
+    /// Куда уходит то, что ресурс объявил сам.
+    ///
+    /// Ставит движок: только он знает про остальные ресурсы. Ресурс же про них
+    /// не знает и знать не должен — он объявляет в пустоту, а разносит движок.
+    using Announce = std::function<void(std::string_view name, std::string_view payload)>;
+
+    void onAnnounce(Announce announce) { announce_ = std::move(announce); }
+
+    /// Объявляет событие остальным. Зовётся из привязки oxymp.emit.
+    void announce(std::string_view name, std::string_view payload) const {
+        if (announce_) {
+            announce_(name, payload);
+        }
+    }
 
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] const std::filesystem::path& root() const noexcept { return root_; }
@@ -116,6 +140,8 @@ private:
     /// Обработчики по имени события. Порядок подписки сохраняется: первый
     /// подписавшийся первым и получит возможность отменить реплику.
     std::unordered_map<std::string, std::vector<v8::Global<v8::Function>>> handlers_;
+
+    Announce announce_;
 
     v8::Global<v8::FunctionTemplate> playerShape_;
     v8::Global<v8::FunctionTemplate> vehicleShape_;

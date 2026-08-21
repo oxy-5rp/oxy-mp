@@ -422,6 +422,32 @@ void onEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
     resourceOf(isolate).subscribe(fromJs(isolate, info[0]), info[1].As<v8::Function>());
 }
 
+/// Объявляет событие всем поднятым ресурсам, включая свой.
+///
+/// Тем ресурсы и говорят друг с другом. Доводы приходят одной строкой, и иначе
+/// быть не может: у каждого ресурса свой изолят, и значение одного в чужом не
+/// живёт вовсе. Укладывает и разбирает их слой alt:V — здесь строка проходит
+/// насквозь, не толкуясь.
+void emitEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    if (info.Length() < 1) {
+        fail(isolate, "emit ждёт имя события");
+        return;
+    }
+
+    const std::string name = fromJs(isolate, info[0]);
+    if (name.empty()) {
+        fail(isolate, "emit ждёт непустое имя события");
+        return;
+    }
+
+    const std::string payload =
+        info.Length() >= 2 ? fromJs(isolate, info[1]) : std::string{};
+
+    resourceOf(isolate).announce(name, payload);
+}
+
 /// Событие от клиента. Отдельным именем, а не общим `on`, и это не сахар.
 ///
 /// Событие от клиента ничем не подтверждено: пакет собрать может кто угодно, и
@@ -736,6 +762,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     const v8::Local<v8::Object> oxymp = v8::Object::New(isolate);
 
     addFunction(context, oxymp, "on", onEvent);
+    addFunction(context, oxymp, "emit", emitEvent);
     addFunction(context, oxymp, "onClient", onClientEvent);
     addFunction(context, oxymp, "emitClient", emitClient);
     addFunction(context, oxymp, "broadcast", broadcast);

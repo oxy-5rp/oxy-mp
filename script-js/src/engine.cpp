@@ -198,6 +198,14 @@ public:
             return false;
         }
 
+        // Объявленное этим ресурсом разносит движок: только он знает про
+        // остальные. Ставится это после запуска — ресурс волен объявить
+        // что-нибудь прямо из точки входа, и слушать его к тому мгновению уже
+        // должно быть кому.
+        resource->onAnnounce([this](std::string_view name, std::string_view payload) {
+            announce(name, payload);
+        });
+
         resources_.emplace(key, std::move(resource));
         return true;
     }
@@ -207,6 +215,37 @@ public:
     [[nodiscard]] std::size_t running() const noexcept override { return resources_.size(); }
 
 private:
+    /// Разносит по всем ресурсам то, что объявил один из них.
+    ///
+    /// Всем, включая объявившего: у alt:V `alt.emit` слышит и тот, кто его
+    /// позвал, если он на это имя подписан. Здесь так же — иначе ресурс,
+    /// говорящий сам с собой через шину, вёл бы себя не как у alt:V.
+    void announce(std::string_view name, std::string_view payload) {
+        // Ограничение глубины — от бесконечности, а не от вкуса. Ресурс волен
+        // объявить из обработчика то же самое имя, и без предела сервер завис
+        // бы намертво, не сказав ни слова: снаружи это неотличимо от
+        // зависшего обработчика, и искать причину было бы не по чему.
+        if (announcing_ >= kMaxAnnounceDepth) {
+            spdlog::error("событие \"{}\" объявлено само из себя глубже {} раз — "
+                          "дальше не разносим",
+                          name, kMaxAnnounceDepth);
+            return;
+        }
+
+        ++announcing_;
+
+        for (const auto& [key, resource] : resources_) {
+            resource->deliver(name, payload);
+        }
+
+        --announcing_;
+    }
+
+    /// Насколько глубоко событие вправе объявить само себя.
+    static constexpr int kMaxAnnounceDepth = 16;
+
+    int announcing_ = 0;
+
     bool handle(const Event& event) override {
         // Такт — единственное место, где движку дают поработать самому: таймеры,
         // обещания, ввод-вывод. Прокрутка идёт до рассылки, а не после, и это
