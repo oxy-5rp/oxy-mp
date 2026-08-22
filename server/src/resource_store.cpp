@@ -1,5 +1,6 @@
 #include "resource_store.hpp"
 
+#include <oxymp/shared/resource/bundle.hpp>
 #include <oxymp/shared/resource/vault.hpp>
 
 #include <spdlog/spdlog.h>
@@ -150,6 +151,45 @@ void ResourceStore::load(const std::filesystem::path& directory) {
     std::ranges::sort(items_, {}, &Item::name);
 
     spdlog::info("Files ready to serve: {}", items_.size());
+}
+
+std::string ResourceStore::addBundle(const std::filesystem::path& root,
+                                    std::span<const std::string> files) {
+    std::vector<shared::Bundle::File> inside;
+    inside.reserve(files.size());
+
+    for (const std::string& file : files) {
+        std::optional<std::vector<std::uint8_t>> plain = readFile(root / file);
+        if (!plain) {
+            spdlog::warn("file {} could not be read: it will not be in the bundle", file);
+            continue;
+        }
+
+        // Путь внутри свёртка — от корня ресурса и всегда через прямую косую
+        // черту: свёрток собирают на Windows, а читать его будет тот же клиент,
+        // но искать в нём файл будет по пути, который написал автор ресурса.
+        std::string path = file;
+        std::ranges::replace(path, '\\', '/');
+
+        inside.push_back(shared::Bundle::File{.path = std::move(path),
+                                              .contents = std::move(*plain)});
+    }
+
+    if (inside.empty()) {
+        return {};
+    }
+
+    std::vector<std::uint8_t> packed =
+        shared::Bundle::pack(inside, shared::Vault::builtInKey());
+
+    std::string hash = shared::fingerprint(packed);
+
+    spdlog::debug("bundle of {} files: {} KB", inside.size(), packed.size() / 1024);
+    spdlog::debug("  /resources/dlcpacks/{}.resource", hash);
+
+    packed_.emplace(hash, std::move(packed));
+
+    return hash;
 }
 
 bool ResourceStore::add(const std::filesystem::path& path, std::string name) {

@@ -792,6 +792,7 @@ void ResourceList::write(ByteWriter& writer) const {
         writer.writeU64(entries[i].size);
         writer.writeU8(entries[i].page ? 1 : 0);
         writer.writeString(entries[i].dataFile);
+        writer.writeString(entries[i].bundle);
     }
 }
 
@@ -813,6 +814,7 @@ ResourceList ResourceList::read(ByteReader& reader) {
         entry.size = reader.readU64();
         entry.page = reader.readU8() != 0;
         entry.dataFile = reader.readString();
+        entry.bundle = reader.readString();
 
         message.entries.push_back(std::move(entry));
     }

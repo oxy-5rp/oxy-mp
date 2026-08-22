@@ -7,6 +7,8 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <format>
 #include <vector>
 
@@ -441,6 +443,7 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
 
     for (const ResourceStore::Item& item : resources_.items()) {
         const auto description = described.find(item.name);
+        const auto packed = bundled_.find(item.name);
 
         resources.entries.push_back(shared::ResourceEntry{
             .name = item.name,
@@ -448,6 +451,23 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
             .size = item.size,
             .page = std::ranges::find(pages, item.name) != pages.end(),
             .dataFile = description == described.end() ? std::string{} : description->second,
+            .bundle = packed == bundled_.end() ? std::string{} : packed->second,
+        });
+    }
+
+    // Файлы, уехавшие в свёрток, в списке остаются — со ссылкой на свёрток
+    // вместо своего отпечатка. Клиенту нужно и то и другое: свёрток он качает
+    // один раз, а имена и виды описаний берёт у каждого файла отдельно.
+    for (const auto& [name, hash] : bundled_) {
+        const auto description = described.find(name);
+
+        resources.entries.push_back(shared::ResourceEntry{
+            .name = name,
+            .hash = hash,
+            .size = 0,
+            .page = std::ranges::find(pages, name) != pages.end(),
+            .dataFile = description == described.end() ? std::string{} : description->second,
+            .bundle = hash,
         });
     }
 
@@ -1687,12 +1707,42 @@ void Server::startResources() {
             }
         }
 
-        // Клиентская половина уходит в раздачу под составным именем: одинаково
-        // названные файлы разных ресурсов иначе сошлись бы в одно.
+        // Клиентская половина делится надвое, и делится не по вкусу.
+        //
+        // Модели и текстуры (`stream/`) уходят отдельными файлами: прятать их
+        // незачем — они и так расходятся по интернету, — а свёрток из них вышел
+        // бы в гигабайты и лёг бы клиенту в память целиком.
+        //
+        // Всё остальное — код режима и страницы интерфейса — уходит одним
+        // свёртком. Иначе исходники лежат у игрока обычным текстом и
+        // открываются блокнотом; у alt:V так же, и это то, ради чего свёрток
+        // заведён.
+        std::vector<std::string> packable;
+
         for (const std::string& file : resource.clientFiles) {
-            if (!resources_.add(resource.root / file, std::format("{}/{}", resource.name, file))) {
+            if (goesIntoBundle(file)) {
+                packable.push_back(file);
+                continue;
+            }
+
+            if (!resources_.add(resource.root / file,
+                                std::format("{}/{}", resource.name, file))) {
                 spdlog::warn("resource \"{}\": file \"{}\" could not be read", resource.name,
                              file);
+            }
+        }
+
+        if (!packable.empty()) {
+            const std::string hash = resources_.addBundle(resource.root, packable);
+
+            if (hash.empty()) {
+                spdlog::warn("resource \"{}\": the bundle was not built", resource.name);
+            } else {
+                for (const std::string& file : packable) {
+                    // Имя составное, как и у отдельных файлов: клиент знает
+                    // ресурс по нему же.
+                    bundled_.emplace(std::format("{}/{}", resource.name, file), hash);
+                }
             }
         }
 
@@ -1704,6 +1754,38 @@ void Server::startResources() {
                          resource.clientFiles.size());
         }
     }
+}
+
+bool Server::goesIntoBundle(std::string_view file) {
+    // Список — белый, и это выбрано нарочно, ровно наоборот тому, как выбран
+    // чёрный список у клиента.
+    //
+    // Прячем мы исходники режима и страницы интерфейса — то, что читает наш же
+    // клиент. Всё, чего мы здесь не узнали, остаётся отдельным файлом, потому
+    // что его может читать сама игра, а свёрток ей не открыть. Ошибка в белом
+    // списке — файл, оставшийся видимым; ошибка в чёрном была бы игрой без
+    // машины и без карты.
+    static constexpr std::array kSource = std::to_array<std::string_view>(
+        {".js", ".cjs", ".mjs", ".ts", ".jsx", ".tsx", ".json", ".html", ".htm", ".css", ".scss",
+         ".map", ".vue", ".svelte", ".md", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+         ".webp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3", ".ogg", ".wav"});
+
+    // Каталог моделей — тот же, о котором договорились alt:V и FiveM, и он
+    // сильнее расширения: рядом с моделью кладут и `.json`, который читает игра.
+    if (file.starts_with("stream/") || file.find("/stream/") != std::string_view::npos) {
+        return false;
+    }
+
+    const std::size_t dot = file.rfind('.');
+    if (dot == std::string_view::npos) {
+        return false;
+    }
+
+    std::string suffix{file.substr(dot)};
+    std::ranges::transform(suffix, suffix.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    return std::ranges::find(kSource, suffix) != kSource.end();
 }
 
 void Server::stopResources() {

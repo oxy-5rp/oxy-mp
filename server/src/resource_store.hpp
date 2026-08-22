@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -51,12 +52,33 @@ public:
     /// false — файла нет или он пуст.
     bool add(const std::filesystem::path& path, std::string name);
 
+    /// Складывает файлы ресурса в один свёрток и держит его готовым к раздаче.
+    ///
+    /// Свёрток раздаётся по отпечатку, как и всё остальное, но **в списке не
+    /// показывается**: клиенту его называют сами файлы — каждый знает, в каком
+    /// свёртке лежит. Отдельной строкой в списке он был бы лишним, а в счётчике
+    /// «сколько качать» — двойным.
+    ///
+    /// Ради этого свёрток и заведён: клиент кладёт его в кеш целиком и не
+    /// раскладывает на диск, а значит исходный код режима не лежит у игрока
+    /// обычным текстом. Так же делает alt:V.
+    ///
+    /// Пустая строка — складывать было нечего.
+    [[nodiscard]] std::string addBundle(const std::filesystem::path& root,
+                                        std::span<const std::string> files);
+
     [[nodiscard]] const std::vector<Item>& items() const noexcept { return items_; }
 
     /// Зашифрованное содержимое по отпечатку. Пусто — такого у нас нет.
     [[nodiscard]] const std::vector<std::uint8_t>* find(const std::string& hash) const;
 
-    [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
+    /// Нечего ли раздавать вовсе.
+    ///
+    /// Считается и по свёрткам, а не только по отдельным файлам: ресурс, у
+    /// которого весь клиентский код уехал в свёрток, не оставляет в списке ни
+    /// одной записи — и раздача по HTTP не поднималась вовсе, а клиент получал
+    /// «сервер не ответил» на единственный нужный ему файл.
+    [[nodiscard]] bool empty() const noexcept { return items_.empty() && packed_.empty(); }
 
 private:
     std::vector<Item> items_;

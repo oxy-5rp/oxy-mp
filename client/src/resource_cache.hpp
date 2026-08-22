@@ -5,7 +5,9 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace oxymp::client {
@@ -56,6 +58,21 @@ public:
     ///
     /// Неудача по одному ресурсу не отменяет остальные: пропавший файл — повод
     /// обойтись без него, а не отказаться играть.
+    /// Скачивает свёрток и запоминает его на время разбора. Пусто — не вышло.
+    ///
+    /// Свёрток качается один раз на весь ресурс, а не по разу на файл внутри: на
+    /// чужой карте это разница между одним запросом и тысячами.
+    [[nodiscard]] const std::vector<std::uint8_t>* openBundle(
+        const std::string& serverAddress, std::uint16_t serverPort, const std::string& hash,
+        std::unordered_map<std::string, std::vector<std::uint8_t>>& opened,
+        const std::vector<std::uint8_t>& key);
+
+    /// Достаёт из свёртка один файл по его составному имени.
+    [[nodiscard]] static bool takeFromBundle(const std::vector<std::uint8_t>& bundle,
+                                             const std::string& name,
+                                             const std::vector<std::uint8_t>& key,
+                                             std::vector<std::uint8_t>& contents);
+
     [[nodiscard]] std::vector<Ready> sync(const std::string& serverAddress,
                                           std::uint16_t serverPort,
                                           const std::vector<shared::ResourceEntry>& wanted,

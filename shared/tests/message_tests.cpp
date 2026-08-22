@@ -893,6 +893,35 @@ TEST_CASE("a resource list of a real game mode survives a round trip", "[message
     CHECK(restored.entries.back().name == "main/client/ui/file1878.js");
 }
 
+TEST_CASE("a resource file remembers which bundle holds it", "[messages]") {
+    ResourceList list;
+
+    list.entries.push_back(ResourceEntry{.name = "main/client/index.js",
+                                         .hash = std::string(64, 'b'),
+                                         .size = 4096,
+                                         .page = false,
+                                         .dataFile = {},
+                                         .bundle = std::string(64, 'c')});
+
+    // Модель лежит сама по себе: прятать её незачем, а свёрток из моделей вышел
+    // бы в гигабайты.
+    list.entries.push_back(ResourceEntry{.name = "main/stream/car.yft",
+                                         .hash = std::string(64, 'd'),
+                                         .size = 1024 * 1024});
+
+    ByteWriter writer;
+    list.write(writer);
+
+    ByteReader reader{ByteView{writer.bytes()}};
+    const ResourceList restored = ResourceList::read(reader);
+
+    CHECK(reader.ok());
+    CHECK(reader.exhausted());
+    REQUIRE(restored.entries.size() == 2);
+    CHECK(restored.entries.front().bundle == std::string(64, 'c'));
+    CHECK(restored.entries.back().bundle.empty());
+}
+
 TEST_CASE("a vehicle teleport survives the round trip", "[messages]") {
     VehicleTeleport sent;
     sent.id = 0x00010007;
