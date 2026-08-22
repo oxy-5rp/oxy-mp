@@ -581,13 +581,16 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
         return {};
     }
 
+    // Вглубь заходим: у карт содержимое разложено по подкаталогам —
+    // `stream/maps`, `stream/props`, — и требовать плоского каталога значило бы
+    // отказать половине чужих ресурсов. Игре подкаталог всё равно не виден: она
+    // ищет по имени, а не по пути.
     const std::string_view tail = resourceEntry.substr(marker + kMarker.size());
 
-    if (tail.empty() || tail.find('/') != std::string_view::npos) {
-        return {};
-    }
+    const std::size_t slash = tail.rfind('/');
+    const std::string_view base = slash == std::string_view::npos ? tail : tail.substr(slash + 1);
 
-    return std::string{tail};
+    return std::string{base};
 }
 
 /// Имя файла, если это описание в корне ресурса, — иначе пусто.
@@ -596,14 +599,12 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
 /// у alt:V, и у FiveM. Вглубь не заходим — `.meta` в подкаталогах бывают у
 /// чужого добра, которое ресурс просто носит с собой.
 [[nodiscard]] std::string describedFileName(std::string_view resourceEntry) {
-    const std::size_t slash = resourceEntry.find('/');
-    if (slash == std::string_view::npos) {
-        return {};
-    }
+    const std::size_t slash = resourceEntry.rfind('/');
 
-    const std::string_view tail = resourceEntry.substr(slash + 1);
+    const std::string_view tail =
+        slash == std::string_view::npos ? resourceEntry : resourceEntry.substr(slash + 1);
 
-    if (tail.find('/') != std::string_view::npos || !tail.ends_with(".meta")) {
+    if (!tail.ends_with(".meta")) {
         return {};
     }
 
@@ -1558,7 +1559,19 @@ void run() {
             // это будут просто файлы: `stream` — то место, о котором обе стороны
             // договорились без лишних объявлений.
             if (fileDevice != nullptr) {
+                // Что из раздаваемого — описание, решает сервер: он называет вид
+                // в `[meta]`, а по имени файла вид карты не угадать. Догадка по
+                // имени осталась ради ресурсов без этого раздела, и дальше
+                // `.meta` рядом с машиной она не идёт.
+                const auto describes = [](const shared::ResourceEntry& entry) {
+                    return !entry.dataFile.empty() || !describedFileName(entry.name).empty();
+                };
+
                 for (const shared::ResourceEntry& entry : *offered) {
+                    if (describes(entry)) {
+                        continue;
+                    }
+
                     const std::string streamed = streamFileName(entry.name);
                     if (streamed.empty()) {
                         continue;
@@ -1577,8 +1590,7 @@ void run() {
                 // Описания — отдельным проходом и после моделей, чтобы порядок
                 // просьб совпадал с порядком, в котором игра их получит.
                 for (const shared::ResourceEntry& entry : *offered) {
-                    const std::string described = describedFileName(entry.name);
-                    if (described.empty()) {
+                    if (!describes(entry)) {
                         continue;
                     }
 
@@ -1591,7 +1603,7 @@ void run() {
                     fileDevice->mount("oxymp:/");
 
                     if (dataFiles != nullptr) {
-                        dataFiles->add(gamePath, described);
+                        dataFiles->add(gamePath, describedFileName(entry.name), entry.dataFile);
                     }
                 }
             }

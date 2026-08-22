@@ -272,7 +272,11 @@ bool parse(std::string_view text, Entries& entries, std::string& error) {
             return false;
         }
 
-        std::string key = lowered(trim(line.substr(0, separator)));
+        // Ключ снимается с кавычек наравне со значением: TOML разрешает их и
+        // там, а описания alt:V ими пользуются — в разделе [meta] ключ это путь
+        // к файлу, и без кавычек точка в нём читалась бы как разделитель
+        // разделов.
+        std::string key = lowered(unquote(trim(line.substr(0, separator))));
         if (key.empty()) {
             error = std::format("строка {}: пустое имя настройки", lineNumber);
             return false;

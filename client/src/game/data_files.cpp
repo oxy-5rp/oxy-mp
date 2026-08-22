@@ -55,6 +55,25 @@ constexpr std::array kKnownFiles{
     KnownFile{"vehiclelayouts.meta", "VEHICLE_LAYOUTS_FILE"},
 };
 
+/// В каком порядке описания попадают к игре.
+///
+/// Порядок здесь не украшение: описание, на которое ссылаются, обязано попасть
+/// к игре раньше ссылающегося. Архетипы — раньше всего, на них ссылается любая
+/// поставленная в мир вещь; поведение машины — раньше самой машины, потому что
+/// машина зовёт его по имени.
+///
+/// По виду, а не по имени файла, и это не мелочь: вид называет сервер, и имя
+/// файла у карты не говорит о нём ничего. Всё, чего в перечне нет, грузится
+/// после перечисленного, сохраняя порядок, в котором пришло.
+constexpr std::array kLoadOrder{
+    std::string_view{"DLC_ITYP_REQUEST"},
+    std::string_view{"HANDLING_FILE"},
+    std::string_view{"VEHICLE_METADATA_FILE"},
+    std::string_view{"CARCOLS_FILE"},
+    std::string_view{"VEHICLE_VARIATION_FILE"},
+    std::string_view{"VEHICLE_LAYOUTS_FILE"},
+};
+
 /// Сколько записей таблицы видов согласны прочесть.
 ///
 /// Предел от испорченного адреса, а не от жадности: таблица кончается особой
@@ -110,7 +129,8 @@ std::int32_t DataFiles::typeOf(std::string_view name) const {
     return -1;
 }
 
-void DataFiles::add(std::string gamePath, std::string_view fileName) {
+void DataFiles::add(std::string gamePath, std::string_view fileName,
+                    std::string_view declared) {
     const std::string lowered = [fileName] {
         std::string result;
         result.reserve(fileName.size());
@@ -127,19 +147,24 @@ void DataFiles::add(std::string gamePath, std::string_view fileName) {
 
     const auto known = std::ranges::find(kKnownFiles, lowered, &KnownFile::fileName);
 
-    if (known == kKnownFiles.end()) {
+    // Названный сервером вид главнее угаданного, и спорить тут не о чем: имя
+    // вида знает тот, кто ресурс собирал, а мы знаем четыре имени файлов.
+    const std::string_view wanted =
+        !declared.empty() ? declared
+                          : (known == kKnownFiles.end() ? std::string_view{} : known->type);
+
+    if (wanted.empty()) {
         // Не всякое описание рядом с машиной нам знакомо, и молчать об этом
         // нельзя: пропущенное описание проявится не ошибкой, а машиной без
         // цвета или без звука — и искать причину будут долго.
-        spdlog::info("описание {} не загружается: вид такого файла неизвестен", fileName);
+        spdlog::debug("data file {} skipped: the server did not name its type", fileName);
         return;
     }
 
-    const std::int32_t type = typeOf(known->type);
+    const std::int32_t type = typeOf(wanted);
 
     if (type < 0) {
-        spdlog::warn("описание {} не загружается: вида \"{}\" у этой игры нет", fileName,
-                     known->type);
+        spdlog::warn("data file {} skipped: this game has no type \"{}\"", fileName, wanted);
         return;
     }
 
@@ -156,10 +181,12 @@ void DataFiles::add(std::string gamePath, std::string_view fileName) {
         }
     }
 
+    const auto place = std::ranges::find(kLoadOrder, wanted);
+
     pending_.push_back(Wanted{
         .path = std::move(gamePath),
         .type = type,
-        .order = static_cast<std::size_t>(std::distance(kKnownFiles.begin(), known)),
+        .order = static_cast<std::size_t>(std::distance(kLoadOrder.begin(), place)),
     });
 }
 
@@ -179,10 +206,9 @@ std::size_t DataFiles::pump() {
         return 0;
     }
 
-    // Порядок — тот же, что в перечне известных файлов: поведение раньше самой
-    // машины, потому что машина ссылается на него по имени. Сортировать по
-    // номеру вида нельзя — его назначает игра, и он ничего не говорит о том,
-    // что от чего зависит.
+    // Порядок — тот же, что в kLoadOrder: то, на что ссылаются, раньше
+    // ссылающегося. Сортировать по номеру вида нельзя — его назначает игра, и
+    // он ничего не говорит о том, что от чего зависит.
     std::ranges::stable_sort(batch, {}, &Wanted::order);
 
     std::size_t loaded = 0;

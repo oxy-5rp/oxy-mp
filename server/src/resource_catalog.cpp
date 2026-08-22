@@ -166,6 +166,51 @@ namespace {
     return std::equal(resolvedRoot.begin(), resolvedRoot.end(), resolved.begin());
 }
 
+/// Имя раздела, в котором alt:V перечисляет виды описаний.
+///
+/// С точкой на конце: разбор приставляет имя раздела к ключу через неё.
+constexpr std::string_view kMetaSection = "meta.";
+
+/// Тип ресурса, который ничего не исполняет, а только раздаёт файлы.
+constexpr std::string_view kFileOnlyType = "dlc";
+
+/// Читает отдельный список раздаваемого — тот, на который указывает `main` у
+/// ресурса без кода.
+///
+/// У alt:V такой список лежит своим файлом (`stream.toml`, `dlc.toml`) и
+/// содержит `files` и раздел `[meta]`. Класть их прямо в `resource.toml` он
+/// тоже позволяет, поэтому прочитанное здесь **добавляется** к прочитанному
+/// там, а не заменяет его.
+[[nodiscard]] bool readManifest(const std::filesystem::path& path, ScriptResource& resource,
+                                const std::string& name,
+                                std::vector<std::string>& complaints) {
+    config_file::Entries entries;
+    std::string error;
+
+    if (!config_file::read(path, entries, error)) {
+        complaints.push_back(std::format("\"{}\": {}", name, error));
+        return false;
+    }
+
+    for (const auto& [key, value] : entries) {
+        if (key.starts_with(kMetaSection)) {
+            resource.dataFiles.emplace(key.substr(kMetaSection.size()), value);
+            continue;
+        }
+
+        // `files` — то же, что `client-files` в описании: список того, что
+        // уходит клиенту. Имя другое, потому что список отдельный, а смысл тот
+        // же, и складывать их в одно место — единственное верное решение.
+        if (key == "files" || key == "client-files") {
+            for (std::string& file : config_file::split(value)) {
+                resource.clientFiles.push_back(std::move(file));
+            }
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
 std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& directory,
@@ -221,7 +266,11 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
         resource.root = root;
 
         for (const auto& [key, value] : entries) {
-            if (key == "type") {
+            if (key.starts_with(kMetaSection)) {
+                // Раздел [meta]: путь к файлу — имя вида у игры. Ключ приходит
+                // сюда приставленным к имени раздела, её и снимаем.
+                resource.dataFiles.emplace(key.substr(kMetaSection.size()), value);
+            } else if (key == "type") {
                 resource.type = value;
             } else if (key == "main") {
                 resource.main = value;
@@ -249,6 +298,24 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
         if (resource.type.empty()) {
             complaints.push_back(std::format("\"{}\": не сказано, чем запускать (type)", name));
             continue;
+        }
+
+        // Ресурс, который ничего не исполняет.
+        //
+        // У alt:V это `type = "dlc"`: машины, карты, звуки — всё, что состоит из
+        // одних файлов. `main` у такого указывает не на скрипт, а на список
+        // раздаваемого, и читается он здесь же.
+        resource.executes = resource.type != kFileOnlyType;
+
+        if (!resource.executes && !resource.main.empty()) {
+            if (!readManifest(root / resource.main, resource, name, complaints)) {
+                continue;
+            }
+
+            // Дальше по коду `main` означает «что запускать», а запускать здесь
+            // нечего. Оставленный, он завёл бы поиск машины для типа, которого
+            // у сервера нет, — и ресурс отказал бы целиком.
+            resource.main.clear();
         }
 
         // Ресурс без main — законный ресурс, а не описка.

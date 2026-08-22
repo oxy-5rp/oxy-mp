@@ -424,18 +424,30 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // ресурсов, названные составным именем: клиент по нему поймёт, какой из
     // скачанных файлов открыть в CEF, а не будет гадать.
     std::vector<std::string> pages;
+
+    // Какие из раздаваемых файлов игра обязана прочесть описанием и каким.
+    // Имена здесь составные — те же, под какими файлы уходят клиенту.
+    std::unordered_map<std::string, std::string> described;
+
     for (const ScriptResource& resource : catalog_.all()) {
         if (!resource.clientMain.empty()) {
             pages.push_back(std::format("{}/{}", resource.name, resource.clientMain));
         }
+
+        for (const auto& [file, type] : resource.dataFiles) {
+            described.emplace(std::format("{}/{}", resource.name, file), type);
+        }
     }
 
     for (const ResourceStore::Item& item : resources_.items()) {
+        const auto description = described.find(item.name);
+
         resources.entries.push_back(shared::ResourceEntry{
             .name = item.name,
             .hash = item.hash,
             .size = item.size,
             .page = std::ranges::find(pages, item.name) != pages.end(),
+            .dataFile = description == described.end() ? std::string{} : description->second,
         });
     }
 
