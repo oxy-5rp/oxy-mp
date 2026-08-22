@@ -2,8 +2,6 @@
 
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
-
 namespace oxymp::client::game {
 
 std::unique_ptr<StreamingFiles> StreamingFiles::create(const EngineAddresses& addresses,
@@ -22,14 +20,10 @@ std::unique_ptr<StreamingFiles> StreamingFiles::create(const EngineAddresses& ad
 void StreamingFiles::add(std::string path, std::string name) {
     const std::lock_guard guard{mutex_};
 
-    if (std::ranges::find(declared_, name) != declared_.end()) {
+    // Отмечаем и спрашиваем одним движением: вставка отвечает, было ли имя
+    // здесь раньше, и второго прохода по множеству не нужно.
+    if (!known_.insert(name).second) {
         return;
-    }
-
-    for (const Wanted& each : pending_) {
-        if (each.name == name) {
-            return;
-        }
     }
 
     pending_.push_back(Wanted{.path = std::move(path), .name = std::move(name)});
@@ -60,11 +54,6 @@ std::size_t StreamingFiles::pump() {
         if (slot == kNoSlot) {
             spdlog::warn("the game did not take file {} under the name {}", file.path, file.name);
             continue;
-        }
-
-        {
-            const std::lock_guard guard{mutex_};
-            declared_.push_back(file.name);
         }
 
         ++taken;

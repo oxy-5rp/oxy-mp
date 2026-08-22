@@ -39,7 +39,9 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -220,6 +222,13 @@ private:
 /// Полсекунды — вдвое больше, чем нужно: сетевой цикл оборачивается за
 /// пятьдесят миллисекунд, а прощание — один пакет, отправляемый тут же.
 constexpr auto kGoodbyeGrace = std::chrono::milliseconds{500};
+
+/// Как часто обслуживать соединение, пока идёт разбор ресурсов.
+///
+/// Разбор занимает сетевой поток целиком, а он же единственный кормит ENet.
+/// Пятьдесят миллисекунд — обычный оборот его цикла: чаще незачем, реже —
+/// значит опять молчать.
+constexpr auto kSyncBeat = std::chrono::milliseconds{50};
 
 /// Закрывает игру.
 ///
@@ -592,6 +601,69 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
 
     return std::string{base};
 }
+
+/// Стоит ли вообще предлагать этот файл потоковой подгрузке.
+///
+/// Список — не белый, а чёрный, и это выбрано нарочно. Белый список расширений
+/// пришлось бы держать полным: пропусти в нём один вид — и ресурс, который на
+/// нём держится, молча не заработает, а искать такое будут часами. Чёрный
+/// перечисляет только то, про что мы знаем наверняка: игровым добром это не
+/// бывает.
+///
+/// Нужен он ради журнала. Чужие карты приезжают с мусором, оставшимся от
+/// FiveM: `fxmanifest.lua`, `_manifest.ymf`, забытый рядом `.zip` с
+/// исходником. Игра такое отвергает — и на каждый файл мы писали человеку
+/// испуганное предупреждение, с которым он не мог сделать ничего.
+/// Расширение файла в нижнем регистре, вместе с точкой. Пусто — расширения нет.
+///
+/// Приведение к нижнему регистру обязательно: чужие ресурсы собирают на разных
+/// машинах, и `.YTYP` рядом с `.ytyp` в них дело обычное.
+[[nodiscard]] std::string lowerSuffix(std::string_view fileName) {
+    const std::size_t dot = fileName.rfind('.');
+    if (dot == std::string_view::npos) {
+        return {};
+    }
+
+    std::string suffix{fileName.substr(dot)};
+    std::ranges::transform(suffix, suffix.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    return suffix;
+}
+
+[[nodiscard]] bool worthStreaming(std::string_view fileName) {
+    // `.ymf` здесь не по ошибке: расширение у игры своё, но читает такие файлы
+    // не стриминг, а загрузчик содержимого DLC. Объявленный стримингу вручную,
+    // он отвергается — что игра нам и отвечала.
+    static constexpr std::array kNotAssets = std::to_array<std::string_view>(
+        {".lua", ".zip", ".rar", ".7z", ".txt", ".md", ".json", ".js", ".ts", ".html", ".css",
+         ".ini", ".cfg", ".log", ".bak", ".psd", ".blend", ".fbx", ".ymf", ".db", ".sql"});
+
+    const std::string suffix = lowerSuffix(fileName);
+    if (suffix.empty()) {
+        return true;
+    }
+
+    return std::ranges::find(kNotAssets, suffix) == kNotAssets.end();
+}
+
+/// Список архетипов — того, какие вещи в мире вообще бывают.
+///
+/// Файл особенный: он и подгружается стримингом, как модель, и объявляется
+/// загрузчику описаний, как `.meta`. Одного из двух мало — без описания игра
+/// не узнает ни одного архетипа, и всякая карта будет ссылаться на то, чего у
+/// неё нет.
+[[nodiscard]] bool isArchetypeList(std::string_view fileName) {
+    return lowerSuffix(fileName) == ".ytyp";
+}
+
+/// Каким видом объявляется список архетипов.
+///
+/// У FiveM это пишут строкой `data_file 'DLC_ITYP_REQUEST' 'stream/*.ytyp'` в
+/// `fxmanifest.lua`, и пишут у всякой карты без исключения: другого вида у
+/// `.ytyp` нет. Требовать от хозяина сервера выписать это на каждый из
+/// четырёхсот файлов чужой карты значило бы требовать её переписать.
+constexpr std::string_view kArchetypeType = "DLC_ITYP_REQUEST";
 
 /// Имя файла, если это описание в корне ресурса, — иначе пусто.
 ///
@@ -1535,7 +1607,26 @@ void run() {
             // и обе — с делением «столько-то из стольких». Закачка идёт в этом
             // же потоке и занимает столько, сколько занимает; молчащая страница
             // всё это время выглядела бы зависшей.
-            const auto report = [menu](std::size_t done, std::size_t total, bool downloading) {
+            // Соединение обслуживается прямо посреди разбора, и это не
+            // украшение, а единственное, чем держится связь.
+            //
+            // Качаем мы в сетевом потоке — том самом и единственном, который
+            // кормит ENet. Пока он занят закачкой, сервер не слышит от нас
+            // ничего: ни ping, ни состояния. На карте в четыре с половиной
+            // тысячи файлов разбор шёл полминуты, и сервер выкидывал нас по
+            // молчанию раньше, чем закачка кончалась, — а клиент замечал это
+            // ещё через полминуты, уже войдя в мир.
+            auto beatAt = std::chrono::steady_clock::now();
+
+            const auto report = [&](std::size_t done, std::size_t total, bool downloading) {
+                if (const auto now = std::chrono::steady_clock::now(); now - beatAt >= kSyncBeat) {
+                    beatAt = now;
+
+                    // Без ожидания: время здесь тратится на закачку, а не на
+                    // сон. Нужно лишь разобрать пришедшее и отправить своё.
+                    connection->update(std::chrono::milliseconds{0});
+                }
+
                 if (menu == nullptr) {
                     return;
                 }
@@ -1568,12 +1659,21 @@ void run() {
                 };
 
                 for (const shared::ResourceEntry& entry : *offered) {
-                    if (describes(entry)) {
+                    const std::string streamed = streamFileName(entry.name);
+                    if (streamed.empty()) {
                         continue;
                     }
 
-                    const std::string streamed = streamFileName(entry.name);
-                    if (streamed.empty()) {
+                    // Список архетипов проходит здесь даже названным в `[meta]`:
+                    // он нужен игре дважды — и файлом, и описанием, — а описание
+                    // ему выпишется тут же, ниже.
+                    if (describes(entry) && !isArchetypeList(streamed)) {
+                        continue;
+                    }
+
+                    if (!worthStreaming(streamed)) {
+                        spdlog::debug("{} is not a game asset, not offering it to streaming",
+                                      entry.name);
                         continue;
                     }
 
@@ -1585,12 +1685,23 @@ void run() {
                     if (streamedFiles != nullptr) {
                         streamedFiles->add(gamePath, streamed);
                     }
+
+                    if (dataFiles != nullptr && isArchetypeList(streamed)) {
+                        dataFiles->add(gamePath, streamed,
+                                       entry.dataFile.empty() ? kArchetypeType
+                                                              : std::string_view{entry.dataFile});
+                    }
                 }
 
                 // Описания — отдельным проходом и после моделей, чтобы порядок
                 // просьб совпадал с порядком, в котором игра их получит.
                 for (const shared::ResourceEntry& entry : *offered) {
                     if (!describes(entry)) {
+                        continue;
+                    }
+
+                    // Архетипы уже объявлены — вместе со своим файлом.
+                    if (isArchetypeList(entry.name) && !streamFileName(entry.name).empty()) {
                         continue;
                     }
 

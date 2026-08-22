@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -321,15 +322,19 @@ void GameSession::serveFiles() {
     // Объявление стримингу — строго следом, и порядок этот обязателен:
     // объявляемый файл игра тут же открывает, чтобы узнать его размер и
     // раскладку страниц, а открыть его она может только через наше устройство.
-    if (streamed_ != nullptr) {
-        streamed_->pump();
-    }
+    const std::size_t streamed = streamed_ != nullptr ? streamed_->pump() : 0;
 
     // Описания — последними, и порядок снова обязателен: описание машины
     // ссылается на её модель по имени, а имя к этому времени должно быть уже
     // объявлено стримингу.
-    if (described_ != nullptr) {
-        described_->pump();
+    const std::size_t described = described_ != nullptr ? described_->pump() : 0;
+
+    // Строка не для того, кто чинит клиент, а для того, кто держит сервер, — и
+    // потому она видна. Ресурс со своими машинами или картой либо доехал до
+    // игры, либо нет, и узнать это иначе нельзя ничем: не доехавший проявится
+    // пустым местом в мире, а пустое место молчит.
+    if (streamed != 0 || described != 0) {
+        spdlog::info("Custom content: {} files, {} descriptions", streamed, described);
     }
 
     if (mounted == 0 || filesChecked_) {
@@ -580,6 +585,12 @@ void GameSession::advance() {
         return;
 
     case Stage::Playing:
+        // Точка появления сервера доходит только теперь: до появления в мире мы
+        // к нему ещё не подключались. Перенос идёт раньше всего прочего в этой
+        // ветви — картинка проявляется тоже отсюда, и опоздать значило бы
+        // показать игроку запасную точку и рывок из неё.
+        applyServerSpawn();
+
         // Подделка сетевого состояния включается только здесь, позже всего
         // остального, и это не осторожность ради осторожности: на загрузке игра
         // распоряжается сессией сама, читает эти признаки чаще всего и ветвится
@@ -761,6 +772,10 @@ void GameSession::forgetSessionOnLeaving() {
     if (here) {
         return;
     }
+
+    // Следующий сервер назовёт свою точку появления, и перенести туда нужно
+    // будет заново.
+    serverSpawnApplied_ = false;
 
     // Метки, маркеры и точки — единственное из мира сессии, что не убирается
     // само собой. Люди и машины пропадают, потому что сверяются со списком, а
@@ -1276,6 +1291,36 @@ void GameSession::spawn() {
     world_.clearArea(point, kClearRadius);
 
     spdlog::debug("spawned at the server point: {:.1f} {:.1f} {:.1f}", point.x, point.y, point.z);
+}
+
+void GameSession::applyServerSpawn() {
+    if (serverSpawnApplied_) {
+        return;
+    }
+
+    const std::optional<shared::Vec3> named = status_.snapshot().spawn;
+    if (!named) {
+        return;
+    }
+
+    const int ped = player_.ped();
+    if (ped == 0) {
+        return;
+    }
+
+    serverSpawnApplied_ = true;
+
+    // Совпало с запасной — переносить некуда, и лишний перенос стоил бы
+    // подгрузки мира заново на пустом месте.
+    if (*named == kFallbackSpawn) {
+        return;
+    }
+
+    teleportSafely(ped, *named, kSpawnHeading);
+    world_.clearArea(*named, kClearRadius);
+
+    spdlog::debug("moved to the spawn point named by the server: {:.1f} {:.1f} {:.1f}", named->x,
+                  named->y, named->z);
 }
 
 void GameSession::sweepScripts() {
