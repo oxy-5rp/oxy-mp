@@ -27,6 +27,7 @@ if(WIN32)
         src/client_app.cpp
         src/dllmain.cpp
         src/discord_presence.cpp
+        src/frame_watch.cpp
         src/game_session.cpp
         src/menu.cpp
         src/resource_cache.cpp
@@ -34,6 +35,7 @@ if(WIN32)
         src/server_history.cpp
         src/ui_feed.cpp
         src/game/appearance.cpp
+        src/game/asset_kind.cpp
         src/game/attachments.cpp
         src/game/bink_sound.cpp
         src/game/blips.cpp
@@ -63,6 +65,7 @@ if(WIN32)
         src/game/network_bail.cpp
         src/game/network_game.cpp
         src/game/objects.cpp
+        src/game/packfiles.cpp
         src/game/peds.cpp
         src/game/nameplates.cpp
         src/game/online_map.cpp

@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace oxymp::client::game {
 namespace {
@@ -24,6 +26,32 @@ constexpr std::size_t kOpen = 1;
 constexpr std::size_t kRead = 6;
 constexpr std::size_t kClose = 12;
 constexpr std::size_t kFileLengthByPath = 22;
+constexpr std::size_t kFindFirst = 25;
+constexpr std::size_t kFindNext = 26;
+constexpr std::size_t kFindClose = 27;
+
+/// Запись обхода каталога — `rage::fiFindData`.
+///
+/// Раскладка взята из объявления в исходниках CitizenFX. Имя первым и длиной в
+/// 256 байт: игра пишет его туда без оглядки на нас, и укоротить поле значило бы
+/// получить запись поверх своего стека.
+struct FindData {
+    char fileName[256];
+    std::uint64_t fileSize;
+    std::uint32_t writeTimeLow;
+    std::uint32_t writeTimeHigh;
+    std::uint32_t attributes;
+};
+
+/// Признак каталога у Windows; игра отдаёт те же признаки.
+constexpr std::uint32_t kDirectory = 0x10;
+
+/// Насколько глубоко заходить в обходе.
+///
+/// Предел от кольца, а не от жадности: устройство вправе отдать «каталог» с тем
+/// же именем, что и родитель, и обход пошёл бы по кругу. У самых глубоких чужих
+/// архивов вложенность не доходит и до половины этого.
+constexpr int kMaxDepth = 8;
 
 /// Достаёт из таблицы методов запись по номеру и приводит её к нужному виду.
 template <typename Signature>
@@ -39,6 +67,9 @@ using ReadMethod = std::uint32_t (*)(void* device, std::uint64_t handle, void* b
                                      std::uint32_t bytes);
 using CloseMethod = std::int32_t (*)(void* device, std::uint64_t handle);
 using LengthMethod = std::uint64_t (*)(void* device, const char* path);
+using FindFirstMethod = std::uint64_t (*)(void* device, const char* path, FindData* found);
+using FindNextMethod = bool (*)(void* device, std::uint64_t handle, FindData* found);
+using FindCloseMethod = int (*)(void* device, std::uint64_t handle);
 
 /// Что игра отдаёт вместо описателя, когда открыть не вышло.
 constexpr std::uint64_t kNoHandle = static_cast<std::uint64_t>(-1);
@@ -124,6 +155,94 @@ std::string FileSystem::read(const char* path) const {
 
     contents.resize(filled);
     return contents;
+}
+
+std::vector<std::string> FileSystem::filesUnder(const std::string& directory) const {
+    std::vector<std::string> files;
+
+    if (!ready()) {
+        return files;
+    }
+
+    // Обход в ширину своим списком, а не рекурсией: у чужих архивов бывает и
+    // тысяча каталогов, а глубина стека внутри кадра игры не наша.
+    struct Step {
+        std::string path;
+        int depth;
+    };
+
+    std::vector<Step> ahead;
+
+    // Косая черта на конце обязательна, и это наблюдение, а не догадка: у
+    // CitizenFX обход тоже начинается с `cfx:/addons/`, а не с `cfx:/addons`.
+    std::string root = directory;
+    if (root.empty() || root.back() != '/') {
+        root += '/';
+    }
+
+    ahead.push_back(Step{.path = std::move(root), .depth = 0});
+
+    while (!ahead.empty()) {
+        const Step here = ahead.back();
+        ahead.pop_back();
+
+        void* const device = lookup_(here.path.c_str(), true);
+        if (device == nullptr) {
+            continue;
+        }
+
+        FindData found{};
+
+        std::uint64_t handle =
+            methodAt<FindFirstMethod>(device, kFindFirst)(device, here.path.c_str(), &found);
+
+        // Некоторые устройства ждут путь каталога без косой черты на конце.
+        if (handle == kNoHandle && here.path.size() > 1 && here.path.back() == '/') {
+            const std::string bare = here.path.substr(0, here.path.size() - 1);
+            handle = methodAt<FindFirstMethod>(device, kFindFirst)(device, bare.c_str(), &found);
+        }
+
+        if (handle == kNoHandle) {
+            spdlog::debug("the game refused to walk {}", here.path);
+            continue;
+        }
+
+        do {
+            // Имя приходит из чужой памяти: если игра не оставила завершающего
+            // нуля, строка ушла бы читать дальше поля.
+            found.fileName[sizeof(found.fileName) - 1] = '\0';
+
+            const std::string_view name{found.fileName};
+
+            if (name.empty() || name == "." || name == "..") {
+                continue;
+            }
+
+            // Путь каталога сам кончается косой чертой, поэтому вторую не
+            // добавляем: игра примет и такое, но в журнале это выглядело бы
+            // ошибкой там, где её нет.
+            std::string full = here.path;
+            if (full.empty() || full.back() != '/') {
+                full += '/';
+            }
+            full += name;
+
+            if ((found.attributes & kDirectory) != 0) {
+                if (here.depth < kMaxDepth) {
+                    full += '/';
+                    ahead.push_back(Step{.path = std::move(full), .depth = here.depth + 1});
+                }
+
+                continue;
+            }
+
+            files.push_back(std::move(full));
+        } while (methodAt<FindNextMethod>(device, kFindNext)(device, handle, &found));
+
+        methodAt<FindCloseMethod>(device, kFindClose)(device, handle);
+    }
+
+    return files;
 }
 
 } // namespace oxymp::client::game

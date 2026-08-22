@@ -99,6 +99,48 @@ void ResourceStore::load(const std::filesystem::path& directory) {
         packed_.emplace(hash, std::move(packed));
     }
 
+    // Раскладка RAGE MP: каталог на пак, а внутри всегда `dlc.rpf`.
+    //
+    // Читается наравне с файлами, лежащими россыпью, и это не поблажка ради
+    // удобства. Хозяин сервера, переходящий с RAGE MP, держит свои паки именно
+    // так — `client_packages/game_resources/dlcpacks/имя/dlc.rpf`, — и требовать
+    // от него разложить полсотни архивов заново, переименовав каждый, значило бы
+    // требовать переделать сервер ради нас.
+    //
+    // Имя раздачи берётся у каталога, а не у файла: `dlc.rpf` у всех паков один
+    // и тот же, и по нему они сошлись бы в один.
+    for (const auto& entry : std::filesystem::directory_iterator{directory, ec}) {
+        if (!entry.is_directory(ec)) {
+            continue;
+        }
+
+        const std::filesystem::path inside = entry.path() / "dlc.rpf";
+
+        if (!std::filesystem::exists(inside, ec)) {
+            continue;
+        }
+
+        const std::optional<std::vector<std::uint8_t>> plain = readFile(inside);
+        if (!plain) {
+            spdlog::warn("file {} could not be read: skipping", inside.string());
+            continue;
+        }
+
+        std::vector<std::uint8_t> packed = shared::Vault::pack(*plain, key);
+        const std::string hash = shared::fingerprint(packed);
+
+        Item item;
+        item.name = entry.path().filename().string() + ".rpf";
+        item.hash = hash;
+        item.size = packed.size();
+
+        spdlog::debug("file {}: {} KB", item.name, item.size / 1024);
+        spdlog::debug("  /resources/dlcpacks/{}.resource", hash);
+
+        items_.push_back(std::move(item));
+        packed_.emplace(hash, std::move(packed));
+    }
+
     if (ec) {
         spdlog::warn("the resource directory was not read in full: {}", ec.message());
     }

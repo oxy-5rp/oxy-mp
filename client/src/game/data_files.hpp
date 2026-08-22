@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace oxymp::client::game {
@@ -110,6 +111,15 @@ private:
 
     mutable std::mutex mutex_;
     std::vector<Wanted> pending_;
+
+    /// Пути, о которых уже просили, — и загруженные, и стоящие в очереди.
+    ///
+    /// Прежде очередь пересматривалась перебором, и повторно просить об уже
+    /// загруженном было нечем: перебор видел только неразобранное. При
+    /// переподключении сервер называет свои описания заново, и чужая карта
+    /// заставляла игру разбирать три сотни списков архетипов ещё раз — прямо
+    /// посреди кадра.
+    std::unordered_set<std::string> known_;
 };
 
 } // namespace oxymp::client::game

@@ -19,6 +19,7 @@
 #include "game/network_bail.hpp"
 #include "game/network_game.hpp"
 #include "game/objects.hpp"
+#include "game/packfiles.hpp"
 #include "game/peds.hpp"
 #include "game/online_map.hpp"
 #include "game/player.hpp"
@@ -34,6 +35,7 @@
 #include "game/vehicles.hpp"
 #include "game/window.hpp"
 #include "game/world.hpp"
+#include "frame_watch.hpp"
 #include "script_host.hpp"
 #include "session_mail.hpp"
 #include "session_status.hpp"
@@ -114,9 +116,11 @@ public:
                                                              LocalState& localState,
                                                              SessionMail& mail,
                                                              UiFeed& feed,
+                                                             FrameWatch& watch,
                                                              game::FileDevice* files,
                                                              game::StreamingFiles* streamed,
                                                              game::DataFiles* described,
+                                                             game::Packfiles* archives,
                                                              std::string& error);
 
     ~GameSession();
@@ -140,12 +144,24 @@ public:
 private:
     GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
-                LocalState& localState, SessionMail& mail, UiFeed& feed, game::FileDevice* files,
-                game::StreamingFiles* streamed, game::DataFiles* described);
+                LocalState& localState, SessionMail& mail, UiFeed& feed, FrameWatch& watch,
+                game::FileDevice* files, game::StreamingFiles* streamed,
+                game::DataFiles* described, game::Packfiles* archives);
 
     /// Вешает отложенные подмены файлов и один раз проверяет, что игра берёт
     /// файлы у нас.
     void serveFiles();
+
+    /// Обходит только что открытый архив и объявляет игре его содержимое.
+    ///
+    /// Открыть архив мало: игра прочтёт из него что угодно, но искать там не
+    /// станет — она ищет не по путям, а по имени в своём списке подгружаемого.
+    /// Поэтому содержимое объявляется ровно так же, как россыпь файлов рядом с
+    /// ресурсом: модели стримингу, списки архетипов ещё и загрузчику описаний.
+    ///
+    /// Вложенные архивы вешаются своими приставками и обходятся следующим
+    /// кадром: у чужих сборок машина внутри карты внутри архива — обычное дело.
+    void declareArchive(const std::string& prefix);
 
     /// Чем клиент занят между запуском игры и полноценной игрой.
     ///
@@ -306,6 +322,10 @@ private:
     /// строк чата. Он живёт внутри этого же процесса и рисуется прямо в кадр.
     UiFeed& feed_;
 
+    /// Сторож кадра. Ему отмечают, до какого места кадр дошёл, — по этой отметке
+    /// зависание называет себя само.
+    FrameWatch& watch_;
+
     game::Hud hud_;
     game::Player player_;
     game::Screen screen_;
@@ -378,12 +398,23 @@ private:
     /// объявлено.
     game::DataFiles* described_ = nullptr;
 
+    /// Архивы игры, присланные сервером. Открывает их она сама; наше дело —
+    /// попросить и потом объявить ей то, что внутри.
+    game::Packfiles* archives_ = nullptr;
+
     /// Чтение файлов средствами самой игры — им и проверяется, что подмена
     /// дошла до неё, а не осталась нашей выдумкой.
     game::FileSystem gameFiles_;
 
     /// Проверяли ли уже, что игра берёт файлы у нас. Один раз за запуск.
     bool filesChecked_ = false;
+
+    /// Сколько файлов и описаний объявлено игре с прошлого отчёта.
+    ///
+    /// Копится потому, что объявление идёт порциями по кадрам: без накопления в
+    /// журнале была бы строка на каждую порцию, а их у чужой карты полсотни.
+    std::size_t servedFiles_ = 0;
+    std::size_t servedDescriptions_ = 0;
     game::Controls controls_;
     game::OnlineMap onlineMap_;
     game::Appearance appearance_;

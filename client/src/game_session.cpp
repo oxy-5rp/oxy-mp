@@ -1,5 +1,6 @@
 #include "game_session.hpp"
 
+#include "game/asset_kind.hpp"
 #include "game/environment.hpp"
 
 #include "game/native_table.hpp"
@@ -112,8 +113,9 @@ bool pressedOnce(int key) {
 GameSession::GameSession(const game::EngineAddresses& addresses, const game::NativeTable& table,
                          Settings settings, const SessionStatus& status,
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
-                         UiFeed& feed, game::FileDevice* files,
-                         game::StreamingFiles* streamed, game::DataFiles* described)
+                         UiFeed& feed, FrameWatch& watch, game::FileDevice* files,
+                         game::StreamingFiles* streamed, game::DataFiles* described,
+                         game::Packfiles* archives)
     : natives_(table),
       settings_(std::move(settings)),
       status_(status),
@@ -121,6 +123,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       localState_(localState),
       mail_(mail),
       feed_(feed),
+      watch_(watch),
       hud_(table),
       player_(table),
       screen_(table),
@@ -135,6 +138,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       files_(files),
       streamed_(streamed),
       described_(described),
+      archives_(archives),
       gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
@@ -162,9 +166,11 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  Settings settings, const SessionStatus& status,
                                                  const RemoteRoster& roster,
                                                  LocalState& localState, SessionMail& mail,
-                                                 UiFeed& feed, game::FileDevice* files,
+                                                 UiFeed& feed, FrameWatch& watch,
+                                                 game::FileDevice* files,
                                                  game::StreamingFiles* streamed,
                                                  game::DataFiles* described,
+                                                 game::Packfiles* archives,
                                                  std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
@@ -178,8 +184,8 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     }
 
     std::unique_ptr<GameSession> session{new GameSession{
-        addresses, table, std::move(settings), status, roster, localState, mail, feed, files,
-        streamed, described}};
+        addresses, table, std::move(settings), status, roster, localState, mail, feed, watch,
+        files, streamed, described, archives}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -272,6 +278,11 @@ GameSession::~GameSession() {
 }
 
 void GameSession::onFrame(bool ownsResources) {
+    // Отметка ставится первой строкой кадра, а дальше уточняется по ходу: если
+    // кадр встанет, сторож назовёт последнее пройденное место, а не «где-то в
+    // клиенте».
+    watch_.mark("frame start");
+
     // Работа с игрой — только от потока с обработчиком скрипта. Рисование же
     // идёт всегда: во время загрузки это единственное, что вообще можно
     // сделать, и ровно тогда свой экран и нужен.
@@ -287,7 +298,10 @@ void GameSession::onFrame(bool ownsResources) {
         // подменённое должно стоять на месте раньше, чем игра его прочтёт.
         serveFiles();
 
+        watch_.mark("suppressing the game's own rules");
         suppressGame();
+
+        watch_.mark("advancing the session");
         advance();
     }
 
@@ -305,7 +319,11 @@ void GameSession::onFrame(bool ownsResources) {
     reportSessionState();
     reportPause();
     publishStage();
+
+    watch_.mark("drawing");
     draw();
+
+    watch_.mark("frame done");
 }
 
 void GameSession::serveFiles() {
@@ -317,24 +335,48 @@ void GameSession::serveFiles() {
     // выделяет память её собственным аллокатором, а он у неё потоковый и в
     // чужих потоках попросту отсутствует. Вызов оттуда роняет игру внутри неё
     // самой — на разыменовании нуля в переходнике, достающем аллокатор.
+    watch_.mark("mounting the file device");
     const std::size_t mounted = files_->pump();
 
     // Объявление стримингу — строго следом, и порядок этот обязателен:
     // объявляемый файл игра тут же открывает, чтобы узнать его размер и
     // раскладку страниц, а открыть его она может только через наше устройство.
+    watch_.mark("offering files to streaming");
     const std::size_t streamed = streamed_ != nullptr ? streamed_->pump() : 0;
 
     // Описания — последними, и порядок снова обязателен: описание машины
     // ссылается на её модель по имени, а имя к этому времени должно быть уже
     // объявлено стримингу.
+    watch_.mark("loading data descriptions");
     const std::size_t described = described_ != nullptr ? described_->pump() : 0;
 
-    // Строка не для того, кто чинит клиент, а для того, кто держит сервер, — и
-    // потому она видна. Ресурс со своими машинами или картой либо доехал до
-    // игры, либо нет, и узнать это иначе нельзя ничем: не доехавший проявится
+    // Архивы — после описаний и до отчёта: открытый архив тут же обходится, и
+    // его содержимое встанет в те же очереди, что и россыпь файлов, только
+    // следующим кадром.
+    if (archives_ != nullptr) {
+        watch_.mark("opening game archives");
+
+        for (const std::string& prefix : archives_->pump(gameFiles_)) {
+            declareArchive(prefix);
+        }
+    }
+
+    // Счёт копится, а строка пишется одна — когда очереди опустеют.
+    //
+    // Порознь было бы по строке на кадр: чужая карта объявляется порциями, и
+    // порций у неё полсотни. Строка эта не для того, кто чинит клиент, а для
+    // того, кто держит сервер: ресурс со своими машинами или картой либо доехал
+    // до игры, либо нет, и узнать это иначе нечем — не доехавший проявится
     // пустым местом в мире, а пустое место молчит.
-    if (streamed != 0 || described != 0) {
-        spdlog::info("Custom content: {} files, {} descriptions", streamed, described);
+    servedFiles_ += streamed;
+    servedDescriptions_ += described;
+
+    if (streamed == 0 && described == 0 && (servedFiles_ != 0 || servedDescriptions_ != 0)) {
+        spdlog::info("Custom content: {} files, {} descriptions", servedFiles_,
+                     servedDescriptions_);
+
+        servedFiles_ = 0;
+        servedDescriptions_ = 0;
     }
 
     if (mounted == 0 || filesChecked_) {
@@ -1321,6 +1363,64 @@ void GameSession::applyServerSpawn() {
 
     spdlog::debug("moved to the spawn point named by the server: {:.1f} {:.1f} {:.1f}", named->x,
                   named->y, named->z);
+}
+
+void GameSession::declareArchive(const std::string& prefix) {
+    watch_.mark("walking a game archive");
+
+    const std::vector<std::string> inside = gameFiles_.filesUnder(prefix);
+
+    if (inside.empty()) {
+        // Пустой архив — почти наверняка не пустой, а неоткрытый: игра ответила
+        // согласием, но обход ничего не нашёл. Молчать нельзя, иначе это
+        // выглядит как «архив приехал и ничего не привёз».
+        spdlog::warn("archive at {} turned out empty", prefix);
+        return;
+    }
+
+    std::size_t models = 0;
+    std::size_t archetypes = 0;
+    std::size_t nested = 0;
+
+    for (const std::string& path : inside) {
+        const std::string_view name = game::baseName(path);
+
+        // Вложенный архив вешается своей приставкой и обходится следующим
+        // кадром: у чужих сборок машина внутри карты внутри архива — обычное
+        // дело. Приставка выводится из его пути, а путь внутри архива
+        // неповторим.
+        if (game::isArchive(name)) {
+            ++nested;
+            continue;
+        }
+
+        if (!game::worthStreaming(name)) {
+            continue;
+        }
+
+        if (streamed_ != nullptr) {
+            streamed_->add(path, std::string{name});
+            ++models;
+        }
+
+        if (described_ != nullptr && game::isArchetypeList(name)) {
+            described_->add(path, std::string{name}, game::kArchetypeType);
+            ++archetypes;
+        }
+    }
+
+    // Строка для хозяина сервера, а не для того, кто чинит клиент: архив либо
+    // привёз игре добро, либо нет, и узнать это иначе нечем.
+    spdlog::info("Archive {} brought {} files and {} archetype lists", prefix, models, archetypes);
+
+    if (nested != 0) {
+        // Вложенные архивы пока не открываются, и об этом говорится вслух:
+        // молча пропущенная половина чужой сборки — это ровно тот случай, когда
+        // человек ищет причину часами. Открывать их — отдельная работа: игре
+        // нужен путь на диске, а вложенный архив лежит внутри другого.
+        spdlog::warn("archive {} carries {} nested archives; those are not opened yet", prefix,
+                     nested);
+    }
 }
 
 void GameSession::sweepScripts() {

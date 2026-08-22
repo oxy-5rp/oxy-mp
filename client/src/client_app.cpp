@@ -31,6 +31,9 @@
 #include "game/window.hpp"
 #include "game/world_hold.hpp"
 #include "game_session.hpp"
+#include "frame_watch.hpp"
+#include "game/asset_kind.hpp"
+#include "game/packfiles.hpp"
 #include "session_status.hpp"
 
 #include <oxymp/client/connection.hpp>
@@ -52,6 +55,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <stop_token>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -229,6 +233,18 @@ constexpr auto kGoodbyeGrace = std::chrono::milliseconds{500};
 /// Пятьдесят миллисекунд — обычный оборот его цикла: чаще незачем, реже —
 /// значит опять молчать.
 constexpr auto kSyncBeat = std::chrono::milliseconds{50};
+
+/// Сколько знаков отпечатка брать в приставку архива.
+///
+/// Приставка — имя устройства в файловой системе игры, и коротким оно должно
+/// быть не из красоты. У игры собственные имена устройств короткие — `common`,
+/// `platform`, `dlcpacks`, — и на длинном она молча ничего не монтирует:
+/// открытый архив вешается, но по приставке потом не читается ничего, и обход
+/// её тоже не находит.
+///
+/// Четырёх знаков отпечатка довольно: архивов на сервере единицы, а совпадение
+/// приставок просто отбрасывает второй архив, а не путает их между собой.
+constexpr std::size_t kArchivePrefixLength = 4;
 
 /// Закрывает игру.
 ///
@@ -614,57 +630,6 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
 /// FiveM: `fxmanifest.lua`, `_manifest.ymf`, забытый рядом `.zip` с
 /// исходником. Игра такое отвергает — и на каждый файл мы писали человеку
 /// испуганное предупреждение, с которым он не мог сделать ничего.
-/// Расширение файла в нижнем регистре, вместе с точкой. Пусто — расширения нет.
-///
-/// Приведение к нижнему регистру обязательно: чужие ресурсы собирают на разных
-/// машинах, и `.YTYP` рядом с `.ytyp` в них дело обычное.
-[[nodiscard]] std::string lowerSuffix(std::string_view fileName) {
-    const std::size_t dot = fileName.rfind('.');
-    if (dot == std::string_view::npos) {
-        return {};
-    }
-
-    std::string suffix{fileName.substr(dot)};
-    std::ranges::transform(suffix, suffix.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    return suffix;
-}
-
-[[nodiscard]] bool worthStreaming(std::string_view fileName) {
-    // `.ymf` здесь не по ошибке: расширение у игры своё, но читает такие файлы
-    // не стриминг, а загрузчик содержимого DLC. Объявленный стримингу вручную,
-    // он отвергается — что игра нам и отвечала.
-    static constexpr std::array kNotAssets = std::to_array<std::string_view>(
-        {".lua", ".zip", ".rar", ".7z", ".txt", ".md", ".json", ".js", ".ts", ".html", ".css",
-         ".ini", ".cfg", ".log", ".bak", ".psd", ".blend", ".fbx", ".ymf", ".db", ".sql"});
-
-    const std::string suffix = lowerSuffix(fileName);
-    if (suffix.empty()) {
-        return true;
-    }
-
-    return std::ranges::find(kNotAssets, suffix) == kNotAssets.end();
-}
-
-/// Список архетипов — того, какие вещи в мире вообще бывают.
-///
-/// Файл особенный: он и подгружается стримингом, как модель, и объявляется
-/// загрузчику описаний, как `.meta`. Одного из двух мало — без описания игра
-/// не узнает ни одного архетипа, и всякая карта будет ссылаться на то, чего у
-/// неё нет.
-[[nodiscard]] bool isArchetypeList(std::string_view fileName) {
-    return lowerSuffix(fileName) == ".ytyp";
-}
-
-/// Каким видом объявляется список архетипов.
-///
-/// У FiveM это пишут строкой `data_file 'DLC_ITYP_REQUEST' 'stream/*.ytyp'` в
-/// `fxmanifest.lua`, и пишут у всякой карты без исключения: другого вида у
-/// `.ytyp` нет. Требовать от хозяина сервера выписать это на каждый из
-/// четырёхсот файлов чужой карты значило бы требовать её переписать.
-constexpr std::string_view kArchetypeType = "DLC_ITYP_REQUEST";
-
 /// Имя файла, если это описание в корне ресурса, — иначе пусто.
 ///
 /// Описания лежат рядом с каталогом моделей, а не внутри него: так их кладут и
@@ -1004,9 +969,10 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               const SessionStatus& status,
                                               const RemoteRoster& roster, LocalState& localState,
                                               SessionMail& mail, UiFeed& feed,
-                                              game::FileDevice* files,
+                                              FrameWatch& watch, game::FileDevice* files,
                                               game::StreamingFiles* streamed,
                                               game::DataFiles* described,
+                                              game::Packfiles* archives,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -1049,8 +1015,8 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     };
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
-                                       localState, mail, feed, files, streamed, described,
-                                       error);
+                                       localState, mail, feed, watch, files, streamed, described,
+                                       archives, error);
     if (session == nullptr) {
         spdlog::error("the game session was not created: {}", error);
     }
@@ -1370,6 +1336,19 @@ void run() {
     // потока игры до самого своего разрушения.
     SessionStatus status;
 
+    // Сторож кадра и его поток.
+    //
+    // Поток отдельный, а не заодно с этим циклом, и это условие работы: в
+    // настоящем зависании сетевой цикл упирается в те же блокировки, что и
+    // поток игры, и молчит вместе с ним — а сказать надо именно тогда.
+    FrameWatch frameWatch;
+
+    // jthread, а не thread: он сам просит остановки и дожидается потока в своём
+    // разрушении. Выходов из этого цикла несколько, и забытая остановка в одном
+    // из них оставила бы сторожа ссылаться на уже разрушенное.
+    const std::jthread watcher{
+        [&frameWatch](std::stop_token stop) { watchFrames(frameWatch, std::move(stop)); }};
+
     // Кто ещё в сессии. Список готовится сетевым потоком целиком и подменяется
     // разом, чтобы поток игры не застал его наполовину обновлённым.
     RemoteRoster roster;
@@ -1379,6 +1358,9 @@ void run() {
     LocalState localState;
 
     std::unique_ptr<game::ScriptStartup> scriptStartup;
+
+    // Архивы игры, присланные сервером: открывает их она сама, мы только просим.
+    std::unique_ptr<game::Packfiles> packfiles;
 
     // Своё устройство файловой системы игры: через него ей отдаются файлы,
     // присланные сервером.
@@ -1433,13 +1415,20 @@ void run() {
             spdlog::warn("nothing to hand our data files to the game with: {}", dataError);
         }
 
+        std::string archiveError;
+        packfiles = game::Packfiles::create(*engine, archiveError);
+
+        if (packfiles == nullptr) {
+            spdlog::warn("nothing to open game archives with: {}", archiveError);
+        }
+
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
         // происходящее в игре покадрово, а мы отсюда уже нет.
         feed.setStage(shared::LoadStage::Scripts);
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
-                                   fileDevice.get(), streamedFiles.get(), dataFiles.get(),
-                                   scriptStartup);
+                                   frameWatch, fileDevice.get(), streamedFiles.get(),
+                                   dataFiles.get(), packfiles.get(), scriptStartup);
     }
 
     // Соединения нет, пока его не попросят, и это главная перемена устройства
@@ -1638,9 +1627,70 @@ void run() {
                 }
             };
 
-            for (const ResourceCache::Ready& item :
-                 resources.sync(active.address, active.port, *offered, report)) {
+            const std::vector<ResourceCache::Ready> ready =
+                resources.sync(active.address, active.port, *offered, report);
+
+            for (const ResourceCache::Ready& item : ready) {
                 feed.pushConsole(0, std::format("ресурс готов: {}", item.name));
+            }
+
+            // Архивы игры открывает она сама.
+            //
+            // Приходят они целым файлом — так раздают свои машины и карты и
+            // RAGE MP, и просто люди в интернете, — и до сих пор такой файл
+            // доезжал до клиента и ложился в кеш мёртвым грузом: россыпь рядом
+            // с ресурсом мы отдавать умели, а архив нет.
+            //
+            // Оглавление у архива зашифровано, но подбирать схему не нужно:
+            // расшифровывает его сама игра, ей довольно попросить.
+            if (packfiles != nullptr && fileDevice != nullptr) {
+                for (const ResourceCache::Ready& item : ready) {
+                    // Составное имя — часть скриптового ресурса, а не игровой
+                    // файл. Архивы лежат отдельно и называются просто.
+                    if (item.name.find('/') != std::string::npos ||
+                        !game::isArchive(item.name)) {
+                        continue;
+                    }
+
+                    // Приставка выводится из имени файла в кеше, а в нём лежит
+                    // отпечаток содержимого: у одного и того же архива она
+                    // всегда одна и та же, у разных — разная. Своего счётчика
+                    // здесь нельзя: он сбился бы при переподключении, и тот же
+                    // архив повесился бы вторым устройством.
+                    const std::string stem = item.path.stem().string();
+                    const std::string_view mark{stem};
+
+                    // Путь для игры — её собственный, а не путь Windows, и это
+                    // не придирка: `D:\...` она открыть отказывается, потому что
+                    // разрешает пути по приставке, а у буквы диска приставки нет.
+                    // Так же делает и CitizenFX: свой архив он сперва кладёт под
+                    // свою приставку и открывает уже её.
+                    //
+                    // Отдаёт архив наше же устройство. Оно для этого годится
+                    // целиком: архив читается по смещениям, а чтение по
+                    // смещениям у него и есть то, чем игра подгружает модели.
+                    // Имя файла берётся настоящее, а не отпечаток, и это не
+                    // мелочь: у части архивов ключ расшифровки оглавления игра
+                    // выбирает по имени и размеру файла. Переименованный архив
+                    // она расшифрует не тем ключом и получит из оглавления
+                    // мусор.
+                    const std::string gamePath =
+                        std::format("oxymp:/archives/{}", item.name);
+
+                    fileDevice->serve(gamePath, item.path);
+                    fileDevice->mount("oxymp:/");
+
+                    // Вешается архив туда, где игра держит свои же DLC, — под
+                    // `dlcpacks:/имя/`. Своя приставка не годится: игра её
+                    // принимает, но по ней потом не отдаёт ничего — ни чтением,
+                    // ни обходом. Здесь же устройство встаёт в то место, где
+                    // содержимое такого архива и полагается искать.
+                    const std::string stemName =
+                        std::filesystem::path{item.name}.stem().string();
+
+                    packfiles->mount(item.path, gamePath,
+                                     std::format("dlcpacks:/{}/", stemName));
+                }
             }
 
             // Модели и текстуры ресурса отдаются игре.
@@ -1667,11 +1717,11 @@ void run() {
                     // Список архетипов проходит здесь даже названным в `[meta]`:
                     // он нужен игре дважды — и файлом, и описанием, — а описание
                     // ему выпишется тут же, ниже.
-                    if (describes(entry) && !isArchetypeList(streamed)) {
+                    if (describes(entry) && !game::isArchetypeList(streamed)) {
                         continue;
                     }
 
-                    if (!worthStreaming(streamed)) {
+                    if (!game::worthStreaming(streamed)) {
                         spdlog::debug("{} is not a game asset, not offering it to streaming",
                                       entry.name);
                         continue;
@@ -1686,9 +1736,9 @@ void run() {
                         streamedFiles->add(gamePath, streamed);
                     }
 
-                    if (dataFiles != nullptr && isArchetypeList(streamed)) {
+                    if (dataFiles != nullptr && game::isArchetypeList(streamed)) {
                         dataFiles->add(gamePath, streamed,
-                                       entry.dataFile.empty() ? kArchetypeType
+                                       entry.dataFile.empty() ? game::kArchetypeType
                                                               : std::string_view{entry.dataFile});
                     }
                 }
@@ -1701,7 +1751,7 @@ void run() {
                     }
 
                     // Архетипы уже объявлены — вместе со своим файлом.
-                    if (isArchetypeList(entry.name) && !streamFileName(entry.name).empty()) {
+                    if (game::isArchetypeList(entry.name) && !streamFileName(entry.name).empty()) {
                         continue;
                     }
 

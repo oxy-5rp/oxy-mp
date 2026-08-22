@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <iterator>
 
@@ -73,6 +74,16 @@ constexpr std::array kLoadOrder{
     std::string_view{"VEHICLE_VARIATION_FILE"},
     std::string_view{"VEHICLE_LAYOUTS_FILE"},
 };
+
+/// Сколько времени за кадр отдаётся загрузке описаний.
+///
+/// Причина та же, что и у объявления файлов, только острее: описание игра не
+/// просто открывает, а разбирает. Список архетипов чужой карты — это сотни
+/// таких разборов, и все в одном кадре складывались в секунды неподвижной
+/// картинки.
+///
+/// Четыре миллисекунды — четверть кадра при шестидесяти в секунду.
+constexpr auto kFrameBudget = std::chrono::milliseconds{4};
 
 /// Сколько записей таблицы видов согласны прочесть.
 ///
@@ -175,10 +186,10 @@ void DataFiles::add(std::string gamePath, std::string_view fileName,
 
     const std::lock_guard guard{mutex_};
 
-    for (const Wanted& each : pending_) {
-        if (each.path == gamePath) {
-            return;
-        }
+    // Отмечаем и спрашиваем одним движением: вставка отвечает, было ли о пути
+    // известно раньше.
+    if (!known_.insert(gamePath).second) {
+        return;
     }
 
     const auto place = std::ranges::find(kLoadOrder, wanted);
@@ -212,8 +223,13 @@ std::size_t DataFiles::pump() {
     std::ranges::stable_sort(batch, {}, &Wanted::order);
 
     std::size_t loaded = 0;
+    std::size_t done = 0;
+
+    const auto started = std::chrono::steady_clock::now();
 
     for (const Wanted& file : batch) {
+        ++done;
+
         void* const mounter = mounters_[file.type];
 
         if (mounter == nullptr) {
@@ -240,6 +256,21 @@ std::size_t DataFiles::pump() {
 
         ++loaded;
         spdlog::debug("игре загружено описание {} (вид {})", file.path, file.type);
+
+        // Хотя бы одно описание за кадр загружается всегда, даже если срок
+        // вышел ещё до начала: иначе очередь не тронулась бы с места.
+        if (std::chrono::steady_clock::now() - started >= kFrameBudget) {
+            break;
+        }
+    }
+
+    // Недоделанное возвращается в начало очереди. Порядок при этом сохраняется
+    // сам собой: батч отсортирован, а остаток берётся с его конца.
+    if (done < batch.size()) {
+        const std::lock_guard guard{mutex_};
+
+        pending_.insert(pending_.begin(), std::make_move_iterator(batch.begin() + done),
+                        std::make_move_iterator(batch.end()));
     }
 
     return loaded;
