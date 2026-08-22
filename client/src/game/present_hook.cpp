@@ -67,7 +67,7 @@ void drawOnce(State& state, IDXGISwapChain* swapchain) {
     try {
         state.onPresent(swapchain);
     } catch (...) {
-        spdlog::error("рисование интерфейса в кадр сорвалось");
+        spdlog::error("drawing the interface into the frame failed");
     }
 
     g_drawing = false;
@@ -112,7 +112,7 @@ HRESULT STDMETHODCALLTYPE resizeBuffersDetour(IDXGISwapChain* swapchain, UINT co
         try {
             state->onResize();
         } catch (...) {
-            spdlog::error("освобождение кадровых ресурсов сорвалось");
+            spdlog::error("releasing frame resources failed");
         }
     }
 
@@ -242,7 +242,7 @@ std::unique_ptr<PresentHook> PresentHook::install(Callback onPresent, ResizeCall
 
         if (!state->present1.install(tables.extended[kPresent1Slot],
                                      reinterpret_cast<void*>(&present1Detour), present1Error)) {
-            spdlog::warn("перехват второго способа показа кадра не поставлен: {}", present1Error);
+            spdlog::warn("the second present hook was not installed: {}", present1Error);
         }
     }
 
@@ -253,7 +253,7 @@ std::unique_ptr<PresentHook> PresentHook::install(Callback onPresent, ResizeCall
         // Не беда, из-за которой стоит отказываться от интерфейса: без этого
         // перехвата смена разрешения обойдётся пересозданием наших ресурсов на
         // следующем кадре, а не заранее.
-        spdlog::warn("перехват пересоздания буферов не поставлен: {}", resizeError);
+        spdlog::warn("the buffer resize hook was not installed: {}", resizeError);
     }
 
     // Состояние переживает объект намеренно: перехват снимается в разрушителе,

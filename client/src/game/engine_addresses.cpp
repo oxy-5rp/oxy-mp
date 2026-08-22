@@ -65,7 +65,7 @@ std::unique_ptr<EngineAddresses> EngineAddresses::resolveCatalog(const gamesig::
             // Заводятся такие под разведку — то, что ещё не выверено на этой
             // сборке, — и ронять из-за них весь клиент незачем.
             if (!signature.required) {
-                spdlog::warn("необязательная сигнатура \"{}\" не разрешилась: {} (совпадений {})",
+                spdlog::warn("optional signature \"{}\" did not resolve: {} ({} matches)",
                              signature.id, gamesig::describe(resolved.status), resolved.matchCount);
                 continue;
             }
@@ -80,7 +80,7 @@ std::unique_ptr<EngineAddresses> EngineAddresses::resolveCatalog(const gamesig::
         spdlog::debug("{} = {:#x}", signature.id, resolved.value);
     }
 
-    spdlog::info("движок опознан: сборка \"{}\", разрешено адресов: {}", addresses->buildDate_,
+    spdlog::debug("движок опознан: сборка \"{}\", разрешено адресов: {}", addresses->buildDate_,
                  addresses->addresses_.size());
 
     return addresses;

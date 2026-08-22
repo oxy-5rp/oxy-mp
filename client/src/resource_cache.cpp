@@ -114,7 +114,7 @@ ResourceCache::ResourceCache(std::filesystem::path directory) : directory_(std::
     std::filesystem::create_directories(directory_, ec);
 
     if (ec) {
-        spdlog::warn("каталог кеша {} не создан: {}", directory_.string(), ec.message());
+        spdlog::warn("cache directory {} was not created: {}", directory_.string(), ec.message());
     }
 
     readIndex();
@@ -243,7 +243,7 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
     const std::vector<std::uint8_t> key = shared::Vault::builtInKey();
 
-    spdlog::info("сервер предлагает ресурсов: {}", wanted.size());
+    spdlog::info("Server offers {} resource files", wanted.size());
 
     std::size_t done = 0;
 
@@ -281,7 +281,7 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         ++done;
 
         if (cached) {
-            spdlog::info("ресурс {} уже есть", entry.name);
+            spdlog::debug("resource file {} is already cached", entry.name);
             ready.push_back(Ready{.name = entry.name, .path = unpacked});
             continue;
         }
@@ -289,20 +289,20 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         const std::string url = std::format("http://{}:{}/resources/dlcpacks/{}.resource",
                                             serverAddress, serverPort, entry.hash);
 
-        spdlog::info("качаем {} ({} КБ)", entry.name, entry.size / 1024);
+        spdlog::debug("downloading {} ({} KB)", entry.name, entry.size / 1024);
 
         std::string error;
         const std::vector<std::uint8_t> packed = download(url, entry.size, error);
 
         if (packed.empty()) {
-            spdlog::error("ресурс {} не скачался: {}", entry.name, error);
+            spdlog::error("resource file {} failed to download: {}", entry.name, error);
             continue;
         }
 
         // Проверка до расшифровки, а не после: отпечаток объявлен для
         // зашифрованного, и сверять его надо с тем, что пришло по проводу.
         if (const std::string actual = shared::fingerprint(packed); actual != entry.hash) {
-            spdlog::error("ресурс {} дошёл испорченным: отпечаток не сошёлся", entry.name);
+            spdlog::error("resource file {} arrived corrupted: checksum mismatch", entry.name);
             continue;
         }
 
@@ -312,18 +312,18 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         // файл законный: в собранной странице интерфейса такие есть, и отвергать
         // их значило бы оставлять на странице дыру без единого слова о причине.
         if (plain.empty() && !error.empty()) {
-            spdlog::error("ресурс {} не открылся: {}", entry.name, error);
+            spdlog::error("resource file {} could not be opened: {}", entry.name, error);
             continue;
         }
 
         if (!writeFile(unpacked, plain)) {
-            spdlog::error("ресурс {} не удалось сохранить в кеш", entry.name);
+            spdlog::error("resource file {} could not be written to the cache", entry.name);
             continue;
         }
 
         laid_[entry.name] = entry.hash;
 
-        spdlog::info("ресурс {} готов", entry.name);
+        spdlog::debug("resource file {} is ready", entry.name);
         ready.push_back(Ready{.name = entry.name, .path = unpacked});
     }
 

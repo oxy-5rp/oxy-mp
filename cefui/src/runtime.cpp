@@ -109,7 +109,7 @@ void stopRuntime() {
     }
 
     ::CefShutdown();
-    spdlog::info("CEF остановлен");
+    spdlog::debug("CEF остановлен");
 }
 
 } // namespace oxymp::cefui

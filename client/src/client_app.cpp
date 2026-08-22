@@ -450,7 +450,7 @@ std::unique_ptr<game::EngineAddresses> resolveEngine() {
             if (auto addresses = game::EngineAddresses::resolveCatalog(*image, error, failure)) {
                 const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - startedAt);
-                spdlog::info("движок опознан за {} мс", elapsed.count());
+                spdlog::debug("engine resolved in {} ms", elapsed.count());
                 return addresses;
             }
         }
@@ -463,21 +463,21 @@ std::unique_ptr<game::EngineAddresses> resolveEngine() {
         // обычной одиночной игре, думая, что играет в мультиплеер. Хуже отказа
         // только отказ, притворившийся успехом.
         if (failure == game::EngineAddresses::Failure::WrongBuild) {
-            spdlog::error("движок не опознан и не будет: {}", error);
-            spdlog::error("каталог сигнатур выверен под одну сборку игры; на другой версии "
-                          "клиент внутри игры работать не может");
+            spdlog::error("the game engine did not resolve and will not: {}", error);
+            spdlog::error("the signature catalogue is verified against one game build; on another "
+                          "build the client inside the game cannot work");
             return nullptr;
         }
 
         // Одна и та же жалоба каждые полсекунды забьёт журнал, а меняется она
         // ровно в тот момент, когда что-то происходит, — его и записываем.
         if (error != lastError) {
-            spdlog::debug("движок пока не опознан: {}", error);
+            spdlog::debug("the engine has not resolved yet: {}", error);
             lastError = error;
         }
 
         if (std::chrono::steady_clock::now() >= deadline) {
-            spdlog::error("не удалось опознать движок игры: {}", error);
+            spdlog::error("failed to resolve the game engine: {}", error);
             return nullptr;
         }
 
@@ -520,7 +520,7 @@ void dumpNativeHashes(const game::NativeTable& table) {
 
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file) {
-        spdlog::warn("не удалось записать список хешей в {}", path.string());
+        spdlog::debug("could not write the hash dump to {}", path.string());
         return;
     }
 
@@ -528,7 +528,7 @@ void dumpNativeHashes(const game::NativeTable& table) {
         file << std::format("{:016X}\n", hash);
     }
 
-    spdlog::info("список хешей выгружен: {} ({} штук)", path.string(), hashes.size());
+    spdlog::debug("hash dump written: {} ({} entries)", path.string(), hashes.size());
 }
 
 /// Дожидается таблицы нативов и проверяет, что вызовы работают.
@@ -548,7 +548,7 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
     const game::FileSystem files{addresses};
 
     if (!files.ready()) {
-        spdlog::warn("файловая система игры недоступна: подмена файлов работать не будет");
+        spdlog::warn("the game file system is unavailable: serving our own files will not work");
         return;
     }
 
@@ -557,11 +557,11 @@ void reportFileSystem(const game::EngineAddresses& addresses) {
 
     const std::int64_t size = files.sizeOf(kProbe);
     if (size < 0) {
-        spdlog::warn("файловая система игры отвечает, но {} в ней не нашлось", kProbe);
+        spdlog::debug("the game file system answers, but {} was not found in it", kProbe);
         return;
     }
 
-    spdlog::info("файловая система игры доступна: {} — {} байт", kProbe, size);
+    spdlog::debug("the game file system is available: {} — {} bytes", kProbe, size);
 }
 
 /// Имя файла, если он лежит в каталоге моделей ресурса, — иначе пусто.
@@ -630,7 +630,7 @@ void prepareFileDeviceProbe(game::FileDevice& device) {
 
         std::ofstream out{source, std::ios::binary | std::ios::trunc};
         if (!out) {
-            spdlog::warn("проверку устройства не на чем провести: {} не пишется", source.string());
+            spdlog::debug("nothing to probe the device with: {} is not writable", source.string());
             return;
         }
 
@@ -645,7 +645,7 @@ void prepareFileDeviceProbe(game::FileDevice& device) {
 bool probeNatives(const game::EngineAddresses& addresses) {
     const game::NativeTable table{addresses};
     if (!table.valid()) {
-        spdlog::error("таблица нативов недоступна");
+        spdlog::error("the native table is unavailable");
         return false;
     }
 
@@ -657,7 +657,7 @@ bool probeNatives(const game::EngineAddresses& addresses) {
 
     while (table.registeredCount() == 0) {
         if (std::chrono::steady_clock::now() >= deadline) {
-            spdlog::error("таблица нативов так и не заполнилась");
+            spdlog::error("the native table never filled up");
             return false;
         }
         std::this_thread::sleep_for(kNativeTableRetryDelay);
@@ -665,7 +665,7 @@ bool probeNatives(const game::EngineAddresses& addresses) {
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - startedAt);
-    spdlog::info("в таблице зарегистрировано нативов: {} (ожидание {} мс)",
+    spdlog::debug("natives registered in the table: {} (waited {} ms)",
                  table.registeredCount(), elapsed.count());
 
     // Список хешей рядом с журналом — тоже только для отладки: игроку он не
@@ -682,7 +682,7 @@ bool probeNatives(const game::EngineAddresses& addresses) {
     // что и хеш верен, и контекст вызова собран правильно.
     const game::NativeHandler frames = table.handlerFor(game::natives::kGetFrameCount);
     if (frames == nullptr) {
-        spdlog::error("натив счётчика кадров не найден — хеши не годятся для этой сборки");
+        spdlog::error("the frame counter native was not found: the hashes do not fit this build");
         return false;
     }
 
@@ -713,14 +713,14 @@ bool probeNatives(const game::EngineAddresses& addresses) {
             const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startedProbe);
 
-            spdlog::info("вызов нативов работает: счётчик кадров {} → {} (ожидание {} мс)", before,
+            spdlog::debug("calling natives works: frame counter {} -> {} (waited {} ms)", before,
                          after, waited.count());
             return true;
         }
 
         if (std::chrono::steady_clock::now() >= probeDeadline) {
-            spdlog::error("счётчик кадров стоит на {} уже {} с — игра не рисует, а значит и "
-                          "работать в ней нечему",
+            spdlog::error("the frame counter has been stuck at {} for {} s: the game is not drawing, "
+                          "so there is nothing to work in",
                           after,
                           std::chrono::duration_cast<std::chrono::seconds>(kNativeProbeTimeout)
                               .count());
@@ -943,7 +943,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
     // проверено вылетом на нажатии Esc. Сюжет гасится поимённо, уже в тике.
     startup = game::ScriptStartup::install(addresses, game::GameScripts::Run, error);
     if (startup == nullptr) {
-        spdlog::error("перехват запуска скриптов не поставлен: {}", error);
+        spdlog::error("the script startup hook was not installed: {}", error);
     }
 
     // Переключатель разведки читается здесь же, где и остальные настройки, и
@@ -980,7 +980,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                        localState, mail, feed, files, streamed, described,
                                        error);
     if (session == nullptr) {
-        spdlog::error("игровая сессия не создана: {}", error);
+        spdlog::error("the game session was not created: {}", error);
     }
 
     return session;
@@ -1013,10 +1013,10 @@ void run() {
     spdlog::default_logger()->sinks().push_back(std::make_shared<ConsoleSink>(feed));
 
     if (startup.addressGiven) {
-        spdlog::info("клиент запущен внутри игры: сервер {}:{}, имя \"{}\"", settings.address,
+        spdlog::debug("client started inside the game: server {}:{}, name \"{}\"", settings.address,
                      settings.port, settings.nickname);
     } else {
-        spdlog::info("клиент запущен внутри игры: сервер не назван, ждём выбора в меню");
+        spdlog::debug("client started inside the game: no server named, waiting for the menu");
     }
 
     // Опознание движка идёт до сети и не мешает ей: даже если игра обновилась и
@@ -1047,27 +1047,27 @@ void run() {
         // мир не грузился вовсе. Двенадцать запусков подряд, ни одного входа в
         // мир; сняли правку — вошли с первого. Подробности в docs/altv-parity.md.
         if (!game::muteLoadingMusic(*engine, error)) {
-            spdlog::error("музыка загрузки останется: {}", error);
+            spdlog::error("the loading music will stay: {}", error);
         }
 
         // Страница выбора режима убирается здесь же и по той же причине: до неё
         // остаётся около минуты, а скриптовый тик, из которого работает всё
         // остальное, начинается уже после неё.
         if (!game::skipLandingPage(*engine, error)) {
-            spdlog::error("страница выбора режима останется: {}", error);
+            spdlog::error("the mode selection page will stay: {}", error);
         }
 
         // Пауза при потере фокуса убирается здесь же: в сетевой игре её быть не
         // должно вовсе, а признак игра выставляет рано.
         if (!game::keepRunningUnfocused(*engine, error)) {
-            spdlog::error("игра будет вставать на паузу при сворачивании: {}", error);
+            spdlog::error("the game will pause when it loses focus: {}", error);
         }
 
         // Раскладка отпускается как можно раньше: игра навязывает себе en-US,
         // заводя клавиатуру, и сделать это она успевает в первые же мгновения.
         // Опоздав, мы правили бы место, через которое она уже прошла.
         if (!game::unlockKeyboardLayout(*engine, error)) {
-            spdlog::error("раскладка останется навязанной, и кириллицы в чате не будет: {}",
+            spdlog::error("the keyboard layout will stay forced, and chat will take no Cyrillic: {}",
                           error);
         }
 
@@ -1078,7 +1078,7 @@ void run() {
         if (!startup.addressGiven) {
             worldHold = game::WorldHold::install(*engine, error);
             if (worldHold == nullptr) {
-                spdlog::error("мир будет грузиться сразу: {}", error);
+                spdlog::error("the world will load right away: {}", error);
             }
         }
 
@@ -1103,13 +1103,13 @@ void run() {
 
         layoutGuard = game::LayoutGuard::install(error);
         if (layoutGuard == nullptr) {
-            spdlog::error("раскладку будет возвращать себе игра: {}", error);
+            spdlog::error("the game will keep taking the keyboard layout back: {}", error);
         }
 
         rawInput = game::RawInput::install(error);
         if (rawInput == nullptr) {
-            spdlog::error("системные сочетания останутся отобранными, и раскладка в игре "
-                          "переключаться не будет: {}",
+            spdlog::error("system hotkeys will stay taken away, and the layout inside the game "
+                          "will not switch: {}",
                           error);
         }
     }
@@ -1123,7 +1123,7 @@ void run() {
 
         gameText = game::CustomText::install(*engine, error);
         if (gameText == nullptr) {
-            spdlog::error("надписи игры останутся её собственными: {}", error);
+            spdlog::error("the game texts will stay its own: {}", error);
         } else {
             gameText->set("FE_THDR_GTAO", kProductName);
             gameText->set("PM_PANE_LEAVE", "Отключиться");
@@ -1139,7 +1139,7 @@ void run() {
 
         binkSound = game::BinkSound::mute(error);
         if (binkSound == nullptr) {
-            spdlog::warn("ролик прозвучит как прежде: {}", error);
+            spdlog::debug("the intro movie will sound as before: {}", error);
         }
     }
 
@@ -1153,7 +1153,7 @@ void run() {
 
         discordBlock = game::DiscordBlock::install(error);
         if (discordBlock == nullptr) {
-            spdlog::error("показ игры в Discord останется: {}", error);
+            spdlog::error("the game will keep announcing itself in Discord: {}", error);
         }
     }
 
@@ -1209,14 +1209,14 @@ void run() {
         // проститься с сервером. Здесь остаётся только запасной срок на случай,
         // если до сетевого цикла игра ещё не дошла.
         actions.quit = [&exitRequest] {
-            spdlog::info("меню просит выйти из игры");
+            spdlog::debug("the menu asks to quit");
 
             exitRequest.ask();
 
             std::thread{[] {
                 std::this_thread::sleep_for(kGoodbyeGrace);
 
-                spdlog::warn("проститься с сервером не вышло — выходим так");
+                spdlog::debug("could not say goodbye to the server, quitting anyway");
                 closeGame();
             }}.detach();
         };
@@ -1226,7 +1226,7 @@ void run() {
         // вернётся, страница не отвечает на мышь; поднимать в нём соединение
         // значило бы подвесить меню на всё время попытки.
         actions.connect = [&request](const std::string& address, const std::string& password) {
-            spdlog::info("меню просит подключиться к {}", address);
+            spdlog::debug("the menu asks to connect to {}", address);
             request.ask(address, password);
         };
 
@@ -1252,7 +1252,7 @@ void run() {
 
         ui = game::UiLayer::create(feed, std::move(actions), uiError);
         if (ui == nullptr) {
-            spdlog::error("интерфейс в кадре игры не поднят: {}", uiError);
+            spdlog::error("the in-game interface layer did not start: {}", uiError);
         } else {
             // Слой поднялся — значит окна ресурсов теперь есть кому заводить.
             game::UiLayer* const layer = ui.get();
@@ -1290,7 +1290,7 @@ void run() {
     // сервер игроку было бы нечем, а игра осталась бы стоять на чёрном экране
     // навсегда: закрыть её он смог бы только диспетчером задач.
     if (worldHold != nullptr && ui == nullptr) {
-        spdlog::warn("выбирать сервер не в чем — отпускаем мир сразу");
+        spdlog::warn("nothing to pick a server with: releasing the world at once");
         worldHold->release();
     }
 
@@ -1342,7 +1342,7 @@ void run() {
         fileDevice = game::FileDevice::create(*engine, deviceError);
 
         if (fileDevice == nullptr) {
-            spdlog::warn("своё устройство файловой системы не заведено: {}", deviceError);
+            spdlog::warn("our file device was not created: {}", deviceError);
         } else {
             prepareFileDeviceProbe(*fileDevice);
         }
@@ -1351,14 +1351,14 @@ void run() {
         streamedFiles = game::StreamingFiles::create(*engine, streamingError);
 
         if (streamedFiles == nullptr) {
-            spdlog::warn("объявлять игре свои модели нечем: {}", streamingError);
+            spdlog::warn("nothing to declare our models to the game with: {}", streamingError);
         }
 
         std::string dataError;
         dataFiles = game::DataFiles::create(*engine, dataError);
 
         if (dataFiles == nullptr) {
-            spdlog::warn("доносить до игры свои описания нечем: {}", dataError);
+            spdlog::warn("nothing to hand our data files to the game with: {}", dataError);
         }
 
         // Скриптовый движок готов. Дальше стадии публикует сессия — она видит
@@ -1430,7 +1430,7 @@ void run() {
             if (connection != nullptr) {
                 connection->disconnect();
 
-                spdlog::info("сервер предупреждён об уходе");
+                spdlog::debug("the server was told we are leaving");
             }
 
             closeGame();
@@ -1442,7 +1442,7 @@ void run() {
                 connection->disconnect();
                 connection.reset();
 
-                spdlog::info("меню просит отключиться — соединение закрыто");
+                spdlog::info("Disconnected");
             }
 
             // Мир при этом остаётся загруженным, и притворяться иначе нечем:
@@ -1500,7 +1500,7 @@ void run() {
                 menu->connecting(start->address);
             }
 
-            spdlog::info("подключаемся к {}:{} именем \"{}\"", active.address, active.port,
+            spdlog::debug("connecting to {}:{} as \"{}\"", active.address, active.port,
                          active.nickname);
 
             // Сервер выбран — мир отпускается. Именно здесь, а не по успешному
@@ -1732,13 +1732,13 @@ void run() {
     session.reset();
 
     if (scriptStartup != nullptr) {
-        spdlog::info("игра доходила до запуска скриптов раз: {}", scriptStartup->invocations());
+        spdlog::debug("the game reached script startup {} times", scriptStartup->invocations());
         scriptStartup.reset();
     }
 
     game::HookEngine::shutdown();
 
-    spdlog::info("клиент остановлен");
+    spdlog::info("Client stopped");
     spdlog::default_logger()->flush();
 }
 

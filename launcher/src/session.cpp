@@ -166,9 +166,9 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         // Не беда, из-за которой стоит не запускать игру: без правки останется
         // невидимым слой, а сама игра будет работать. Сказать об этом, впрочем,
         // нужно — иначе пропавший экран загрузки выглядит поломкой клиента.
-        spdlog::warn("оконный режим игры не изменён: {}", note);
+        spdlog::warn("the game window mode was not changed: {}", note);
     } else {
-        spdlog::info("оконный режим игры: {}", note);
+        spdlog::info("game window mode: {}", note);
     }
 
     if (settings.attach) {

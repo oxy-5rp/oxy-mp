@@ -40,7 +40,7 @@ std::optional<Skin> Skin::load(const std::filesystem::path& file) {
 
     std::ifstream in{file, std::ios::binary};
     if (!in) {
-        spdlog::warn("оформление не открылось: {}", file.string());
+        spdlog::debug("skin file could not be opened: {}", file.string());
         return std::nullopt;
     }
 
@@ -49,7 +49,7 @@ std::optional<Skin> Skin::load(const std::filesystem::path& file) {
     const nlohmann::json document = nlohmann::json::parse(in, nullptr, false, true);
 
     if (document.is_discarded() || !document.is_object()) {
-        spdlog::warn("оформление не разобралось: {}", file.string());
+        spdlog::debug("skin file did not parse: {}", file.string());
         return std::nullopt;
     }
 
@@ -93,7 +93,7 @@ std::optional<Skin> Skin::load(const std::filesystem::path& file) {
         }
     }
 
-    spdlog::info("оформление: {}, серверов {}",
+    spdlog::debug("skin: {}, {} servers",
                  skin.gameName.empty() ? "без имени" : skin.gameName, skin.servers.size());
 
     return skin;

@@ -91,7 +91,7 @@ ServerHistory ServerHistory::load(const std::filesystem::path& file) {
     // запускаться.
     const nlohmann::json parsed = nlohmann::json::parse(text, nullptr, false, true);
     if (!parsed.is_object()) {
-        spdlog::warn("история серверов не разобралась — начинаем с чистой");
+        spdlog::warn("the server history did not parse: starting with an empty one");
         return history;
     }
 
@@ -112,7 +112,7 @@ void ServerHistory::save(const std::filesystem::path& file) const {
 
     std::ofstream stream{file, std::ios::binary | std::ios::trunc};
     if (!stream) {
-        spdlog::warn("историю серверов не удалось записать: {}", file.string());
+        spdlog::warn("the server history could not be written: {}", file.string());
         return;
     }
 

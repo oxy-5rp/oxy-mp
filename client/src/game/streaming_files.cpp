@@ -58,7 +58,7 @@ std::size_t StreamingFiles::pump() {
         register_(&slot, file.path.c_str(), true, file.name.c_str(), false);
 
         if (slot == kNoSlot) {
-            spdlog::warn("игра не взяла файл {} под именем {}", file.path, file.name);
+            spdlog::warn("the game did not take file {} under the name {}", file.path, file.name);
             continue;
         }
 
@@ -69,7 +69,7 @@ std::size_t StreamingFiles::pump() {
 
         ++taken;
 
-        spdlog::info("игре объявлен файл {} под именем {} (место {})", file.path, file.name,
+        spdlog::debug("игре объявлен файл {} под именем {} (место {})", file.path, file.name,
                      slot);
     }
 

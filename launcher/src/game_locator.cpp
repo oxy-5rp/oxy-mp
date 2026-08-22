@@ -238,7 +238,7 @@ std::optional<GameLocation> locateGame(std::string& error) {
         if (auto location = gameInDirectory(candidate.directory, ignored)) {
             location->source = candidate.source;
 
-            spdlog::info("игра найдена ({}): {}", location->source,
+            spdlog::info("Game found ({}): {}", location->source,
                          location->directory.string());
 
             return location;

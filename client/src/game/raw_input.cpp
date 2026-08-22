@@ -79,14 +79,14 @@ struct RawInput::State {
         }
 
         if (stripped && !state->told.exchange(true)) {
-            spdlog::info("сырой ввод: у игры отобран отказ от системных сочетаний — "
+            spdlog::debug("сырой ввод: у игры отобран отказ от системных сочетаний — "
                          "смена раскладки снова работает");
         }
 
         const BOOL answer = original(copy.data(), count, size);
 
         if (answer == FALSE) {
-            spdlog::warn("сырой ввод: Windows отказала в просьбе, ошибка {}", ::GetLastError());
+            spdlog::warn("raw input: Windows refused the request, error {}", ::GetLastError());
         }
 
         return answer;

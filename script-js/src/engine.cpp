@@ -113,7 +113,7 @@ Process& process() {
 
     node.ready = true;
 
-    spdlog::info("движок JS поднят: Node {}, V8 {}", NODE_VERSION_STRING,
+    spdlog::info("JS engine up: Node {}, V8 {}", NODE_VERSION_STRING,
                  v8::V8::GetVersion());
 
     return true;
@@ -243,8 +243,8 @@ private:
         // бы намертво, не сказав ни слова: снаружи это неотличимо от
         // зависшего обработчика, и искать причину было бы не по чему.
         if (announcing_ >= kMaxAnnounceDepth) {
-            spdlog::error("событие \"{}\" объявлено само из себя глубже {} раз — "
-                          "дальше не разносим",
+            spdlog::error("event \"{}\" announced itself deeper than {} times — "
+                          "not spreading it further",
                           name, kMaxAnnounceDepth);
             return;
         }

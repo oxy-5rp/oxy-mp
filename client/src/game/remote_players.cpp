@@ -277,7 +277,7 @@ std::uint32_t RemotePlayers::model() {
     model_ = invokeNative<std::uint32_t>(hashKey_, kRemoteModel);
 
     if (model_ != kRemoteModelHash) {
-        spdlog::error("GET_HASH_KEY вернул {:#010x} вместо {:#010x} — чужих игроков не показать",
+        spdlog::error("GET_HASH_KEY returned {:#010x} instead of {:#010x}: other players cannot be shown",
                       model_, kRemoteModelHash);
         model_ = 0;
     }
@@ -417,7 +417,7 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
         // Персонажа могло не стать помимо нас: игра вправе убрать то, что
         // считает лишним, а обращение к исчезнувшему — это вылет.
         if (!invokeNative<bool>(doesExist_, puppet.ped)) {
-            spdlog::warn("персонаж игрока {} исчез, заводим заново", player.id);
+            spdlog::warn("the ped of player {} vanished, creating it again", player.id);
             puppets_.erase(known);
             continue;
         }

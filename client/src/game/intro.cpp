@@ -54,7 +54,7 @@ void skipLegalScreens(const EngineAddresses& addresses) {
     // процесс может не лечь молча — например если по адресу лежит копия, а
     // читает игра другую, — и тогда «обнуляем» в журнале означало бы ровно
     // ничего.
-    spdlog::info("юридическая заставка держалась {} мс, после записи {} мс", before, *duration);
+    spdlog::debug("юридическая заставка держалась {} мс, после записи {} мс", before, *duration);
 }
 
 bool muteLoadingMusic(const EngineAddresses& addresses, std::string& error) {
@@ -75,7 +75,7 @@ bool muteLoadingMusic(const EngineAddresses& addresses, std::string& error) {
         return false;
     }
 
-    spdlog::info("музыка загрузки заглушена: {:#x} теперь возврат",
+    spdlog::debug("музыка загрузки заглушена: {:#x} теперь возврат",
                  reinterpret_cast<std::uintptr_t>(function));
 
     return true;

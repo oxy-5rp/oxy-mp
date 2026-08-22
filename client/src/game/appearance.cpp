@@ -98,7 +98,7 @@ std::uint32_t Appearance::modelHash() {
     model_ = invokeNative<std::uint32_t>(hashKey_, kFreemodeModel);
 
     if (model_ != kFreemodeModelHash) {
-        spdlog::error("GET_HASH_KEY вернул {:#010x} вместо {:#010x} — хеш натива указывает не туда",
+        spdlog::error("GET_HASH_KEY returned {:#010x} instead of {:#010x}: the native hash points elsewhere",
                       model_, kFreemodeModelHash);
 
         // Дальше идти нельзя: если этот натив не тот, за кого себя выдаёт, то и
@@ -146,7 +146,7 @@ bool Appearance::want(std::uint32_t model) {
     waitedFrames_ = 0;
     settledFrames_ = 0;
 
-    spdlog::info("сервер назначил модель {:#010x}, заменяем", target);
+    spdlog::debug("сервер назначил модель {:#010x}, заменяем", target);
     return true;
 }
 
@@ -167,7 +167,7 @@ Appearance::Progress Appearance::advance(int player) {
 
         if (!invokeNative<bool>(hasModelLoaded_, model)) {
             if (++waitedFrames_ >= kLoadFrameLimit) {
-                spdlog::error("модель {} не загрузилась за {} кадров", kFreemodeModel,
+                spdlog::error("model {} did not load in {} frames", kFreemodeModel,
                               waitedFrames_);
                 return Progress::Failed;
             }
@@ -178,12 +178,12 @@ Appearance::Progress Appearance::advance(int player) {
         // где клиент просит игру пересоздать персонажа игрока, и если она на
         // этом падает, последняя строка обязана назвать шаг, а не оставить
         // гадать по адресу вылета.
-        spdlog::info("модель загружена за {} кадров, заменяем персонажа", waitedFrames_);
+        spdlog::debug("модель загружена за {} кадров, заменяем персонажа", waitedFrames_);
 
         invokeNative<void>(setPlayerModel_, player, model);
         step_ = Step::DressUp;
 
-        spdlog::info("персонаж заменён, ждём его появления");
+        spdlog::debug("персонаж заменён, ждём его появления");
         return Progress::Loading;
     }
 
@@ -201,7 +201,7 @@ Appearance::Progress Appearance::advance(int player) {
         return Progress::Loading;
     }
 
-    spdlog::info("новый персонаж {}, одеваем", ped);
+    spdlog::debug("новый персонаж {}, одеваем", ped);
 
     // Без этого персонаж стоит голым: заготовка приходит без одежды вовсе.
     invokeNative<void>(defaultVariation_, ped, false);
@@ -210,7 +210,7 @@ Appearance::Progress Appearance::advance(int player) {
 
     invokeNative<void>(releaseModel_, model);
 
-    spdlog::info("модель игрока заменена на {}", kFreemodeModel);
+    spdlog::debug("модель игрока заменена на {}", kFreemodeModel);
     return Progress::Done;
 }
 
@@ -223,7 +223,7 @@ void Appearance::silenceStoryVoice(int ped) const {
     // молчания не будет, а молчание всё равно лучше крика Франклина.
     invokeNative<void>(ambientVoice_, ped, kFreemodeVoice);
 
-    spdlog::info("голос персонажа заменён на {}", kFreemodeVoice);
+    spdlog::debug("голос персонажа заменён на {}", kFreemodeVoice);
 }
 
 } // namespace oxymp::client::game

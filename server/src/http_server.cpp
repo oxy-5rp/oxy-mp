@@ -145,7 +145,7 @@ std::unique_ptr<HttpServer> HttpServer::start(std::uint16_t port, const Resource
     server->listener_ = static_cast<std::intptr_t>(listener);
     server->worker_ = std::thread{[raw = server.get()] { raw->serve(); }};
 
-    spdlog::info("раздача ресурсов слушает порт {} (http)", port);
+    spdlog::info("Resource delivery listening on port {} (http)", port);
 
     return server;
 }

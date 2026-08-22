@@ -63,7 +63,7 @@ bool keepRunningUnfocused(const EngineAddresses& addresses, std::string& error) 
         return false;
     }
 
-    spdlog::info("пауза при потере фокуса убрана: запись {:#x}, признак {:#x}",
+    spdlog::debug("пауза при потере фокуса убрана: запись {:#x}, признак {:#x}",
                  reinterpret_cast<std::uintptr_t>(write),
                  reinterpret_cast<std::uintptr_t>(flag));
 

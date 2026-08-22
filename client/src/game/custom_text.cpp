@@ -46,7 +46,7 @@ const char* CustomText::lookUp(void* dictionary, std::uint32_t hash) {
             // Без этой строки «в меню по-прежнему GTA ONLINE» одинаково означало
             // бы и «перехват не встал», и «встал, но не туда».
             if (!state->told.exchange(true)) {
-                spdlog::info("подмена надписей работает: игра спросила первую нашу");
+                spdlog::debug("подмена надписей работает: игра спросила первую нашу");
             }
 
             return found->second.c_str();
@@ -96,14 +96,14 @@ std::unique_ptr<CustomText> CustomText::install(const EngineAddresses& addresses
                             &secondOriginal, error)) {
         // Первое место уже уведено, и вернуть его нечем — но беды в этом нет:
         // подмена работает, просто не везде.
-        spdlog::warn("второе место подмены надписей не уведено: {}", error);
+        spdlog::warn("the second text hook site was not taken: {}", error);
     } else if (secondOriginal != original) {
-        spdlog::warn("два места спрашивают надписи по разным адресам: {:#x} и {:#x}",
+        spdlog::warn("two sites ask for texts at different addresses: {:#x} and {:#x}",
                      reinterpret_cast<std::uintptr_t>(original),
                      reinterpret_cast<std::uintptr_t>(secondOriginal));
     }
 
-    spdlog::info("подмена надписей игры поставлена, словарь игры на {:#x}",
+    spdlog::debug("подмена надписей игры поставлена, словарь игры на {:#x}",
                  reinterpret_cast<std::uintptr_t>(original));
 
     auto text = std::unique_ptr<CustomText>{new CustomText};

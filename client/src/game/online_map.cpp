@@ -52,7 +52,7 @@ void OnlineMap::enable() const {
 
     invokeNative<void>(onEnterMp_);
 
-    spdlog::info("мир переключён на карту сетевого режима");
+    spdlog::debug("мир переключён на карту сетевого режима");
 }
 
 } // namespace oxymp::client::game

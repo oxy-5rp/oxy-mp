@@ -104,7 +104,7 @@ DWORD WINAPI worker(LPVOID) {
 
     setUpLogging();
 
-    spdlog::info("модуль в Rockstar Games Launcher, ставим подмену");
+    spdlog::debug("модуль в Rockstar Games Launcher, ставим подмену");
 
     std::string error;
 
@@ -134,12 +134,12 @@ DWORD WINAPI worker(LPVOID) {
         error);
 
     if (g_link == nullptr) {
-        spdlog::error("подмену поставить не удалось: {}", error);
+        spdlog::error("the patch could not be installed: {}", error);
         publishFailure(error);
         return 1;
     }
 
-    spdlog::info("подмена стоит: запуск игры пойдёт мимо BattlEye");
+    spdlog::debug("подмена стоит: запуск игры пойдёт мимо BattlEye");
     publish(oxymp::shared::LaunchState::Hooked);
 
     return 0;

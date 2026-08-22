@@ -118,7 +118,7 @@ struct DiscordBlock::State {
     /// сказать нужно ровно одно — что дверь закрыта и закрыта именно нами.
     void tellRefused(const char* how) {
         if (refused.fetch_add(1) == 0) {
-            spdlog::info("показ игры в Discord отклонён: {}", how);
+            spdlog::debug("показ игры в Discord отклонён: {}", how);
         }
     }
 
@@ -227,14 +227,14 @@ std::unique_ptr<DiscordBlock> DiscordBlock::install(std::string& error) {
     }
 
     if (!put(state->narrow, "CreateFileA", reinterpret_cast<void*>(&State::openNarrow))) {
-        spdlog::warn("однобайтовое открытие канала не перехвачено: {}", error);
+        spdlog::warn("the single-byte pipe open was not hooked: {}", error);
     }
 
     if (!put(state->library, "LoadLibraryExW", reinterpret_cast<void*>(&State::load))) {
-        spdlog::warn("загрузка библиотеки показа не перехвачена: {}", error);
+        spdlog::warn("loading the presence library was not hooked: {}", error);
     }
 
-    spdlog::info("показ игры в Discord заткнут: канал открываем только мы");
+    spdlog::debug("показ игры в Discord заткнут: канал открываем только мы");
 
     auto block = std::unique_ptr<DiscordBlock>{new DiscordBlock};
     block->state_ = std::move(state);
@@ -243,7 +243,7 @@ std::unique_ptr<DiscordBlock> DiscordBlock::install(std::string& error) {
 
 DiscordBlock::~DiscordBlock() {
     if (state_ != nullptr) {
-        spdlog::info("чужих попыток открыть канал Discord отклонено: {}",
+        spdlog::debug("чужих попыток открыть канал Discord отклонено: {}",
                      state_->refused.load());
 
         state_->wide.remove();

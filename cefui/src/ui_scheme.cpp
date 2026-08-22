@@ -101,7 +101,7 @@ private:
 
         const auto shared = std::mismatch(root.begin(), root.end(), inside.begin(), inside.end());
         if (shared.first != root.end()) {
-            spdlog::warn("страница просит {} — это вне её каталога", path);
+            spdlog::warn("the page asks for {}: that is outside its directory", path);
             return {};
         }
 
@@ -140,14 +140,14 @@ void registerUiScheme(std::string page, const std::filesystem::path& directory) 
     // настроек не сохранилась бы между запусками.
     if (!CefRegisterSchemeHandlerFactory("http", "ui",
                                          new UiSchemeFactory{std::move(page), directory})) {
-        spdlog::error("не удалось завести схему http://ui — меню не откроется");
+        spdlog::error("the http://ui scheme was not registered: the menu will not open");
         return;
     }
 
     if (size != 0) {
-        spdlog::info("страница меню взята из модуля: {} КБ", size / 1024);
+        spdlog::debug("страница меню взята из модуля: {} КБ", size / 1024);
     } else {
-        spdlog::warn("страницы меню в модуле нет — берём из {}", directory.string());
+        spdlog::warn("the menu page is not in the module: taking it from {}", directory.string());
     }
 }
 
@@ -156,11 +156,11 @@ void registerResourceScheme(const std::filesystem::path& directory) {
     // приходит с диска, из того, что клиент скачал у сервера.
     if (!CefRegisterSchemeHandlerFactory("http", "resource",
                                          new UiSchemeFactory{std::string{}, directory})) {
-        spdlog::error("не удалось завести схему http://resource — страницы режимов не откроются");
+        spdlog::error("the http://resource scheme was not registered: mode pages will not open");
         return;
     }
 
-    spdlog::info("страницы ресурсов берутся из {}", directory.string());
+    spdlog::debug("страницы ресурсов берутся из {}", directory.string());
 }
 
 } // namespace oxymp::cefui

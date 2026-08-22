@@ -160,7 +160,7 @@ Settings Settings::load(const std::filesystem::path& file) {
 
     toml::parse_result parsed = toml::parse_file(file.string());
     if (!parsed) {
-        spdlog::warn("настройки не разобрались ({}): взяты умолчания",
+        spdlog::warn("settings did not parse ({}): defaults are used",
                      std::string{parsed.error().description()});
         return settings;
     }
@@ -188,7 +188,7 @@ bool Settings::save(const std::filesystem::path& file) const {
 
     std::ofstream out{file, std::ios::binary | std::ios::trunc};
     if (!out) {
-        spdlog::warn("настройки не записались: {}", file.string());
+        spdlog::warn("settings were not written: {}", file.string());
         return false;
     }
 

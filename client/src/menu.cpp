@@ -321,7 +321,7 @@ struct Menu::State {
         if (settingsObject.is_object()) {
             emit("settings:update", nlohmann::json::array({settingsObject}));
         } else {
-            spdlog::error("настройки не легли в JSON — страница увидит свои умолчания");
+            spdlog::error("settings did not serialise: the page will show its own defaults");
         }
 
         sendServers();
@@ -333,7 +333,7 @@ struct Menu::State {
         emit("ui:ready");
         emit("version:ready");
 
-        spdlog::info("меню готово");
+        spdlog::debug("menu is ready");
     }
 
     /// Разбирает событие от страницы.
@@ -365,7 +365,7 @@ struct Menu::State {
             // остальное — кому достаётся клавиатура, рисуется ли под меню экран
             // загрузки, слышит ли страница мышь. Пока эта строка не появилась в
             // журнале, любая жалоба на ввод означает сразу несколько разных бед.
-            spdlog::info("меню сообщает о себе: {}", open ? "открыто" : "закрыто");
+            spdlog::debug("menu reports itself: {}", open ? "открыто" : "закрыто");
 
             opened.store(open);
             updateCursor();
@@ -458,7 +458,7 @@ struct Menu::State {
         // отладочный: жалоба «кнопка не работает» иначе не проверяется ничем —
         // по этой строке сразу видно, какая именно кнопка и чего она просила.
         if (unanswered.insert(std::string{name}).second) {
-            spdlog::info("меню просит {} — отвечать пока нечем", name);
+            spdlog::debug("menu asks for {} — nothing to answer with yet", name);
         }
     }
 
@@ -541,7 +541,7 @@ struct Menu::State {
         }
 
         if (address.empty()) {
-            spdlog::warn("меню просит повторить подключение, а последнего адреса нет");
+            spdlog::warn("menu asks to reconnect, but no previous address is known");
             return;
         }
 

@@ -107,7 +107,7 @@ Window::Window() noexcept {
     window_ = findOwnWindow();
 
     if (window_ == nullptr) {
-        spdlog::warn("окно игры не найдено — заголовок и значок останутся рокстаровскими");
+        spdlog::warn("the game window was not found: title and icon will stay Rockstar's");
         return;
     }
 
@@ -126,7 +126,7 @@ Window::Window() noexcept {
                                             LR_DEFAULTSIZE | LR_SHARED));
 
     if (icon_ == nullptr) {
-        spdlog::warn("значок не найден в ресурсах модуля — окну останется рокстаровский");
+        spdlog::warn("the icon was not found in the module resources: the window keeps Rockstar's");
     }
 
     spdlog::debug("окно игры найдено: {}", static_cast<const void*>(window_));
@@ -152,7 +152,7 @@ void Window::apply(const std::string& title) {
             // поток жалоб незачем.
             if (!lostReported_) {
                 lostReported_ = true;
-                spdlog::warn("окно игры не найдено — заголовок и значок пока не поставить");
+                spdlog::warn("the game window was not found: title and icon cannot be set yet");
             }
             return;
         }

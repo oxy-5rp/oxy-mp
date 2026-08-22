@@ -31,7 +31,7 @@ NetworkGame::NetworkGame(const EngineAddresses& addresses) noexcept {
         const Byte& byte = byteFor(flag);
 
         if (byte.address == nullptr) {
-            spdlog::warn("признак «{}» не найден — подделать его не выйдет", describe(flag));
+            spdlog::warn("flag \"{}\" was not found: it cannot be faked", describe(flag));
             continue;
         }
 
@@ -80,7 +80,7 @@ bool NetworkGame::write(Byte& byte, std::uint8_t value, Flag flag) {
         return true;
     }
 
-    spdlog::error("признак «{}» по {:#x} не записывается: положили {}, читается {}", describe(flag),
+    spdlog::error("flag \"{}\" at {:#x} does not stick: wrote {}, reads {}", describe(flag),
                   reinterpret_cast<std::uintptr_t>(byte.address), value, *byte.address);
 
     byte.writeFailed = true;
@@ -107,9 +107,9 @@ void NetworkGame::beginHolding(Fake what) noexcept {
 
     holding_ = true;
 
-    spdlog::warn("включена подделка сетевого состояния ({}) — это разведка, а не сессия: "
-                 "игра будет ходить по сетевым веткам, не имея объектов сессии",
-                 what == Fake::Both ? "оба признака" : "только установившаяся игра");
+    spdlog::warn("faking the network state is on ({}): this is a probe, not a session — "
+                 "the game will take network branches without any session objects",
+                 what == Fake::Both ? "both flags" : "the settled flag only");
 }
 
 void NetworkGame::hold() {

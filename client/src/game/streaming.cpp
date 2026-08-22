@@ -88,7 +88,7 @@ bool Streaming::advance() {
     if (loaded) {
         spdlog::debug("мир вокруг точки подгружен за {} мс", waited);
     } else {
-        spdlog::warn("мир вокруг точки не догрузился за {} мс — отпускаем игрока как есть",
+        spdlog::warn("the world around the point did not finish loading in {} ms: releasing the player as is",
                      waited);
     }
 

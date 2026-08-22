@@ -255,13 +255,13 @@ struct Browser::State : public CefClient,
         switch (level) {
         case LOGSEVERITY_ERROR:
         case LOGSEVERITY_FATAL:
-            spdlog::error("[страница] {} — {}", message.ToString(), where);
+            spdlog::error("[page] {} — {}", message.ToString(), where);
             break;
         case LOGSEVERITY_WARNING:
-            spdlog::warn("[страница] {} — {}", message.ToString(), where);
+            spdlog::warn("[page] {} — {}", message.ToString(), where);
             break;
         default:
-            spdlog::info("[страница] {} — {}", message.ToString(), where);
+            spdlog::debug("[page] {} — {}", message.ToString(), where);
             break;
         }
 
@@ -275,7 +275,7 @@ struct Browser::State : public CefClient,
 
     void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, ErrorCode code,
                      const CefString& text, const CefString& url) override {
-        spdlog::error("страница интерфейса не загрузилась: {} ({}), {}", text.ToString(),
+        spdlog::error("the interface page did not load: {} ({}), {}", text.ToString(),
                       static_cast<int>(code), url.ToString().substr(0, 64));
     }
 

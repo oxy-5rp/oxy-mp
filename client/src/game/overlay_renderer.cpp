@@ -162,7 +162,7 @@ ID3DBlob* compile(const char* source, const char* profile) {
 
     if (complaint != nullptr) {
         if (FAILED(compiled)) {
-            spdlog::error("шейдер интерфейса не собрался: {}",
+            spdlog::error("the interface shader did not compile: {}",
                           static_cast<const char*>(complaint->GetBufferPointer()));
         }
         complaint->Release();
@@ -222,8 +222,8 @@ bool OverlayRenderer::ensurePipeline(IDXGISwapChain* swapchain) {
     }
 
     if (FAILED(swapchain->GetDevice(__uuidof(ID3D11Device), reinterpret_cast<void**>(&device_)))) {
-        spdlog::error("у кадра игры не оказалось устройства Direct3D 11 — интерфейс в кадре "
-                      "рисовать нечем");
+        spdlog::error("the game frame has no Direct3D 11 device: the in-frame interface "
+                      "has nothing to draw with");
         return false;
     }
 
@@ -375,7 +375,7 @@ void OverlayRenderer::draw(IDXGISwapChain* swapchain, const std::uint8_t* pixels
     if (!ensurePipeline(swapchain) || !ensureTexture(width, height) || !ensureTarget(swapchain)) {
         failed_ = true;
         releaseAll();
-        spdlog::error("интерфейс в кадре игры отключён: подготовить вывод не удалось");
+        spdlog::error("the in-frame interface is off: preparing the output failed");
         return;
     }
 

@@ -528,7 +528,7 @@ void Resource::report(v8::Local<v8::Context> context, const v8::TryCatch& caught
         where = std::format(" ({}:{})", fromJs(isolate, message->GetScriptResourceName()), line);
     }
 
-    spdlog::error("[{}] ошибка в обработчике: {}{}", name_, fromJs(isolate, caught.Exception()),
+    spdlog::error("[{}] handler error: {}{}", name_, fromJs(isolate, caught.Exception()),
                   where);
 }
 

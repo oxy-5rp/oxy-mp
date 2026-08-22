@@ -318,7 +318,7 @@ struct UiLayer::State {
                             kept->painted = true;
                             kept->hadContent = opaque != 0;
 
-                            spdlog::info("страница окна {}: кадр {}x{}, видимых точек {}",
+                            spdlog::debug("страница окна {}: кадр {}x{}, видимых точек {}",
                                          kept->id, w, h, opaque);
                         }
 
@@ -327,7 +327,7 @@ struct UiLayer::State {
                     error);
 
                 if (view->surface.browser == nullptr) {
-                    spdlog::error("окно ресурса \"{}\" не завелось: {}", view->url, error);
+                    spdlog::error("resource window \"{}\" was not created: {}", view->url, error);
                     break;
                 }
 
@@ -342,7 +342,7 @@ struct UiLayer::State {
 
                 view->surface.browser->open(view->url);
 
-                spdlog::info("окно ресурса открыто: {}", view->url);
+                spdlog::debug("окно ресурса открыто: {}", view->url);
 
                 const std::lock_guard guard{viewsMutex};
                 views.push_back(std::move(view));
@@ -509,7 +509,7 @@ struct UiLayer::State {
         input = MenuInput::install(game, *menuSurface.browser, std::move(actions), error);
 
         if (input == nullptr) {
-            spdlog::error("ввод для меню не перехвачен, меню убрано: {}", error);
+            spdlog::error("input was not hooked for the menu, the menu is gone: {}", error);
 
             // Меню убирается целиком, а не остаётся показанным. Второе было бы
             // хуже отсутствия: страница закрывает собой весь кадр, и не имея
@@ -617,7 +617,7 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
         state.menu = Menu::create(*state.menuSurface.browser, directory.parent_path(),
                                   std::move(actions));
     } else {
-        spdlog::error("меню не поднялось: {}", menuError);
+        spdlog::error("the menu did not start: {}", menuError);
     }
 
     state.hook = PresentHook::install(
@@ -699,7 +699,7 @@ std::unique_ptr<UiLayer> UiLayer::create(UiFeed& feed, Menu::Actions actions, st
     // Поток заводится последним: до этого мгновения ему нечего вести.
     state.keeper = std::thread{[&state] { state.keep(); }};
 
-    spdlog::info("игровой интерфейс поднят внутри кадра");
+    spdlog::debug("игровой интерфейс поднят внутри кадра");
     return layer;
 }
 

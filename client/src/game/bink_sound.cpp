@@ -42,7 +42,7 @@ struct BinkSound::State {
 
     static void tellOnce(std::atomic<bool>& told, const char* what) {
         if (!told.exchange(true)) {
-            spdlog::info("звук ролика заглушен: игра звала {}", what);
+            spdlog::debug("звук ролика заглушен: игра звала {}", what);
         }
     }
 
@@ -116,7 +116,7 @@ std::unique_ptr<BinkSound> BinkSound::mute(std::string& error) {
 
         std::string own;
         if (!hook.install(target, detour, own)) {
-            spdlog::warn("{} не перехвачена: {}", name, own);
+            spdlog::warn("{} was not hooked: {}", name, own);
             error = std::move(own);
         }
     };
@@ -128,7 +128,7 @@ std::unique_ptr<BinkSound> BinkSound::mute(std::string& error) {
     put(state->soundOnOff, "BinkSetSoundOnOff", reinterpret_cast<void*>(&State::setSoundOnOff));
     put(state->volume, "BinkSetVolume", reinterpret_cast<void*>(&State::setVolume));
 
-    spdlog::info("звук роликов заглушен");
+    spdlog::debug("звук роликов заглушен");
 
     auto sound = std::unique_ptr<BinkSound>{new BinkSound};
     sound->state_ = std::move(state);

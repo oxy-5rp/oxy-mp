@@ -37,11 +37,12 @@ extern "C" void onInterrupt(int) {
 }
 
 void printUsage() {
-    std::cerr << "Использование:\n"
-                 "  oxymp-server [--port <номер>] [--max-players <число>] [--name <имя>]\n";
+    std::cerr << "Usage:\n"
+                 "  oxymp-server [--config <file>] [--port <number>] "
+                 "[--max-players <count>] [--name <name>] [--debug]\n";
 }
 
-/// Разбирает беззнаковое число целиком: \"30abc\" считается ошибкой, а не 30.
+/// Разбирает беззнаковое число целиком: "30abc" считается ошибкой, а не 30.
 template<typename T>
 bool parseNumber(std::string_view text, T& value) {
     const auto* end = text.data() + text.size();
@@ -93,6 +94,8 @@ bool parseArguments(int argc, char** argv, oxymp::server::Config& config) {
             }
         } else if (argument == "--name" && hasValue) {
             config.name = argv[++i];
+        } else if (argument == "--debug") {
+            config.verbose = true;
         } else if (argument == "--config" && hasValue) {
             // Уже прочитан отдельным проходом — здесь его нужно только пропустить
             // вместе со значением, чтобы он не сошёл за неизвестный ключ.
@@ -113,7 +116,15 @@ int main(int argc, char** argv) {
 #endif
 
     spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
-    spdlog::set_level(spdlog::level::debug);
+
+    // По умолчанию — только то, что нужно хозяину сервера: кто вошёл, что
+    // поднялось, что сломалось. Опись каталога раздаваемых файлов, адреса и
+    // разбор пакетов нужны тому, кто чинит сервер, и никому больше — они уходят
+    // на отладочный уровень и включаются ключом.
+    //
+    // Ставится до разбора настроек: жалобы на сам файл настроек должны быть
+    // видны, а уровень к тому мгновению ещё не прочитан.
+    spdlog::set_level(spdlog::level::info);
 
     oxymp::server::Config config;
 
@@ -132,17 +143,21 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    if (config.verbose) {
+        spdlog::set_level(spdlog::level::debug);
+    }
+
     std::signal(SIGINT, onInterrupt);
     std::signal(SIGTERM, onInterrupt);
 
     std::string error;
     const auto server = oxymp::server::Server::start(config, error);
     if (!server) {
-        spdlog::error("не удалось запустить сервер: {}", error);
+        spdlog::error("failed to start the server: {}", error);
         return 1;
     }
 
-    spdlog::info("для остановки нажмите Ctrl+C");
+    spdlog::info("Press Ctrl+C to stop");
 
     server->run(g_stopRequested);
 

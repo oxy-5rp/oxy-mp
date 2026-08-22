@@ -32,7 +32,7 @@ std::uint64_t detour() {
     // выполняется в главном потоке игры, и всё тяжёлое отсюда отзовётся
     // подвисанием картинки.
     if (g_scripts == GameScripts::Block) {
-        spdlog::info("стартовые скрипты игры не запущены (раз {}) — сюжета не будет", count);
+        spdlog::debug("стартовые скрипты игры не запущены (раз {}) — сюжета не будет", count);
 
         // Возврат нуля безопасен: разбор функции показывает, что на одной из
         // веток она уходит на эпилог, не выставив rax вовсе. Значение её
@@ -40,7 +40,7 @@ std::uint64_t detour() {
         return 0;
     }
 
-    spdlog::info("игра запускает стартовые скрипты (раз {})", count);
+    spdlog::debug("игра запускает стартовые скрипты (раз {})", count);
 
     if (g_original == nullptr) {
         return 0;
@@ -72,7 +72,7 @@ std::unique_ptr<ScriptStartup> ScriptStartup::install(const EngineAddresses& add
 
     g_original = startup->hook_.original<StartupFunction>();
 
-    spdlog::info("перехват запуска скриптов поставлен на {:#x}, режим: {}",
+    spdlog::debug("перехват запуска скриптов поставлен на {:#x}, режим: {}",
                  reinterpret_cast<std::uintptr_t>(target),
                  scripts == GameScripts::Block ? "не пускать" : "пускать");
 

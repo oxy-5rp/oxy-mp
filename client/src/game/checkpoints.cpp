@@ -129,7 +129,7 @@ void Checkpoints::apply(const shared::CheckpointState& state) {
         kept.handle = create(state);
 
         if (kept.handle == 0) {
-            spdlog::warn("контрольная точка {} не завелась", state.id);
+            spdlog::warn("checkpoint {} was not created", state.id);
         }
 
         return;
@@ -140,7 +140,7 @@ void Checkpoints::apply(const shared::CheckpointState& state) {
     fresh.handle = state.visible ? create(state) : 0;
 
     if (state.visible && fresh.handle == 0) {
-        spdlog::warn("контрольная точка {} не завелась", state.id);
+        spdlog::warn("checkpoint {} was not created", state.id);
     }
 
     shown_.insert_or_assign(state.id, fresh);

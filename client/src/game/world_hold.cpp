@@ -109,7 +109,7 @@ void WorldHold::gameThreadHold() {
 
     hold->inLoop.store(true);
 
-    spdlog::info("мир придержан: поток игры ждёт выбора сервера, состояние {}", arrival);
+    spdlog::debug("мир придержан: поток игры ждёт выбора сервера, состояние {}", arrival);
 
     std::int32_t lastSeen = arrival;
 
@@ -122,7 +122,7 @@ void WorldHold::gameThreadHold() {
         // местом разбирались дважды, и в следующий раз разбираться придётся по
         // нему же.
         if (const std::int32_t now = *hold->initState; now != lastSeen) {
-            spdlog::info("раскрутка игры: состояние {} вместо {}", now, lastSeen);
+            spdlog::debug("раскрутка игры: состояние {} вместо {}", now, lastSeen);
             lastSeen = now;
         }
 
@@ -133,7 +133,7 @@ void WorldHold::gameThreadHold() {
     // только сделанная позже.
     *hold->initState = kLoadWorldState;
 
-    spdlog::info("мир отпущен: состояние {}, игра грузится дальше сама", *hold->initState);
+    spdlog::debug("мир отпущен: состояние {}, игра грузится дальше сама", *hold->initState);
 
     hold->inLoop.store(false);
 }
@@ -221,7 +221,7 @@ std::unique_ptr<WorldHold> WorldHold::install(const EngineAddresses& addresses,
         return nullptr;
     }
 
-    spdlog::info("удержание мира поставлено: {:#x} зовёт нас через переходник {:#x}", site, thunk);
+    spdlog::debug("удержание мира поставлено: {:#x} зовёт нас через переходник {:#x}", site, thunk);
 
     auto hold = std::unique_ptr<WorldHold>{new WorldHold};
     hold->state_ = std::move(state);
@@ -244,14 +244,14 @@ WorldHold::~WorldHold() {
         // Возвращать байты в этом положении нельзя, и переходник тоже остаётся:
         // поток игры сейчас внутри него. Утечка в несколько десятков байт против
         // вылета — выбор не из трудных.
-        spdlog::error("поток игры не вышел из удержания — код оставлен как есть");
+        spdlog::error("the game thread did not leave the hold: the code is left as it is");
         active_ = nullptr;
         return;
     }
 
     std::string error;
     if (!code::write(state_->site, state_->original, kWriteLength, error)) {
-        spdlog::error("не удалось вернуть запись состояния на место: {}", error);
+        spdlog::error("could not put the state write back: {}", error);
     }
 
     active_ = nullptr;
@@ -264,14 +264,14 @@ void WorldHold::release() noexcept {
         return;
     }
 
-    spdlog::info("мир просят отпустить");
+    spdlog::debug("мир просят отпустить");
 
     if (!state_->visited.load()) {
         // Поток игры до нас ещё не дошёл. Само по себе это не беда: дойдя, он
         // увидит просьбу и пройдёт мимо, не задерживаясь. Бедой это станет, если
         // он не дойдёт вовсе — а такое бывает, когда клиент внедрился позже, чем
         // игра прошла это место.
-        spdlog::info("поток игры до удержания ещё не доходил — отпустим на подходе");
+        spdlog::debug("поток игры до удержания ещё не доходил — отпустим на подходе");
     }
 }
 

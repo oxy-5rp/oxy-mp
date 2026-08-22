@@ -58,7 +58,7 @@ void Blips::apply(const shared::BlipState& state) {
         blip = invokeNative<int>(add_, state.position.x, state.position.y, state.position.z);
 
         if (blip == 0) {
-            spdlog::warn("метка {} не завелась", state.id);
+            spdlog::warn("blip {} was not created", state.id);
             return;
         }
 

@@ -243,7 +243,7 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
     const bool sameVolume = volumeOf(existingAncestor(mirror)) == gameVolume;
 
     if (!sameVolume) {
-        spdlog::info("oxyMP и игра на разных дисках — свяжем символьными ссылками");
+        spdlog::info("oxyMP and the game are on different drives: linking with symlinks");
     }
 
     const std::filesystem::path pinned = mirror / kExecutableName;
@@ -279,7 +279,7 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
             return std::nullopt;
         }
 
-        spdlog::info("GTA5.exe закреплён: {}", pinned.string());
+        spdlog::info("GTA5.exe pinned: {}", pinned.string());
     } else {
         report.gameUpdated = !sameFile(game.executable, pinned);
     }
@@ -293,10 +293,10 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
     report.linked = *linked;
 
     if (report.gameUpdated) {
-        spdlog::warn("игра обновилась, но запускаем закреплённую копию: {}", pinned.string());
+        spdlog::warn("the game updated, but the pinned copy is being started: {}", pinned.string());
     }
 
-    spdlog::info("зеркало игры готово: {}, новых ссылок {}", mirror.string(), report.linked);
+    spdlog::info("Game mirror ready: {}, {} new links", mirror.string(), report.linked);
 
     return report;
 }

@@ -169,7 +169,7 @@ void DataFiles::add(std::string gamePath, std::string_view fileName,
     }
 
     if (gamePath.size() >= sizeof(Entry::name)) {
-        spdlog::warn("описание {} не загружается: путь длиннее, чем принимает игра", gamePath);
+        spdlog::warn("data file {} skipped: the path is longer than the game accepts", gamePath);
         return;
     }
 
@@ -217,7 +217,7 @@ std::size_t DataFiles::pump() {
         void* const mounter = mounters_[file.type];
 
         if (mounter == nullptr) {
-            spdlog::warn("описание {} не загружено: загрузчика вида {} у игры нет", file.path,
+            spdlog::warn("data file {} not loaded: the game has no mounter for type {}", file.path,
                          file.type);
             continue;
         }
@@ -234,12 +234,12 @@ std::size_t DataFiles::pump() {
         const auto load = reinterpret_cast<LoadDataFile>(table[kLoadDataFile]);
 
         if (!load(mounter, &entry)) {
-            spdlog::warn("игра отказалась загружать описание {}", file.path);
+            spdlog::warn("the game refused to load data file {}", file.path);
             continue;
         }
 
         ++loaded;
-        spdlog::info("игре загружено описание {} (вид {})", file.path, file.type);
+        spdlog::debug("игре загружено описание {} (вид {})", file.path, file.type);
     }
 
     return loaded;

@@ -57,7 +57,7 @@ void ResourceStore::load(const std::filesystem::path& directory) {
     std::error_code ec;
 
     if (!std::filesystem::exists(directory, ec)) {
-        spdlog::info("каталог игровых файлов {} отсутствует — раздавать нечего",
+        spdlog::debug("the game files directory {} is missing: nothing to serve",
                      directory.string());
         return;
     }
@@ -73,7 +73,7 @@ void ResourceStore::load(const std::filesystem::path& directory) {
 
         const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
         if (!plain) {
-            spdlog::warn("ресурс {} прочитать не удалось — пропускаем", path.filename().string());
+            spdlog::warn("file {} could not be read: skipping", path.filename().string());
             continue;
         }
 
@@ -92,22 +92,22 @@ void ResourceStore::load(const std::filesystem::path& directory) {
 
         // Отпечаток целиком, а не началом: по нему строится ссылка, и хозяину
         // сервера нужно иметь возможность проверить раздачу браузером.
-        spdlog::info("ресурс {}: {} КБ", item.name, item.size / 1024);
-        spdlog::info("  /resources/dlcpacks/{}.resource", hash);
+        spdlog::debug("file {}: {} KB", item.name, item.size / 1024);
+        spdlog::debug("  /resources/dlcpacks/{}.resource", hash);
 
         items_.push_back(std::move(item));
         packed_.emplace(hash, std::move(packed));
     }
 
     if (ec) {
-        spdlog::warn("каталог ресурсов прочитан не полностью: {}", ec.message());
+        spdlog::warn("the resource directory was not read in full: {}", ec.message());
     }
 
     // Порядок задаётся именем, а не тем, как каталог лёг на диск: клиент
     // показывает список человеку, и он не должен меняться от перезапуска.
     std::ranges::sort(items_, {}, &Item::name);
 
-    spdlog::info("ресурсов готово к раздаче: {}", items_.size());
+    spdlog::info("Files ready to serve: {}", items_.size());
 }
 
 bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
@@ -124,8 +124,8 @@ bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
     item.hash = hash;
     item.size = packed.size();
 
-    spdlog::info("ресурс {}: {} КБ", item.name, item.size / 1024);
-    spdlog::info("  /resources/dlcpacks/{}.resource", hash);
+    spdlog::debug("file {}: {} KB", item.name, item.size / 1024);
+    spdlog::debug("  /resources/dlcpacks/{}.resource", hash);
 
     items_.push_back(std::move(item));
 

@@ -92,7 +92,7 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
     server->host_ = std::move(host);
     server->world_ = WorldClock{config.weather, config.startingHour, config.startingMinute};
 
-    spdlog::info("сервер \"{}\" слушает порт {}, мест: {}", config.name, config.port,
+    spdlog::info("Server \"{}\" listening on port {}, slots: {}", config.name, config.port,
                  config.maxPlayers);
 
     // Игровые файлы собираются до того, как кто-либо подключится: клиент
@@ -118,8 +118,8 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
         if (server->http_ == nullptr) {
             // Не повод не запускать сервер: без раздачи играть можно, просто без
             // добавленного хозяином содержимого.
-            spdlog::error("раздача ресурсов не поднялась: {}", httpError);
-            spdlog::error("клиенты не получат добавленное вами содержимое");
+            spdlog::error("resource delivery did not start: {}", httpError);
+            spdlog::error("clients will not receive the content you added");
         }
     }
 
@@ -182,7 +182,7 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         events_.dispatch(script::Event{.kind = script::EventKind::Tick});
     }
 
-    spdlog::info("остановка, игроков было: {}", players_.size());
+    spdlog::info("Stopping, players online: {}", players_.size());
 
     // Ресурсы останавливаются до того, как сервер вытолкнет последнее. Иначе
     // ресурс, прощающийся с игроками строкой в чат, говорил бы её в уже
@@ -213,7 +213,7 @@ void Server::handleDisconnected(net::PeerId peer) {
         return;
     }
 
-    spdlog::info("игрок \"{}\" (id {}) отключился, осталось: {}", player->nickname, player->id,
+    spdlog::info("Player \"{}\" (id {}) disconnected, {} left", player->nickname, player->id,
                  players_.size());
 
     // Где он сидел — забывается сразу. Машины при этом остаются: в них могли
@@ -245,7 +245,7 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
 
     const auto id = shared::peekMessageId(packet);
     if (!id) {
-        spdlog::warn("соединение {} прислало нераспознанный пакет ({} байт)", peer, payload.size());
+        spdlog::warn("connection {} sent an unrecognised packet ({} bytes)", peer, payload.size());
         return;
     }
 
@@ -325,19 +325,19 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::ObjectAdded:
     case shared::MessageId::ObjectRemoved:
     case shared::MessageId::ServerEvent:
-        spdlog::warn("соединение {} прислало серверное сообщение", peer);
+        spdlog::warn("connection {} sent a server-only message", peer);
         return;
     }
 }
 
 void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     if (players_.findByPeer(peer) != nullptr) {
-        spdlog::warn("соединение {} представилось повторно", peer);
+        spdlog::warn("connection {} introduced itself twice", peer);
         return;
     }
 
     if (hello.protocolVersion != shared::kProtocolVersion) {
-        spdlog::info("соединение {} отклонено: протокол {} против нашего {}", peer,
+        spdlog::info("connection {} refused: protocol {} against our {}", peer,
                      hello.protocolVersion, shared::kProtocolVersion);
         reject(peer, shared::RejectReason::ProtocolMismatch);
         return;
@@ -351,7 +351,7 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // незачем.
     if (!config_.password.empty() && (hello.password.size() > shared::kMaxPasswordLength ||
                                       hello.password != config_.password)) {
-        spdlog::info("соединение {} отклонено: пароль не сошёлся", peer);
+        spdlog::info("connection {} refused: wrong password", peer);
         reject(peer, shared::RejectReason::WrongPassword);
         return;
     }
@@ -458,7 +458,7 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // протоколе будет не по чему — а хозяину сервера нужно понять, что резать
     // надо не тут.
     if (resources.entries.size() > shared::kMaxResources) {
-        spdlog::error("раздаётся {} файлов, а протокол вмещает {} — остальные не дойдут",
+        spdlog::error("{} files are being served, but the protocol holds {}: the rest will not arrive",
                       resources.entries.size(), shared::kMaxResources);
     }
 
@@ -496,7 +496,7 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     announcement.nickname = player.nickname;
     broadcast(announcement, peer);
 
-    spdlog::info("игрок \"{}\" (id {}) подключился, всего: {}", player.nickname, player.id,
+    spdlog::info("Player \"{}\" (id {}) connected, {} online", player.nickname, player.id,
                  players_.size());
 
     // После рассылки о входе, а не вместо неё: PlayerJoined ведёт список
@@ -1235,7 +1235,7 @@ void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& re
     // вот отличить перестрелку от доклада о попадании за километр может.
     const float reach = config_.streamDistance * config_.streamDistance;
     if (shared::distanceSquared(attackerAt, victim->position) > reach) {
-        spdlog::warn("игрок \"{}\" (id {}) доложил о попадании издалека", attackerName, attackerId);
+        spdlog::warn("player \"{}\" (id {}) reported a hit from too far away", attackerName, attackerId);
         return;
     }
 
@@ -1381,8 +1381,8 @@ void Server::seated(const Player& player, shared::VehicleId vehicle, std::int8_t
 }
 
 void Server::kicked(const Player& player, std::string_view reason) {
-    spdlog::info("игрок {} выгнан: {}", player.nickname,
-                 reason.empty() ? std::string_view{"без объяснения"} : reason);
+    spdlog::info("Player {} kicked: {}", player.nickname,
+                 reason.empty() ? std::string_view{"no reason given"} : reason);
 
     // Причина уходит строкой чата, а не своим сообщением, и это осознанный
     // выбор, а не откладывание работы. Своё сообщение потребовало бы номера в
@@ -1602,7 +1602,7 @@ void Server::chatLine(shared::PlayerId to, std::string text) {
     line.text = std::move(text);
 
     if (to == shared::kInvalidPlayerId) {
-        spdlog::info("чат: [сервер] {}", line.text);
+        spdlog::info("chat: [server] {}", line.text);
         broadcast(line);
         return;
     }
@@ -1632,13 +1632,13 @@ void Server::announce(shared::ChatKind kind, shared::PlayerId author, std::strin
     line.nickname = std::move(nickname);
     line.text = std::move(text);
 
-    spdlog::info("чат: [{}] {}", line.nickname.empty() ? "сервер" : line.nickname, line.text);
+    spdlog::info("chat: [{}] {}", line.nickname.empty() ? "server" : line.nickname, line.text);
 
     broadcast(line);
 }
 
 void Server::reject(net::PeerId peer, shared::RejectReason reason) {
-    spdlog::info("соединение {} отклонено: {}", peer, describe(reason));
+    spdlog::info("connection {} refused: {}", peer, describe(reason));
 
     shared::ServerReject message;
     message.reason = reason;
@@ -1653,7 +1653,7 @@ void Server::reject(net::PeerId peer, shared::RejectReason reason) {
 void Server::startResources() {
     for (const std::string& complaint : catalog_.load(config_.resourceDirectory,
                                                       config_.resources)) {
-        spdlog::warn("ресурс: {}", complaint);
+        spdlog::warn("resource: {}", complaint);
     }
 
     ensureRuntimes();
@@ -1674,7 +1674,7 @@ void Server::startResources() {
             Runtime* const runtime = runtimeFor(resource.type);
 
             if (runtime == nullptr) {
-                spdlog::error("ресурс \"{}\": машины для типа \"{}\" в сервере нет",
+                spdlog::error("resource \"{}\": the server has no runtime for type \"{}\"",
                               resource.name, resource.type);
                 continue;
             }
@@ -1682,7 +1682,7 @@ void Server::startResources() {
             std::string error;
 
             if (!runtime->start(resource, error)) {
-                spdlog::error("ресурс \"{}\" не поднят: {}", resource.name, error);
+                spdlog::error("resource \"{}\" did not start: {}", resource.name, error);
                 continue;
             }
         }
@@ -1691,16 +1691,16 @@ void Server::startResources() {
         // названные файлы разных ресурсов иначе сошлись бы в одно.
         for (const std::string& file : resource.clientFiles) {
             if (!resources_.add(resource.root / file, std::format("{}/{}", resource.name, file))) {
-                spdlog::warn("ресурс \"{}\": файл \"{}\" прочитать не удалось", resource.name,
+                spdlog::warn("resource \"{}\": file \"{}\" could not be read", resource.name,
                              file);
             }
         }
 
         if (runs) {
-            spdlog::info("ресурс \"{}\" поднят ({}), клиенту файлов: {}", resource.name,
+            spdlog::info("Resource \"{}\" started ({}), {} files for the client", resource.name,
                          resource.type, resource.clientFiles.size());
         } else {
-            spdlog::info("ресурс \"{}\" раздаёт файлы, не исполняя ничего: {}", resource.name,
+            spdlog::info("Resource \"{}\" serves files without running anything: {}", resource.name,
                          resource.clientFiles.size());
         }
     }
@@ -1738,8 +1738,8 @@ void Server::ensureRuntimes() {
             // Не повод не запускать сервер: без движка он лишится скриптов, но
             // не сессии. Жаловаться при этом обязательно — иначе хозяин будет
             // искать, почему его режим молчит.
-            spdlog::error("движок JS не поднялся: {}", error);
-            spdlog::error("ресурсы на JS работать не будут");
+            spdlog::error("the JS engine did not start: {}", error);
+            spdlog::error("JS resources will not work");
         }
 #endif
     }
@@ -1764,7 +1764,7 @@ void Server::dropSilentPeers() {
             continue;
         }
 
-        spdlog::info("соединение {} не представилось за отведённое время", it->first);
+        spdlog::info("connection {} did not introduce itself in time", it->first);
         host_->disconnect(it->first);
         it = awaitingHello_.erase(it);
     }

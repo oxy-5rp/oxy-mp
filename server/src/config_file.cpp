@@ -157,6 +157,26 @@ template<typename T>
 }
 
 /// Разбирает время суток вида «12:30».
+/// Признак: да, нет, 1, 0, true, false.
+///
+/// Своим разбором, а не через число: хозяин сервера пишет `debug: true`, и
+/// отказать ему из-за того, что мы понимаем только единицу, было бы придиркой.
+[[nodiscard]] bool boolean(std::string_view text, bool& value) {
+    const std::string lowerText = lowered(text);
+
+    if (lowerText == "1" || lowerText == "true" || lowerText == "yes" || lowerText == "on") {
+        value = true;
+        return true;
+    }
+
+    if (lowerText == "0" || lowerText == "false" || lowerText == "no" || lowerText == "off") {
+        value = false;
+        return true;
+    }
+
+    return false;
+}
+
 [[nodiscard]] bool timeOfDay(std::string_view value, std::uint8_t& hour, std::uint8_t& minute) {
     const std::size_t colon = value.find(':');
     if (colon == std::string_view::npos) {
@@ -386,6 +406,8 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
             understood = number(value, config.maxObjects);
         } else if (key == "maxpeds") {
             understood = number(value, config.maxPeds);
+        } else if (key == "debug") {
+            understood = boolean(value, config.verbose);
         } else if (key == "maxblips") {
             understood = number(value, config.maxBlips);
         } else if (key == "maxmarkers") {

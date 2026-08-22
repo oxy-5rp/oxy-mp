@@ -95,7 +95,7 @@ bool unlockKeyboardLayout(const EngineAddresses& addresses, std::string& error) 
         return false;
     }
 
-    spdlog::info("раскладка отпущена: {:#x} больше не навязывает en-US",
+    spdlog::debug("раскладка отпущена: {:#x} больше не навязывает en-US",
                  reinterpret_cast<std::uintptr_t>(code));
 
     return true;
@@ -177,7 +177,7 @@ void switchInputLanguage() {
     if (FAILED(hr) || profiles == nullptr) {
         if (!g_toldFailed) {
             g_toldFailed = true;
-            spdlog::warn("служба текстового ввода не отозвалась ({:#x}) — язык не переключить",
+            spdlog::warn("the text input service did not answer ({:#x}): the layout cannot be switched",
                          static_cast<std::uint32_t>(hr));
         }
         return;
@@ -189,7 +189,7 @@ void switchInputLanguage() {
     if (FAILED(changed)) {
         if (!g_toldFailed) {
             g_toldFailed = true;
-            spdlog::warn("служба текстового ввода отказала в смене языка на {:#06x}: {:#x}", next,
+            spdlog::warn("the text input service refused to switch the layout to {:#06x}: {:#x}", next,
                          static_cast<std::uint32_t>(changed));
         }
         return;
@@ -197,7 +197,7 @@ void switchInputLanguage() {
 
     // Замер до и после — не отладочный мусор: только он отличает «служба не
     // послушалась» от «послушалась, а раскладку потока кто-то вернул».
-    spdlog::info("язык ввода: было {:#x}, просили {:#06x}, стало {:#x}",
+    spdlog::debug("язык ввода: было {:#x}, просили {:#06x}, стало {:#x}",
                  reinterpret_cast<std::uintptr_t>(before), next,
                  reinterpret_cast<std::uintptr_t>(::GetKeyboardLayout(0)));
 }
@@ -243,7 +243,7 @@ struct LayoutGuard::State {
         }
 
         if (!state->told.exchange(true)) {
-            spdlog::info("игре отказано в возврате своей раскладки: она просила {:#x}",
+            spdlog::debug("игре отказано в возврате своей раскладки: она просила {:#x}",
                          reinterpret_cast<std::uintptr_t>(layout));
         }
 
@@ -298,7 +298,7 @@ std::unique_ptr<LayoutGuard> LayoutGuard::install(std::string& error) {
 
     g_activate = state->activate.original<ActivateFunction>();
 
-    spdlog::info("раскладка удерживается: игре её больше не вернуть, {:#x}—{:#x}", g_gameBegin,
+    spdlog::debug("раскладка удерживается: игре её больше не вернуть, {:#x}—{:#x}", g_gameBegin,
                  g_gameEnd);
 
     auto guard = std::unique_ptr<LayoutGuard>{new LayoutGuard};

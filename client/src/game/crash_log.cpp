@@ -153,7 +153,7 @@ std::unique_ptr<CrashLog> CrashLog::install() {
     log->handle_ = ::AddVectoredExceptionHandler(1, &onException);
 
     if (log->handle_ == nullptr) {
-        spdlog::warn("ловушка падений не поставлена — крах оборвёт журнал молча");
+        spdlog::warn("the crash handler was not installed: a crash will cut the log silently");
         return nullptr;
     }
 

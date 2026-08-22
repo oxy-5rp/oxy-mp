@@ -220,7 +220,7 @@ SkinAssets SkinAssets::load(const std::filesystem::path& skinFile) {
         assets.width = size->width;
         assets.height = size->height;
     } else if (!skin->launcherBackground.empty()) {
-        spdlog::warn("фон лаунчера не разобрался как PNG — окно останется {}x{}", assets.width,
+        spdlog::warn("the launcher background did not parse as PNG: the window stays {}x{}", assets.width,
                      assets.height);
     }
 
@@ -231,11 +231,11 @@ SkinAssets SkinAssets::load(const std::filesystem::path& skinFile) {
         assets.smallIcon = makeIcon(icon, ::GetSystemMetrics(SM_CXSMICON));
 
         if (assets.largeIcon == nullptr) {
-            spdlog::warn("значок из оформления не разобрался — останется свой");
+            spdlog::warn("the icon from the skin did not parse: keeping our own");
         }
     }
 
-    spdlog::info("оформление окна: {}, {}x{}", assets.name.empty() ? "без имени" : assets.name,
+    spdlog::info("window skin: {}, {}x{}", assets.name.empty() ? "unnamed" : assets.name,
                  assets.width, assets.height);
 
     return assets;

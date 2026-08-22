@@ -138,8 +138,8 @@ void reportAdapter() {
             // пишется, — хватает ли памяти.
             const auto gigabytes = description.DedicatedVideoMemory / (1024ull * 1024ull * 1024ull);
 
-            spdlog::info("видеокарта: {}", name.string());
-            spdlog::info("своей памяти: {} ГБ, изготовитель {:04x}", gigabytes,
+            spdlog::debug("видеокарта: {}", name.string());
+            spdlog::debug("своей памяти: {} ГБ, изготовитель {:04x}", gigabytes,
                          description.VendorId);
         }
 
@@ -193,10 +193,10 @@ void reportLoadedModules() {
     // сам по себе не значит ничего.
     std::sort(paths.begin(), paths.end());
 
-    spdlog::info("загружено модулей: {}", paths.size());
+    spdlog::debug("загружено модулей: {}", paths.size());
 
     for (const std::string& path : paths) {
-        spdlog::info("  {}", path);
+        spdlog::debug("  {}", path);
     }
 }
 
@@ -214,11 +214,13 @@ void reportEnvironment() {
     if (!game.empty()) {
         const std::filesystem::path directory = game.parent_path();
 
-        spdlog::info("игра: {}", directory.string());
+        spdlog::debug("game: {}", directory.string());
 
         const std::string version = fileVersion(game);
 
-        spdlog::info("сборка игры: {} на {}", version.empty() ? "неизвестна" : version,
+        // Единственная строка о самом клиенте, которую видит игрок, и она же
+        // первое, что спрашивают у приславшего журнал: какая игра и откуда.
+        spdlog::info("oxyMP client on GTA V {} ({})", version.empty() ? "unknown" : version,
                      gamePlatform(directory));
 
         // Расхождение со сборкой, под которую выверены сигнатуры, объявляется
@@ -232,13 +234,13 @@ void reportEnvironment() {
         //
         // Так же поступает alt:V, объявляя расхождение версий своих архивов.
         if (!version.empty() && version != gamesig::kTargetGameVersion) {
-            spdlog::warn("сигнатуры выверены под {} — эта сборка другая",
+            spdlog::warn("the signatures are verified against {}: this build is a different one",
                          gamesig::kTargetGameVersion);
         }
     }
 
     if (!client.empty()) {
-        spdlog::info("клиент: {}", client.parent_path().string());
+        spdlog::debug("client: {}", client.parent_path().string());
     }
 
     reportAdapter();

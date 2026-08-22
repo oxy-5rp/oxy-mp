@@ -320,7 +320,7 @@ int LauncherWindow::run(const Paths& paths, Session::Settings settings) {
     description.lpszClassName = kWindowClass;
 
     if (::RegisterClassExW(&description) == 0) {
-        spdlog::error("не удалось завести класс окна");
+        spdlog::error("the window class could not be registered");
         return 1;
     }
 
@@ -351,7 +351,7 @@ int LauncherWindow::run(const Paths& paths, Session::Settings settings) {
                                       height, nullptr, nullptr, instance, nullptr);
 
     if (window.handle == nullptr) {
-        spdlog::error("не удалось создать окно");
+        spdlog::error("the window could not be created");
         return 1;
     }
 

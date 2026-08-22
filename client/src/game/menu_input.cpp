@@ -188,8 +188,8 @@ std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& brows
                                            ::GetWindowThreadProcessId(window, nullptr));
 
     if (input->messages_ == nullptr) {
-        spdlog::error("перехват очереди сообщений не поставлен, ошибка {}: раскладка в игре "
-                      "переключаться не будет",
+        spdlog::error("the message queue hook was not installed, error {}: the layout inside the game "
+                      "will not switch",
                       ::GetLastError());
     }
 
@@ -209,7 +209,7 @@ std::unique_ptr<MenuInput> MenuInput::install(HWND window, cefui::Browser& brows
     if (input->keyboard_ == nullptr) {
         // Не смертельно: без него меню останется без клавиатуры, но мышь и
         // страница работают. Отказываться от всего перехвата из-за этого нельзя.
-        spdlog::error("клавиатура для меню не перехвачена, ошибка {}", ::GetLastError());
+        spdlog::error("the keyboard was not hooked for the menu, error {}", ::GetLastError());
     }
 
     spdlog::debug("ввод для меню перехвачен");
@@ -257,7 +257,7 @@ LRESULT CALLBACK MenuInput::messageProc(int code, WPARAM wparam, LPARAM lparam) 
     if (message->message == WM_INPUTLANGCHANGEREQUEST && !input->sawLanguageRequest_) {
         input->sawLanguageRequest_ = true;
 
-        spdlog::info("Windows просит сменить раскладку на {:#x}",
+        spdlog::debug("Windows просит сменить раскладку на {:#x}",
                      static_cast<std::uintptr_t>(message->lParam));
     }
 
@@ -309,7 +309,7 @@ LRESULT CALLBACK MenuInput::keyboardProc(int code, WPARAM wparam, LPARAM lparam)
         DWORD process = 0;
         ::GetWindowThreadProcessId(::GetForegroundWindow(), &process);
 
-        spdlog::info("низкоуровневый перехват клавиатуры зовётся; впереди процесс {}, наш {}",
+        spdlog::debug("низкоуровневый перехват клавиатуры зовётся; впереди процесс {}, наш {}",
                      process, ::GetCurrentProcessId());
     }
 
@@ -335,7 +335,7 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
 
     if (!sawQueuedKey_) {
         sawQueuedKey_ = true;
-        spdlog::info("нажатия доходят очередью сообщений");
+        spdlog::debug("нажатия доходят очередью сообщений");
     }
 
     if (down && message.message != WM_CHAR &&
@@ -367,7 +367,7 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
 
         if (key == VK_F4 && held(VK_MENU)) {
             if (down && actions_.askExit) {
-                spdlog::info("Alt+F4 — выходим из игры");
+                spdlog::debug("Alt+F4 — выходим из игры");
                 actions_.askExit();
             }
             return true;
@@ -434,7 +434,7 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     // не пришло или не дошло до страницы, — и различить их нечем.
     if (!sawKey_) {
         sawKey_ = true;
-        spdlog::info("перехват клавиатуры видит нажатия");
+        spdlog::debug("перехват клавиатуры видит нажатия");
     }
 
     // Смена языка ввода замечается прежде вопроса «нужен ли ввод странице»:
@@ -470,7 +470,7 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     // игровой, — дождаться и добить, если игра не закрылась сама.
     if (key == VK_F4 && held(VK_MENU)) {
         if (down && actions_.askExit) {
-            spdlog::info("Alt+F4 — выходим из игры");
+            spdlog::debug("Alt+F4 — выходим из игры");
             actions_.askExit();
         }
         return true;
@@ -549,7 +549,7 @@ void MenuInput::sendCharacters(unsigned key, unsigned scan) {
         if (!loggedSilentKey_) {
             loggedSilentKey_ = true;
 
-            spdlog::info("клавиша {} (скан {}) при раскладке {:#x} не дала буквы: перевод "
+            spdlog::debug("клавиша {} (скан {}) при раскладке {:#x} не дала буквы: перевод "
                          "вернул {}",
                          key, scan, reinterpret_cast<std::uintptr_t>(layout), written);
         }
@@ -567,7 +567,7 @@ void MenuInput::sendCharacters(unsigned key, unsigned scan) {
 
         if (!sentCharacter_) {
             sentCharacter_ = true;
-            spdlog::info("буквы отдаются странице: первая — {:#06x}", symbol);
+            spdlog::debug("буквы отдаются странице: первая — {:#06x}", symbol);
         }
 
         browser_->sendKey(cefui::Browser::KeyAction::Char, symbol, scan, held(VK_SHIFT),
@@ -648,7 +648,7 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
     // без другого и сочтёт клавишу зажатой.
     if (message == WM_SYSKEYDOWN && wparam == VK_F4 && held(VK_MENU)) {
         if (actions_.askExit) {
-            spdlog::info("Alt+F4 — выходим из игры");
+            spdlog::debug("Alt+F4 — выходим из игры");
             actions_.askExit();
         }
 
@@ -670,7 +670,7 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
     //
     // Младшие четыре бита у SC_CLOSE Windows держит за собой, отсюда и маска.
     if (message == WM_CLOSE || (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == SC_CLOSE)) {
-        spdlog::info("Windows просит закрыть окно игры — выходим");
+        spdlog::debug("Windows просит закрыть окно игры — выходим");
 
         if (actions_.exitNow) {
             actions_.exitNow();

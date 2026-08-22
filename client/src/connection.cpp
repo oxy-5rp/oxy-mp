@@ -246,14 +246,14 @@ void Connection::beginAttempt() {
     host_ = net::Host::connect(settings_.address, settings_.port, error);
 
     if (host_ == nullptr) {
-        spdlog::warn("не удалось начать подключение к {}:{}: {}", settings_.address,
+        spdlog::warn("could not start connecting to {}:{}: {}", settings_.address,
                      settings_.port, error);
         fallBackToWaiting("подключение не началось");
         return;
     }
 
     state_ = ConnectionState::Connecting;
-    spdlog::info("подключение к {}:{}", settings_.address, settings_.port);
+    spdlog::info("Connecting to {}:{}", settings_.address, settings_.port);
 }
 
 void Connection::handleEvent(const net::Event& event) {
@@ -295,7 +295,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
 
     const auto id = shared::peekMessageId(packet);
     if (!id) {
-        spdlog::warn("сервер прислал нераспознанный пакет ({} байт)", payload.size());
+        spdlog::debug("unrecognised packet from the server ({} bytes)", payload.size());
         return;
     }
 
@@ -326,7 +326,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
             player.id = joined->playerId;
             player.nickname = joined->nickname;
 
-            spdlog::info("в сессии появился игрок \"{}\" (id {})", joined->nickname,
+            spdlog::debug("player \"{}\" (id {}) joined", joined->nickname,
                          joined->playerId);
         }
         return;
@@ -339,7 +339,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
             // числится за игроком — у неё свой номер, и в ней могли остаться
             // пассажиры. Она уйдёт сама, когда о ней перестанут приходить
             // снимки, то есть когда её и правда некому станет вести.
-            spdlog::info("игрок id {} вышел", left->playerId);
+            spdlog::debug("player id {} left", left->playerId);
         }
         return;
 
@@ -428,7 +428,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
 
     case shared::MessageId::ChatLine:
         if (auto line = shared::decode<shared::ChatLine>(packet)) {
-            spdlog::info("чат: {}", line->text);
+            spdlog::debug("chat: {}", line->text);
             chatLines_.push_back(std::move(*line));
         }
         return;
@@ -553,7 +553,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
     case shared::MessageId::ChatSay:
     case shared::MessageId::DamageReport:
     case shared::MessageId::ClientEvent:
-        spdlog::warn("сервер прислал клиентское сообщение");
+        spdlog::debug("the server sent a client-only message");
         return;
     }
 }
@@ -577,7 +577,7 @@ void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
 
     serverName_ = welcome.name;
 
-    spdlog::info("сервер принял: наш id {}, темп {} тактов в секунду, имя \"{}\"",
+    spdlog::info("Connected to \"{2}\" as id {0} ({1} ticks/s)",
                  welcome.playerId, welcome.tickRate, welcome.name);
 }
 
@@ -588,14 +588,14 @@ void Connection::handleReject(const shared::ServerReject& reject) {
     // которое сервер ещё не успел похоронить. Прекращать попытки здесь значило
     // бы не вернуться в игру после единственного разрыва связи.
     if (reject.reason == shared::RejectReason::NicknameTaken) {
-        spdlog::warn("сервер отказал: {}", describe(reject.reason));
+        spdlog::warn("Connection refused: {}", describe(reject.reason));
         fallBackToWaiting("имя пока занято");
         return;
     }
 
     state_ = ConnectionState::Rejected;
     disconnect_ = DisconnectReason::Refused;
-    spdlog::error("сервер отказал: {}", describe(reject.reason));
+    spdlog::error("Connection refused: {}", describe(reject.reason));
 }
 
 void Connection::handlePong(const shared::Pong& pong) {
@@ -977,7 +977,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
         return;
     }
 
-    spdlog::warn("{}, повтор через {} мс", reason, retryDelay_.count());
+    spdlog::warn("{}, retrying in {} ms", reason, retryDelay_.count());
 
     host_.reset();
     serverPeer_ = net::kInvalidPeerId;

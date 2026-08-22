@@ -185,46 +185,46 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
     // этом нельзя: беззвучно пропавшая часть выглядит как необъяснимая пропажа
     // возможности, а не как ошибка в хешах.
     if (!session->hud_.ready()) {
-        spdlog::error("нативы рисования не найдены — своего интерфейса не будет");
+        spdlog::error("drawing natives not found: the client will have no interface of its own");
     }
     if (!session->player_.ready()) {
-        spdlog::error("нативы игрока не найдены — появления не будет");
+        spdlog::error("player natives not found: spawning will not work");
     }
     if (!session->screen_.ready()) {
-        spdlog::error("нативы экрана не найдены — заставка игры останется");
+        spdlog::error("screen natives not found: the game splash will stay");
     }
     if (!session->story_.ready()) {
-        spdlog::error("нативы сюжета не найдены — кат-сцены и Online не погасить");
+        spdlog::error("story natives not found: cutscenes and Online cannot be silenced");
     }
     if (!session->world_.ready()) {
-        spdlog::error("нативы мира не найдены — прохожие и розыск останутся");
+        spdlog::error("world natives not found: pedestrians and wanted level will stay");
     }
     if (!session->appearance_.ready()) {
-        spdlog::error("нативы внешности не найдены — персонаж останется сюжетным");
+        spdlog::error("appearance natives not found: the ped will stay a story character");
     }
     if (!session->respawn_.ready()) {
-        spdlog::error("нативы смерти не найдены — игра будет обрабатывать её сама");
+        spdlog::error("death natives not found: the game will handle death on its own");
     }
     session->appearance_.describeHandlers();
 
     if (!session->frontend_.ready()) {
-        spdlog::error("нативы меню не найдены — клиент не отличит меню от игры");
+        spdlog::error("menu natives not found: the client cannot tell menu from gameplay");
     }
     if (!session->controls_.ready()) {
-        spdlog::error("нативы управления не найдены — читкоды останутся доступны");
+        spdlog::error("control natives not found: cheats will stay available");
     }
     if (!session->remotePlayers_.ready()) {
-        spdlog::error("нативы персонажей не найдены — чужих игроков не будет видно");
+        spdlog::error("ped natives not found: other players will not be visible");
     }
     if (!session->vehicles_.ready()) {
-        spdlog::error("нативы машин не найдены — чужие машины показать не удастся");
+        spdlog::error("vehicle natives not found: vehicles of others cannot be shown");
     }
     if (!session->nameplates_.ready()) {
-        spdlog::error("нативы рисования в мире не найдены — подписей над головами не будет");
+        spdlog::error("world drawing natives not found: there will be no nameplates");
     }
     if (session->settings_.hostSession) {
         if (!session->netSession_.ready()) {
-            spdlog::error("поднятие сессии заказано, но её точки входа не разрешились");
+            spdlog::error("hosting a session was asked for, but its entry points did not resolve");
         }
 
         // Перехват ставится здесь, задолго до первой просьбы поднять сессию, и
@@ -235,14 +235,14 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
 
         session->networkBail_ = game::NetworkBail::install(addresses, bailError);
         if (session->networkBail_ == nullptr) {
-            spdlog::error("выход из сессии не перехвачен, и сессия проживёт доли секунды: {}",
+            spdlog::error("session bail was not hooked, the session will last a fraction of a second: {}",
                           bailError);
         }
     }
     if (session->settings_.forceNetworkGame != game::NetworkGame::Fake::None &&
         !session->networkGame_.ready()) {
-        spdlog::error("подделка сетевого состояния заказана, но признаков не нашлось — "
-                      "разведочные сигнатуры не разрешились на этой сборке");
+        spdlog::error("faking the network state was asked for, but no flags were found — "
+                      "the probe signatures did not resolve on this build");
     }
 
     // Порядок обязателен: перехват вправе вызвать обработчик сразу же, поэтому
@@ -350,9 +350,9 @@ void GameSession::serveFiles() {
     const std::string read = gameFiles_.read(game::FileDevice::kProbePath);
 
     if (read == game::FileDevice::kProbeContents) {
-        spdlog::info("своё устройство файловой системы работает: игра читает наши байты");
+        spdlog::debug("our file device works: the game reads our bytes");
     } else {
-        spdlog::error("своё устройство встало, но игра прочла из него не то: {} байт",
+        spdlog::error("our file device mounted, but the game read the wrong bytes: {} bytes",
                       read.size());
     }
 }
@@ -561,7 +561,7 @@ void GameSession::advance() {
 
         ownModel_ = progress == game::Appearance::Progress::Done;
         if (!ownModel_) {
-            spdlog::warn("модель не заменена — сюжет останется, иначе игрок исчезнет вместе с ним");
+            spdlog::warn("player model was not replaced: the story character stays");
         }
 
         stage_ = Stage::Spawning;
@@ -617,7 +617,7 @@ void GameSession::advance() {
                     // тому, что мы им сказали, а сказали мы прежнюю модель.
                     lookPublished_ = false;
                 } else {
-                    spdlog::warn("модель, назначенная сервером, не встала");
+                    spdlog::warn("the model assigned by the server did not apply");
                 }
             }
         }
@@ -686,7 +686,7 @@ void GameSession::ensureTextEntry() {
         // Один раз: без перехвата не будет чата, и повторять попытку каждый
         // кадр значит записать в журнал одну и ту же строку тысячу раз.
         textEntryFailed_ = true;
-        spdlog::error("перехват клавиатуры не поставлен — чата не будет: {}", error);
+        spdlog::error("keyboard hook not installed, chat will not work: {}", error);
     }
 }
 
@@ -709,7 +709,7 @@ void GameSession::handleTyping() {
         // «запрет работает» и «запрет не дошёл сюда вовсе».
         if (!menuSuppressed_) {
             menuSuppressed_ = true;
-            spdlog::info("меню открыто — ввод у игры отобран");
+            spdlog::debug("menu is open: input taken away from the game");
         }
 
         return;
@@ -792,7 +792,7 @@ void GameSession::forgetSessionOnLeaving() {
     if (scripts_ != nullptr) {
         for (const std::string& name : startedResources_) {
             scripts_->stopResource(name);
-            spdlog::info("клиентский ресурс \"{}\" остановлен: сессия кончилась", name);
+            spdlog::info("Resource \"{}\" stopped: the session ended", name);
         }
     }
 
@@ -877,7 +877,7 @@ void GameSession::applyServerEvents(int ped) {
     if (ped != 0) {
         for (const shared::Vec3& destination : mail_.takeTeleports()) {
             player_.teleport(ped, destination);
-            spdlog::info("сервер перенёс нас");
+            spdlog::debug("the server teleported us");
         }
     }
 
@@ -1170,15 +1170,15 @@ void GameSession::runScripts() {
             hooks.showView = views.show;
             hooks.focusView = views.focus;
         } else {
-            spdlog::warn("слоя интерфейса нет — окна ресурсов заводиться не будут");
+            spdlog::warn("no interface layer: resource windows will not open");
         }
 
         std::string error;
         scripts_ = ScriptHost::load(game::clientDirectory(), std::move(hooks), error);
 
         if (scripts_ == nullptr) {
-            spdlog::warn("скриптовая машина клиента не поднялась: {}", error);
-            spdlog::warn("ресурсы сервера работать не будут, остальное — как обычно");
+            spdlog::warn("the client script engine did not start: {}", error);
+            spdlog::warn("server resources will not run; everything else works as usual");
         }
     }
 
@@ -1188,10 +1188,10 @@ void GameSession::runScripts() {
 
     for (const SessionMail::ClientResource& resource : waiting) {
         if (scripts_->startResource(resource.name, resource.root, resource.entry)) {
-            spdlog::info("клиентский ресурс \"{}\" поднят", resource.name);
+            spdlog::info("Resource \"{}\" started", resource.name);
             startedResources_.push_back(resource.name);
         } else {
-            spdlog::error("клиентский ресурс \"{}\" не поднялся", resource.name);
+            spdlog::error("Resource \"{}\" failed to start", resource.name);
         }
     }
 
@@ -1224,7 +1224,7 @@ void GameSession::applyIncomingDamage(int ped) {
         //
         // Само сообщение при этом никуда не делось и делось быть не могло: из
         // него видно, кто попал и из чего, а из числа здоровья — не видно.
-        spdlog::info("игрок {} попал по нам на {}", taken.attacker, taken.amount);
+        spdlog::debug("player {} hit us for {}", taken.attacker, taken.amount);
     }
 }
 
@@ -1275,7 +1275,7 @@ void GameSession::spawn() {
     // него остаются на местах, и убрать их нужно отдельно.
     world_.clearArea(point, kClearRadius);
 
-    spdlog::info("игрок появился в точке сервера: {:.1f} {:.1f} {:.1f}", point.x, point.y, point.z);
+    spdlog::debug("spawned at the server point: {:.1f} {:.1f} {:.1f}", point.x, point.y, point.z);
 }
 
 void GameSession::sweepScripts() {
@@ -1364,7 +1364,7 @@ void GameSession::handleDeath(int player) {
     screen_.fadeIn(kFadeIn);
     screen_.keepInterfaceUp();
 
-    spdlog::info("игрок поднят в точке появления");
+    spdlog::debug("player raised at the spawn point");
 }
 
 void GameSession::publishLocalState(int player, int ped, bool dead) {
@@ -1503,7 +1503,7 @@ void GameSession::publishAppearance(int ped) {
     // внешность глазами можно только вдвоём, а по этой строке видно, что своя
     // прочиталась и ушла, ещё до того, как найдётся второй игрок.
     if (first) {
-        spdlog::info("своя внешность объявлена: модель {:#x}, верх {}, ноги {}, обувь {}",
+        spdlog::debug("own appearance published: model {:#x}, top {}, legs {}, feet {}",
                      look.model, look.components[11].drawable, look.components[4].drawable,
                      look.components[6].drawable);
     } else {
@@ -1629,7 +1629,7 @@ void GameSession::draw() {
         screen_.fadeIn(kFadeIn);
         feed_.setReady();
 
-        spdlog::info("игрок в игре, слой загрузки может уходить");
+        spdlog::info("Joined the world");
     }
 }
 

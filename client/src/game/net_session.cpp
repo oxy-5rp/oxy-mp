@@ -78,8 +78,8 @@ void NetSession::rehostIfDropped(Mode mode, bool sessionStarted) {
         if (asked_ && everStarted_ && !gaveUpReported_) {
             gaveUpReported_ = true;
 
-            spdlog::warn("игра не удержала сетевую сессию, дальше играем без неё: "
-                         "мир будет вести себя как в одиночной игре");
+            spdlog::warn("the game did not hold the network session, playing without it: "
+                         "the world will behave as in single player");
         }
         return;
     }
@@ -95,9 +95,9 @@ void NetSession::rehostIfDropped(Mode mode, bool sessionStarted) {
     }
 
     if (everStarted_) {
-        spdlog::info("игра вышла из сетевой сессии, поднимаем ещё раз");
+        spdlog::debug("игра вышла из сетевой сессии, поднимаем ещё раз");
     } else {
-        spdlog::info("сессия так и не поднялась за {} с, просим заново",
+        spdlog::debug("сессия так и не поднялась за {} с, просим заново",
                      std::chrono::duration_cast<std::chrono::seconds>(kStartupGrace).count());
     }
 
@@ -114,7 +114,7 @@ bool NetSession::host(Mode mode) {
 
     if (mode == Mode::Solo) {
         if (hostSolo_ == nullptr) {
-            spdlog::error("натив одиночной сессии не найден");
+            spdlog::error("the solo session native was not found");
             return false;
         }
 
@@ -132,7 +132,7 @@ bool NetSession::host(Mode mode) {
     }
 
     if (!ready()) {
-        spdlog::error("поднять сессию нечем: разведочные сигнатуры не разрешились");
+        spdlog::error("nothing to host a session with: the probe signatures did not resolve");
         return false;
     }
 

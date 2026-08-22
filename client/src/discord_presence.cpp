@@ -137,7 +137,7 @@ void DiscordPresence::pump() {
     for (;;) {
         DWORD available = 0;
         if (::PeekNamedPipe(pipe_, nullptr, 0, nullptr, &available, nullptr) == FALSE) {
-            spdlog::info("Discord закрыл канал");
+            spdlog::debug("Discord closed the pipe");
             disconnect();
             return;
         }
@@ -178,7 +178,7 @@ void DiscordPresence::pump() {
         // Первое всё же нужно: по нему видно, что показ вообще принят.
         if (body.find("\"evt\":\"ERROR\"") != std::string::npos ||
             body.find("\"code\"") != std::string::npos) {
-            spdlog::warn("Discord отказал: {}", body);
+            spdlog::debug("Discord refused: {}", body);
         } else if (!confirmed_) {
             confirmed_ = true;
             spdlog::debug("Discord принял показ: {}", body);
@@ -281,7 +281,7 @@ void DiscordPresence::update(const Presence& presence) {
     if (!send(kFrame, payload)) {
         // Discord закрыли. Это не ошибка: канал просто исчез, и через положенное
         // время мы поищем его снова.
-        spdlog::info("Discord отключился");
+        spdlog::debug("Discord disconnected");
         disconnect();
         nextAttemptAt_ = now + kReconnectDelay;
         return;

@@ -126,7 +126,7 @@ std::unique_ptr<Browser> Browser::create(HWND window, const std::wstring& userDa
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [state](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
                 if (FAILED(result) || environment == nullptr) {
-                    spdlog::error("движок интерфейса не поднялся: {:#010x}",
+                    spdlog::error("the interface engine did not start: {:#010x}",
                                   static_cast<std::uint32_t>(result));
                     return result;
                 }
@@ -137,7 +137,7 @@ std::unique_ptr<Browser> Browser::create(HWND window, const std::wstring& userDa
                         [state](HRESULT created,
                                 ICoreWebView2Controller* controller) -> HRESULT {
                             if (FAILED(created) || controller == nullptr) {
-                                spdlog::error("страница не создана: {:#010x}",
+                                spdlog::error("the page was not created: {:#010x}",
                                               static_cast<std::uint32_t>(created));
                                 return created;
                             }
@@ -160,7 +160,7 @@ std::unique_ptr<Browser> Browser::create(HWND window, const std::wstring& userDa
                                     shading->put_DefaultBackgroundColor(
                                         COREWEBVIEW2_COLOR{0, 0, 0, 0});
                                 } else {
-                                    spdlog::warn("движок интерфейса не умеет прозрачный фон");
+                                    spdlog::warn("the interface engine cannot do a transparent background");
                                 }
                             }
 
@@ -201,14 +201,14 @@ std::unique_ptr<Browser> Browser::create(HWND window, const std::wstring& userDa
                             ::GetClientRect(state->window, &bounds);
                             controller->put_Bounds(bounds);
 
-                            spdlog::info("движок интерфейса готов, окно {}x{}",
+                            spdlog::debug("движок интерфейса готов, окно {}x{}",
                                          bounds.right - bounds.left, bounds.bottom - bounds.top);
 
                             if (!state->pending.empty()) {
                                 const std::wstring wide = widen(state->pending);
                                 const HRESULT shown = state->view->NavigateToString(wide.c_str());
 
-                                spdlog::info("страница показана: {} символов, код {:#010x}",
+                                spdlog::debug("страница показана: {} символов, код {:#010x}",
                                              wide.size(), static_cast<std::uint32_t>(shown));
 
                                 state->pending.clear();

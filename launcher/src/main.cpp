@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        spdlog::info("копия игры готова: {}", mirror->location.directory.string());
+        spdlog::info("Game copy ready: {}", mirror->location.directory.string());
         return 0;
     }
 
@@ -224,9 +224,9 @@ int main(int argc, char** argv) {
     }
 
     if (settings.server.empty()) {
-        spdlog::info("сервер не назван: клиент поднимет меню и будет ждать выбора");
+        spdlog::info("No server given: the client will open the menu and wait for a choice");
     } else {
-        spdlog::info("сервер: {}, имя: {}", settings.server, settings.nickname);
+        spdlog::info("Server: {}, name: {}", settings.server, settings.nickname);
     }
 
     auto game = oxymp::launcher::Session::run(
@@ -242,10 +242,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    spdlog::info("журнал клиента: logs\\client_<дата>.log рядом с этим файлом");
+    spdlog::info("Client log: logs\\client_<date>.log next to this file");
 
     game->waitForExit();
-    spdlog::info("игра завершилась");
+    spdlog::info("The game has exited");
 
     return 0;
 }

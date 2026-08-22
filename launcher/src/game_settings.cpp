@@ -153,7 +153,7 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
         std::filesystem::copy_file(settings, backup, ec);
 
         if (ec) {
-            spdlog::warn("копия настроек игры не сделана: {}", ec.message());
+            spdlog::warn("the game settings backup was not made: {}", ec.message());
         }
     }
 
@@ -175,7 +175,7 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
     note = "игра переведена в оконный режим без рамки (было " + std::to_string(current) +
            "), копия в backup";
 
-    spdlog::info("оконный режим игры: {} → {}, копия {}", current,
+    spdlog::info("game window mode: {} -> {}, backup {}", current,
                  static_cast<int>(WindowMode::Borderless), backup.string());
 
     return true;

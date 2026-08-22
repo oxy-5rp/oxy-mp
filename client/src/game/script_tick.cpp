@@ -136,9 +136,9 @@ std::uint32_t detour(void* thread, std::uint32_t operations) {
     void* const previous = slot != nullptr ? *slot : nullptr;
 
     if (!g_slotReported.exchange(true)) {
-        spdlog::info("первый кадр клиента: поток {}, обработчик скрипта {}", fmt::ptr(thread),
+        spdlog::debug("первый кадр клиента: поток {}, обработчик скрипта {}", fmt::ptr(thread),
                      ownsResources ? "есть" : "отсутствует");
-        spdlog::info("активный поток в TLS до подмены: {}", fmt::ptr(previous));
+        spdlog::debug("активный поток в TLS до подмены: {}", fmt::ptr(previous));
     }
 
     if (slot != nullptr) {
@@ -201,7 +201,7 @@ std::unique_ptr<ScriptTick> ScriptTick::install(const EngineAddresses& addresses
 
     g_original = tick->hook_.original<TickFunction>();
 
-    spdlog::info("перехват тика скриптов поставлен на {:#x}",
+    spdlog::debug("перехват тика скриптов поставлен на {:#x}",
                  reinterpret_cast<std::uintptr_t>(target));
 
     return tick;

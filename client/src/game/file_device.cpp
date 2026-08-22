@@ -87,7 +87,7 @@ struct FileDevice::Device {
                           FILE_ATTRIBUTE_NORMAL, nullptr);
 
         if (handle == INVALID_HANDLE_VALUE) {
-            spdlog::warn("подменённый файл {} не открылся", fileName);
+            spdlog::warn("the served file {} could not be opened", fileName);
             return kNoHandle;
         }
 
@@ -427,7 +427,7 @@ std::size_t FileDevice::pump() {
         // начинающиеся с корня своего пространства имён, а именно такие у неё
         // все.
         if (!mount_(prefix.c_str(), device_, true)) {
-            spdlog::warn("игра не приняла устройство на приставке {}", prefix);
+            spdlog::warn("the game did not accept the device at prefix {}", prefix);
             continue;
         }
 
@@ -440,7 +440,7 @@ std::size_t FileDevice::pump() {
 
         // Строкой на приставку, а не на файл: файлов бывают тысячи, а приставок
         // единицы, и именно приставка — то, что игра либо приняла, либо нет.
-        spdlog::info("своё устройство повешено на {}", prefix);
+        spdlog::debug("своё устройство повешено на {}", prefix);
     }
 
     return done;

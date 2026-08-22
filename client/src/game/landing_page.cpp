@@ -48,7 +48,7 @@ bool skipLandingPage(const EngineAddresses& addresses, std::string& error) {
     DWORD restored = 0;
     ::VirtualProtect(branch, sizeof(*branch), previous, &restored);
 
-    spdlog::info("страница выбора режима отключена: {:#x} теперь безусловный переход",
+    spdlog::debug("страница выбора режима отключена: {:#x} теперь безусловный переход",
                  reinterpret_cast<std::uintptr_t>(branch));
 
     return true;

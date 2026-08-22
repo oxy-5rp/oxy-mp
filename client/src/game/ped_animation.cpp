@@ -99,7 +99,7 @@ bool PedAnimation::ready(std::string_view dictionary) {
     const auto [entry, added] = requestedAt_.try_emplace(name, now);
 
     if (!added && now - entry->second >= kLoadPatience) {
-        spdlog::warn("набор движений \"{}\" не загружается — движение не покажется",
+        spdlog::warn("animation dictionary \"{}\" does not load: the animation will not show",
                      dictionary);
         complained_.insert(name);
     }
