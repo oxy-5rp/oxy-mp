@@ -1,4 +1,5 @@
 add_executable(oxymp_shared_tests
+    bundle_tests.cpp
     message_tests.cpp
     mvalue_tests.cpp
     serialization_tests.cpp

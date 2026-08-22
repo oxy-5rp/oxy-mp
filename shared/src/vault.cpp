@@ -121,9 +121,13 @@ std::uint32_t littleEndian(std::span<const std::uint8_t> from, std::size_t at) {
            (static_cast<std::uint32_t>(from[at + 3]) << 24);
 }
 
-/// Накладывает поток шифра на данные. Шифрование и расшифровка — одно действие.
-void applyStream(std::span<std::uint8_t> data, std::span<const std::uint8_t> key,
-                 std::span<const std::uint8_t> nonce) {
+/// Накладывает поток шифра на данные, начиная с указанного номера блока и
+/// пропустив в первом блоке заданное число байт.
+///
+/// Шифрование и расшифровка — одно действие.
+void applyStreamFrom(std::span<std::uint8_t> data, std::span<const std::uint8_t> key,
+                     std::span<const std::uint8_t> nonce, std::uint32_t firstBlock,
+                     std::size_t skipInFirst) {
     std::array<std::uint32_t, 16> start{};
 
     // "expand 32-byte k" — постоянная из стандарта.
@@ -136,13 +140,18 @@ void applyStream(std::span<std::uint8_t> data, std::span<const std::uint8_t> key
         start[4 + i] = littleEndian(key, i * 4);
     }
 
-    start[12] = 0;
+    start[12] = firstBlock;
 
     for (std::size_t i = 0; i < 3; ++i) {
         start[13 + i] = littleEndian(nonce, i * 4);
     }
 
-    for (std::size_t offset = 0; offset < data.size(); offset += 64) {
+    // Сколько байт первого блока пропустить: кусок мог начаться с середины
+    // блока, и накладывать на него поток с начала блока значило бы промахнуться.
+    std::size_t skip = skipInFirst;
+    std::size_t written = 0;
+
+    while (written < data.size()) {
         std::array<std::uint32_t, 16> block = start;
 
         for (int round = 0; round < 10; ++round) {
@@ -160,17 +169,28 @@ void applyStream(std::span<std::uint8_t> data, std::span<const std::uint8_t> key
             block[i] += start[i];
         }
 
-        const std::size_t remaining = std::min<std::size_t>(64, data.size() - offset);
+        const std::size_t available = 64 - skip;
+        const std::size_t remaining = std::min(available, data.size() - written);
 
         for (std::size_t i = 0; i < remaining; ++i) {
-            const std::uint32_t word = block[i / 4];
-            const auto keyByte = static_cast<std::uint8_t>(word >> ((i % 4) * 8));
+            const std::size_t at = skip + i;
+            const std::uint32_t word = block[at / 4];
+            const auto keyByte = static_cast<std::uint8_t>(word >> ((at % 4) * 8));
 
-            data[offset + i] ^= keyByte;
+            data[written + i] ^= keyByte;
         }
+
+        written += remaining;
+        skip = 0;
 
         ++start[12];
     }
+}
+
+/// То же с начала потока — как было до появления чтения с середины.
+void applyStream(std::span<std::uint8_t> data, std::span<const std::uint8_t> key,
+                 std::span<const std::uint8_t> nonce) {
+    applyStreamFrom(data, key, nonce, 0, 0);
 }
 
 /// Кладёт четырёхбайтное число в конец, младшим байтом вперёд.
@@ -283,6 +303,20 @@ std::vector<std::uint8_t> Vault::unpack(std::span<const std::uint8_t> packed,
     }
 
     return plain;
+}
+
+void applyKeystreamAt(std::span<std::uint8_t> data, std::span<const std::uint8_t> key,
+                      std::span<const std::uint8_t> nonce, std::uint64_t streamOffset) {
+    if (key.size() != Vault::kKeyLength || nonce.size() != Vault::kNonceLength) {
+        return;
+    }
+
+    // Место в потоке переводится в номер блока и остаток внутри него: блок у
+    // ChaCha20 ровно 64 байта, и делить приходится именно так.
+    constexpr std::uint64_t kBlockLength = 64;
+
+    applyStreamFrom(data, key, nonce, static_cast<std::uint32_t>(streamOffset / kBlockLength),
+                    static_cast<std::size_t>(streamOffset % kBlockLength));
 }
 
 std::string fingerprint(std::span<const std::uint8_t> data) {
