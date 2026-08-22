@@ -1,9 +1,12 @@
 #include "game_locator.hpp"
 
+#include "game_store.hpp"
 #include "registry.hpp"
 
 #include <spdlog/spdlog.h>
 
+#include <array>
+#include <cstdint>
 #include <format>
 #include <fstream>
 #include <iterator>
@@ -11,6 +14,8 @@
 #include <vector>
 
 #include <windows.h>
+
+#include <bcrypt.h>
 
 namespace oxymp::launcher {
 namespace {
@@ -160,6 +165,107 @@ std::vector<std::filesystem::path> epicInstalls() {
     return installs;
 }
 
+/// Расшифровывает список игр Rockstar Games Launcher.
+///
+/// AES-256-CBC на нулевом ключе и нулевом векторе. Это не взлом и не подбор:
+/// ключ у самого Rockstar нулевой, файл им не заперт, а прикрыт. Первые
+/// шестнадцать байт расшифрованного — не текст, и отбрасываются.
+///
+/// Пусто, если файла нет или он оказался не тем, чем мы его считали. Отказывать
+/// из-за него нельзя ни в коем случае: это одно из мест поиска, а не
+/// единственное.
+std::string decryptTitles(std::vector<std::uint8_t>& data) {
+    // Шифр блочный: длина не кратна блоку — значит перед нами не то, что мы
+    // думаем, и расшифровывать нечего.
+    constexpr std::size_t kBlockSize = 16;
+
+    if (data.empty() || data.size() % kBlockSize != 0) {
+        return {};
+    }
+
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    if (::BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0) {
+        return {};
+    }
+
+    std::string text;
+
+    // Сцепление блоков задаётся отдельно: по умолчанию у поставщика режим CBC не
+    // выбран, и без этой строки расшифровался бы каждый блок сам по себе.
+    if (::BCryptSetProperty(algorithm, BCRYPT_CHAINING_MODE,
+                            reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_CHAIN_MODE_CBC)),
+                            sizeof(BCRYPT_CHAIN_MODE_CBC), 0) == 0) {
+        std::array<std::uint8_t, 32> key{};
+        std::array<std::uint8_t, kBlockSize> startVector{};
+
+        BCRYPT_KEY_HANDLE handle = nullptr;
+
+        if (::BCryptGenerateSymmetricKey(algorithm, &handle, nullptr, 0, key.data(),
+                                         static_cast<ULONG>(key.size()), 0) == 0) {
+            ULONG written = 0;
+
+            if (::BCryptDecrypt(handle, data.data(), static_cast<ULONG>(data.size()), nullptr,
+                                startVector.data(), static_cast<ULONG>(startVector.size()), data.data(),
+                                static_cast<ULONG>(data.size()), &written, 0) == 0 &&
+                written > kBlockSize) {
+                text.assign(reinterpret_cast<const char*>(data.data()) + kBlockSize,
+                            written - kBlockSize);
+            }
+
+            ::BCryptDestroyKey(handle);
+        }
+    }
+
+    ::BCryptCloseAlgorithmProvider(algorithm, 0);
+
+    return text;
+}
+
+/// Куда Rockstar Games Launcher поставил игры.
+///
+/// Он запускает игру любой площадки, и его собственный список — единственное
+/// место, где путь к копии из Steam или Epic записан наверняка. В реестре они
+/// лежат под другими именами значений, и имена эти у площадок разные; здесь же
+/// путь один и тот же для всех.
+///
+/// Возвращаются все установленные игры подряд, без разбора, какая из них наша:
+/// GTA5.exe лежит ровно в одной, и отобрать её проще проверкой каталога, чем
+/// разбором чужого формата, который вправе смениться.
+std::vector<std::filesystem::path> rockstarLauncherInstalls() {
+    std::vector<std::filesystem::path> installs;
+
+    std::wstring programData(MAX_PATH, L'\0');
+    const DWORD written = ::GetEnvironmentVariableW(L"PROGRAMDATA", programData.data(),
+                                                    static_cast<DWORD>(programData.size()));
+    if (written == 0 || written >= programData.size()) {
+        return installs;
+    }
+    programData.resize(written);
+
+    const std::filesystem::path titles =
+        std::filesystem::path{programData} / "Rockstar Games" / "Launcher" / "titles.dat";
+
+    const std::string raw = readTextFile(titles);
+    if (raw.empty()) {
+        return installs;
+    }
+
+    std::vector<std::uint8_t> data(raw.begin(), raw.end());
+
+    const std::string list = decryptTitles(data);
+    if (list.empty()) {
+        return installs;
+    }
+
+    // `il` — install location. У неустановленных игр он пуст, и valuesOf такие
+    // значения не возвращает вовсе.
+    for (const std::string& path : valuesOf(list, "il")) {
+        installs.emplace_back(path);
+    }
+
+    return installs;
+}
+
 } // namespace
 
 std::string readGameVersion(const std::filesystem::path& executable) {
@@ -199,23 +305,34 @@ std::optional<GameLocation> gameInDirectory(const std::filesystem::path& directo
     }
 
     location.version = readGameVersion(location.executable);
+    location.store = storeOf(location.directory);
 
     return location;
 }
 
 std::optional<GameLocation> locateGame(std::string& error) {
-    // По очереди, в порядке того, как часто встречается. Первая найденная и
-    // берётся: двух установок одной игры не бывает, а если у человека всё же
-    // две, он укажет нужную ключом --game.
+    // Куда смотреть. Первый каталог, в котором нашлась GTA5.exe, и берётся: двух
+    // установок одной игры не бывает, а если у человека всё же две, он укажет
+    // нужную ключом --game.
+    //
+    // Название места поиска — не площадка, а лишь пометка для журнала: где
+    // искали и где нашли. Чья это копия, спрашивается потом у самого каталога.
     struct Candidate {
         std::filesystem::path directory;
-        std::string source;
+        std::string origin;
     };
 
     std::vector<Candidate> candidates;
 
+    // Список Rockstar Games Launcher — первым, и это не вкусовщина. Игру любой
+    // площадки запускает он, поэтому запись о ней у него есть всегда, а всё
+    // остальное здесь — обходные пути на случай, если списка нет.
+    for (const std::filesystem::path& directory : rockstarLauncherInstalls()) {
+        candidates.push_back(Candidate{directory, "Rockstar Games Launcher"});
+    }
+
     if (const auto folder = readLocalMachineString(kRegistryPath, L"InstallFolder")) {
-        candidates.push_back(Candidate{*folder, "Rockstar Games Launcher"});
+        candidates.push_back(Candidate{*folder, "реестр"});
     }
 
     for (const std::filesystem::path& library : steamLibraries()) {
@@ -236,9 +353,8 @@ std::optional<GameLocation> locateGame(std::string& error) {
         std::string ignored;
 
         if (auto location = gameInDirectory(candidate.directory, ignored)) {
-            location->source = candidate.source;
-
-            spdlog::info("Game found ({}): {}", location->source,
+            spdlog::debug("game found through {}", candidate.origin);
+            spdlog::info("Game found ({}): {}", storeName(location->store),
                          location->directory.string());
 
             return location;

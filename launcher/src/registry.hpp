@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -19,5 +20,13 @@ namespace oxymp::launcher {
 /// машину, и у разных людей за одним компьютером пути разные.
 [[nodiscard]] std::optional<std::wstring> readCurrentUserString(const wchar_t* path,
                                                                 const wchar_t* name);
+
+/// Читает числовое значение из HKEY_CURRENT_USER.
+///
+/// Ради одного вопроса: вошёл ли кто-нибудь в Steam. Ответ на него Steam держит
+/// числом, а не строкой, и читать его строковым запросом бесполезно —
+/// RegGetValueW откажет по несовпадению разряда.
+[[nodiscard]] std::optional<std::uint32_t> readCurrentUserNumber(const wchar_t* path,
+                                                                 const wchar_t* name);
 
 } // namespace oxymp::launcher

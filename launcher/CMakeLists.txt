@@ -5,6 +5,7 @@ add_executable(oxymp_launcher
     src/game_mirror.cpp
     src/game_settings.cpp
     src/game_process.cpp
+    src/game_store.cpp
     src/launcher_patch.cpp
     src/launcher_window.cpp
     src/main.cpp
@@ -60,6 +61,11 @@ target_link_libraries(oxymp_launcher PRIVATE
 # Версия исполняемого файла игры. Ею лаунчер отличает подходящую сборку от
 # чужой до запуска, а не после.
 target_link_libraries(oxymp_launcher PRIVATE version)
+
+# Шифр Windows. Ради одного дела: список установленных игр Rockstar Games
+# Launcher лежит зашифрованным, и без него не найти копию, купленную в Steam или
+# Epic, — в реестре они записаны под другими именами значений.
+target_link_libraries(oxymp_launcher PRIVATE bcrypt)
 
 # Лаунчер бесполезен без того, что он внедряет: модуля в игру, подмены звена
 # BattlEye в лаунчер Rockstar и хозяйства Chromium, которым модуль рисует

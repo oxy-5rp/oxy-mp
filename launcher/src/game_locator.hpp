@@ -1,5 +1,7 @@
 #pragma once
 
+#include "game_store.hpp"
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -18,8 +20,9 @@ struct GameLocation {
     /// Пусто, если прочитать не удалось.
     std::string version;
 
-    /// Откуда игра взялась — для журнала и для человека.
-    std::string source;
+    /// Чья это копия. Узнаётся по самому каталогу игры, а не по тому, где мы
+    /// её нашли: искать можно где угодно, а площадка у копии одна.
+    GameStore store = GameStore::Rockstar;
 };
 
 /// Находит установленную игру.

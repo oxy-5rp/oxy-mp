@@ -40,4 +40,16 @@ std::optional<std::wstring> readCurrentUserString(const wchar_t* path, const wch
     return readString(HKEY_CURRENT_USER, path, name);
 }
 
+std::optional<std::uint32_t> readCurrentUserNumber(const wchar_t* path, const wchar_t* name) {
+    DWORD value = 0;
+    DWORD bytes = sizeof(value);
+
+    if (::RegGetValueW(HKEY_CURRENT_USER, path, name, RRF_RT_REG_DWORD, nullptr, &value, &bytes) !=
+        ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+
+    return value;
+}
+
 } // namespace oxymp::launcher

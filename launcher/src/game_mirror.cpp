@@ -265,6 +265,10 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
     report.location.executable = pinned;
     report.location.version = game.version;
 
+    // Площадка у копии та же: закрепляя игру, мы переносим и её переходник к
+    // Steam, и права она спросит там же, где спросила бы исходная.
+    report.location.store = game.store;
+
     // Настоящая копия, а не ссылка, и это самое существенное место здесь.
     //
     // Ссылка на GTA5.exe отменила бы всю затею: обновление подменило бы файл, а

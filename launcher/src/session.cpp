@@ -3,6 +3,7 @@
 #include "game_locator.hpp"
 #include "game_mirror.hpp"
 #include "game_settings.hpp"
+#include "game_store.hpp"
 #include "launcher_patch.hpp"
 #include "rockstar_launcher.hpp"
 
@@ -12,6 +13,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string>
 
@@ -28,6 +30,11 @@ constexpr auto kProcessTimeout = std::chrono::seconds{180};
 /// Сколько добиваться внедрения. Сразу после запуска процесс занят собой и
 /// удалённый поток в нём создать не удаётся.
 constexpr auto kInjectTimeout = std::chrono::seconds{30};
+
+/// Сколько ждать, пока человек войдёт в клиент своей площадки. Steam поднимается
+/// быстро, но вход бывает и с подтверждением с телефона, и вводить его человек
+/// будет не торопясь.
+constexpr auto kStoreTimeout = std::chrono::seconds{120};
 
 /// Сколько ждать готовности Rockstar Games Launcher, если поднимать его пришлось
 /// нам. Холодный старт лаунчера с обновлением бывает долгим.
@@ -226,6 +233,19 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
                            "а у другой сборки код другой.\n"
                            "Нужна ровно та версия — либо новая сборка oxyMP под вашу.",
                            installed->version, gamesig::kTargetGameVersion));
+        return nullptr;
+    }
+
+    // Клиент площадки поднимается прежде всего остального. Копия из Steam
+    // спрашивает права у steam_api64.dll, а та — у запущенного Steam: без него
+    // игра закрывается, не дойдя до загрузки, и человек видит только мигнувшее
+    // окно, а причину — нигде.
+    if (installed->store != GameStore::Rockstar) {
+        report(Progress::Working, std::format("Готовим {}", storeName(installed->store)));
+    }
+
+    if (!ensureStoreReady(installed->store, kStoreTimeout, error)) {
+        report(Progress::Failed, error);
         return nullptr;
     }
 
