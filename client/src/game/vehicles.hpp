@@ -8,7 +8,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace oxymp::client::game {
@@ -245,6 +247,16 @@ private:
     [[nodiscard]] bool occupied(int vehicle) const;
 
     VehicleSnapshot snapshot_;
+
+    /// Модели, о которых уже сказано, что они не загружаются.
+    ///
+    /// По хешу и по одному разу: машина заказывается каждый кадр, и без этого
+    /// журнал забился бы одной строкой за секунду.
+    std::unordered_set<std::uint32_t> complained_;
+
+    /// Когда модель заказали впервые. По этому времени и видно, что она не
+    /// придёт: у загруженной срок короткий, у отсутствующей его нет вовсе.
+    std::unordered_map<std::uint32_t, std::chrono::steady_clock::time_point> requestedAt_;
 
     NativeHandler requestModel_ = nullptr;
     NativeHandler hasModelLoaded_ = nullptr;

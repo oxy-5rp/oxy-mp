@@ -5,10 +5,18 @@
 
 #include <spdlog/spdlog.h>
 
+#include <chrono>
+
 #include <algorithm>
 
 namespace oxymp::client::game {
 namespace {
+
+/// Сколько ждать модель, прежде чем счесть, что её не будет.
+///
+/// Пять секунд: за это время грузится с диска что угодно, включая модель на
+/// десяток мегабайт, а ждать дольше значит держать человека в неведении.
+constexpr auto kModelPatience = std::chrono::seconds{5};
 
 /// Сколько пассажирских мест перебирается в поисках персонажа, если спросить у
 /// самой машины не удалось.
@@ -168,9 +176,35 @@ int Vehicles::spawn(const shared::VehicleState& state) {
     }
 
     invokeNative<void>(requestModel_, state.model);
+
     if (!invokeNative<bool>(hasModelLoaded_, state.model)) {
+        // Молчать здесь нельзя, и это стоило вечера. Модель, которой у игры
+        // нет, ведёт себя ровно так же, как модель, которая ещё грузится:
+        // машина просто не появляется, и ни одной строки о том, почему. Хозяин
+        // сервера при этом видит «машина заведена» в своём журнале и ищет
+        // причину где угодно, только не здесь.
+        //
+        // Отсюда терпение и жалоба: модель, не пришедшая за отведённое время,
+        // не придёт уже никогда — либо её нет в игре, либо ресурс, который её
+        // приносит, не поднялся.
+        const auto now = std::chrono::steady_clock::now();
+        const auto [entry, added] = requestedAt_.try_emplace(state.model, now);
+
+        if (!added && now - entry->second >= kModelPatience &&
+            !complained_.contains(state.model)) {
+            complained_.insert(state.model);
+
+            spdlog::warn("vehicle model {:#010x} never loaded: the game does not have it, "
+                         "or the resource that brings it did not start",
+                         state.model);
+        }
+
         return 0;
     }
+
+    // Пришедшая модель забывается: заказана она может быть снова, и второй
+    // отсчёт должен начаться с чистого места.
+    requestedAt_.erase(state.model);
 
     // Последние признаки: машина не сетевая и не принадлежит скрипту. Сетевых в
     // одиночной игре не бывает, а принадлежность скрипту передаётся отдельно,
