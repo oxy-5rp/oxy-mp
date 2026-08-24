@@ -57,6 +57,18 @@ toml::table defaults() {
         {"disableRtl", false},
         {"discordRichPresence", true},
         {"displaySystemUpdateMessagesInLog", false},
+
+        // Настройки, которых у нас пока никто не читает, и всё же они здесь.
+        // Файл настроек переносят с одного мультиплеера на другой руками, и
+        // настройка, которую мы молча выбросили, потерялась бы при первом же
+        // сохранении. Значения — те же, что у alt:V по умолчанию.
+        {"earlyAuthTestURL", ""},
+        {"enableDiscordOverlay", false},
+        {"enableGuildedOverlay", false},
+        {"enableNvidiaShadowPlayOverlay", false},
+        {"enableOverwolfOverlay", false},
+        {"linuxCompatibility", false},
+
         {"expandedConsole", true},
         {"externalConsoleX", 0},
         {"externalConsoleY", 0},

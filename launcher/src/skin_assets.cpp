@@ -22,6 +22,10 @@ namespace {
 constexpr int kDefaultWidth = 300;
 constexpr int kDefaultHeight = 400;
 
+/// Размер окна установки, когда оформления нет. Тот же, что у образца alt:V.
+constexpr int kDefaultInstallerWidth = 800;
+constexpr int kDefaultInstallerHeight = 600;
+
 /// Разбирает base64 в байты.
 ///
 /// Свой разбор, а не библиотека: base64 — это таблица на 64 знака и сдвиги, и
@@ -199,6 +203,8 @@ SkinAssets SkinAssets::load(const std::filesystem::path& skinFile) {
     SkinAssets assets;
     assets.width = kDefaultWidth;
     assets.height = kDefaultHeight;
+    assets.installerWidth = kDefaultInstallerWidth;
+    assets.installerHeight = kDefaultInstallerHeight;
 
     const std::optional<config::Skin> skin = config::Skin::load(skinFile);
     if (!skin.has_value()) {
@@ -207,6 +213,7 @@ SkinAssets SkinAssets::load(const std::filesystem::path& skinFile) {
 
     assets.name = skin->launcherName.empty() ? skin->gameName : skin->launcherName;
     assets.background = dataUrl(skin->launcherBackground);
+    assets.installerBackground = dataUrl(skin->installerBackground);
 
     if (!skin->primaryColor.empty()) {
         assets.accent = "#" + skin->primaryColor;
@@ -222,6 +229,16 @@ SkinAssets SkinAssets::load(const std::filesystem::path& skinFile) {
     } else if (!skin->launcherBackground.empty()) {
         spdlog::warn("the launcher background did not parse as PNG: the window stays {}x{}", assets.width,
                      assets.height);
+    }
+
+    const std::vector<std::uint8_t> installer = decodeBase64(skin->installerBackground);
+
+    if (const std::optional<ImageSize> size = pngSize(installer)) {
+        assets.installerWidth = size->width;
+        assets.installerHeight = size->height;
+    } else if (!skin->installerBackground.empty()) {
+        spdlog::warn("the installer background did not parse as PNG: the window stays {}x{}",
+                     assets.installerWidth, assets.installerHeight);
     }
 
     if (!skin->icon.empty()) {

@@ -105,7 +105,7 @@ std::filesystem::path findSettings() {
 bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::string& note) {
     const std::filesystem::path settings = findSettings();
     if (settings.empty()) {
-        note = "настройки игры не найдены — игра ещё ни разу не запускалась";
+        note = "the game settings are not there - the game has never been started";
         return true;
     }
 
@@ -113,7 +113,7 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
     {
         std::ifstream file(settings, std::ios::binary);
         if (!file) {
-            note = "настройки игры не читаются";
+            note = "the game settings cannot be read";
             return false;
         }
 
@@ -124,14 +124,14 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
 
     const std::size_t field = findIgnoringCase(contents, kField);
     if (field == std::string::npos) {
-        note = "в настройках игры нет поля оконного режима";
+        note = "the game settings have no window mode field";
         return true;
     }
 
     const std::size_t valueAt = field + kField.size();
     const std::size_t valueEnd = contents.find('"', valueAt);
     if (valueEnd == std::string::npos) {
-        note = "поле оконного режима испорчено";
+        note = "the window mode field is malformed";
         return false;
     }
 
@@ -139,7 +139,7 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
     std::from_chars(contents.data() + valueAt, contents.data() + valueEnd, current);
 
     if (current == static_cast<int>(WindowMode::Borderless)) {
-        note = "игра уже в оконном режиме без рамки";
+        note = "the game is already borderless windowed";
         return true;
     }
 
@@ -162,18 +162,18 @@ bool preferBorderlessWindow(const std::filesystem::path& backupDirectory, std::s
 
     std::ofstream file(settings, std::ios::binary | std::ios::trunc);
     if (!file) {
-        note = "настройки игры не перезаписываются";
+        note = "the game settings cannot be rewritten";
         return false;
     }
 
     file << contents;
     if (!file) {
-        note = "настройки игры записались не полностью";
+        note = "the game settings were written only in part";
         return false;
     }
 
-    note = "игра переведена в оконный режим без рамки (было " + std::to_string(current) +
-           "), копия в backup";
+    note = "switched to borderless windowed (was " + std::to_string(current) +
+           "), a copy is in backup";
 
     spdlog::info("game window mode: {} -> {}, backup {}", current,
                  static_cast<int>(WindowMode::Borderless), backup.string());

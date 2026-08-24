@@ -5,6 +5,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <format>
@@ -23,6 +24,17 @@ namespace {
 /// Игра ставится 32-разрядным установщиком, поэтому её ключ лежит в ветке
 /// WOW6432Node, даже когда сама игра 64-разрядная.
 constexpr const wchar_t* kRegistryPath = L"SOFTWARE\\WOW6432Node\\Rockstar Games\\Grand Theft Auto V";
+
+/// Тот же ключ без WOW6432Node: на некоторых установках он лежит и там.
+constexpr const wchar_t* kRegistryPathNative =
+    L"SOFTWARE\\Rockstar Games\\Grand Theft Auto V";
+
+/// Где Windows держит запись Steam об установленной игре. 271590 — её номер в
+/// магазине Steam; он же стоит в ссылке запуска.
+constexpr const wchar_t* kSteamUninstallPath =
+    L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 271590";
+constexpr const wchar_t* kSteamUninstallPathNative =
+    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 271590";
 
 constexpr const wchar_t* kExecutableName = L"GTA5.exe";
 
@@ -300,7 +312,7 @@ std::optional<GameLocation> gameInDirectory(const std::filesystem::path& directo
 
     std::error_code ec;
     if (!std::filesystem::exists(location.executable, ec)) {
-        error = std::format("в каталоге {} нет GTA5.exe", directory.string());
+        error = std::format("there is no GTA5.exe in {}", directory.string());
         return std::nullopt;
     }
 
@@ -310,13 +322,10 @@ std::optional<GameLocation> gameInDirectory(const std::filesystem::path& directo
     return location;
 }
 
-std::optional<GameLocation> locateGame(std::string& error) {
-    // Куда смотреть. Первый каталог, в котором нашлась GTA5.exe, и берётся: двух
-    // установок одной игры не бывает, а если у человека всё же две, он укажет
-    // нужную ключом --game.
-    //
-    // Название места поиска — не площадка, а лишь пометка для журнала: где
-    // искали и где нашли. Чья это копия, спрашивается потом у самого каталога.
+std::vector<GameLocation> findGames() {
+    // Куда смотреть. Название места — не площадка, а лишь пометка для журнала:
+    // где искали и где нашли. Чья это копия, спрашивается потом у самого
+    // каталога — библиотека площадки лежит в нём и не врёт.
     struct Candidate {
         std::filesystem::path directory;
         std::string origin;
@@ -331,8 +340,23 @@ std::optional<GameLocation> locateGame(std::string& error) {
         candidates.push_back(Candidate{directory, "Rockstar Games Launcher"});
     }
 
-    if (const auto folder = readLocalMachineString(kRegistryPath, L"InstallFolder")) {
-        candidates.push_back(Candidate{*folder, "реестр"});
+    // Три значения в одном ключе реестра, по одному на площадку. Имена не наши:
+    // так их пишет установщик Rockstar, и так их читает alt:V.
+    for (const std::wstring& root : {std::wstring{kRegistryPath},
+                                     std::wstring{kRegistryPathNative}}) {
+        for (const wchar_t* value : {L"InstallFolder", L"InstallFolderSteam", L"InstallFolderEpic"}) {
+            if (const auto folder = readLocalMachineString(root.c_str(), value)) {
+                candidates.push_back(Candidate{*folder, "the registry"});
+            }
+        }
+    }
+
+    // Steam записывает свою копию ещё и туда, где Windows держит список
+    // установленного, — под номером игры в её магазине.
+    for (const wchar_t* uninstall : {kSteamUninstallPath, kSteamUninstallPathNative}) {
+        if (const auto folder = readLocalMachineString(uninstall, L"InstallLocation")) {
+            candidates.push_back(Candidate{*folder, "Steam"});
+        }
     }
 
     for (const std::filesystem::path& library : steamLibraries()) {
@@ -346,27 +370,50 @@ std::optional<GameLocation> locateGame(std::string& error) {
     }
 
     for (const std::filesystem::path& directory : epicInstalls()) {
-        candidates.push_back(Candidate{directory, "Epic Games"});
+        candidates.push_back(Candidate{directory, "Epic Games Store"});
     }
+
+    std::vector<GameLocation> found;
 
     for (const Candidate& candidate : candidates) {
         std::string ignored;
 
-        if (auto location = gameInDirectory(candidate.directory, ignored)) {
-            spdlog::debug("game found through {}", candidate.origin);
-            spdlog::info("Game found ({}): {}", storeName(location->store),
-                         location->directory.string());
-
-            return location;
+        auto location = gameInDirectory(candidate.directory, ignored);
+        if (!location) {
+            continue;
         }
+
+        // Одна и та же копия находится сразу несколькими путями — списком
+        // Rockstar, реестром и библиотекой Steam, — и показать её человеку
+        // трижды значило бы предложить выбор там, где выбора нет.
+        const bool known =
+            std::any_of(found.begin(), found.end(), [&location](const GameLocation& seen) {
+                std::error_code ec;
+                return std::filesystem::equivalent(seen.directory, location->directory, ec);
+            });
+
+        if (known) {
+            continue;
+        }
+
+        spdlog::debug("game found through {}", candidate.origin);
+        spdlog::info("Game found ({}): {}", storeName(location->store),
+                     location->directory.string());
+
+        found.push_back(*location);
     }
 
-    error = candidates.empty()
-                ? "игра не найдена: ни Rockstar, ни Steam, ни Epic о ней не знают.\n"
-                  "Укажите каталог ключом --game."
-                : "игра числится установленной, но GTA5.exe на месте нет.\n"
-                  "Укажите каталог ключом --game.";
+    return found;
+}
 
+std::optional<GameLocation> locateGame(std::string& error) {
+    const std::vector<GameLocation> found = findGames();
+
+    if (!found.empty()) {
+        return found.front();
+    }
+
+    error = "the game was not found: Rockstar, Steam and Epic all know nothing about it";
     return std::nullopt;
 }
 

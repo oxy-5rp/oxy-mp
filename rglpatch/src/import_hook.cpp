@@ -108,14 +108,14 @@ std::unique_ptr<ImportHook> ImportHook::install(void* module, std::string_view f
                                                 void* replacement, std::string& error) {
     const IMAGE_NT_HEADERS* const headers = headersOf(module);
     if (headers == nullptr) {
-        error = "по адресу модуля нет заголовка PE";
+        error = "there is no PE header at the module address";
         return nullptr;
     }
 
     const IMAGE_DATA_DIRECTORY& imports =
         headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (imports.VirtualAddress == 0) {
-        error = "у модуля нет таблицы импорта";
+        error = "the module has no import table";
         return nullptr;
     }
 
@@ -137,7 +137,7 @@ std::unique_ptr<ImportHook> ImportHook::install(void* module, std::string_view f
     }
 
     if (slot == nullptr) {
-        error = std::format("{} не найдена в таблице импорта", function);
+        error = std::format("{} is not in the import table", function);
         return nullptr;
     }
 
@@ -146,7 +146,7 @@ std::unique_ptr<ImportHook> ImportHook::install(void* module, std::string_view f
     hook->original_ = *slot;
 
     if (!writeSlot(slot, replacement)) {
-        error = std::format("не удалось записать в таблицу импорта: код ошибки Windows {}",
+        error = std::format("could not write to the import table: Windows error {}",
                             ::GetLastError());
         return nullptr;
     }

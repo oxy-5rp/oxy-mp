@@ -155,7 +155,7 @@ std::wstring withoutArguments(const std::wstring& commandLine) {
         for (const std::wstring_view name : kStrippedArguments) {
             if (isArgument(word, name)) {
                 stripped = true;
-                spdlog::debug("довод лаунчера {} до игры не доходит",
+                spdlog::debug("launcher argument {} does not reach the game",
                              std::filesystem::path{std::wstring{word}}.string());
                 break;
             }
@@ -229,7 +229,7 @@ std::wstring withLanguage(const std::wstring& commandLine, const std::wstring& l
         result += wanted;
     }
 
-    spdlog::debug("язык игры: {}", std::filesystem::path{language}.string());
+    spdlog::debug("game language: {}", std::filesystem::path{language}.string());
 
     return result;
 }
@@ -266,7 +266,17 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
                                        ? executableFromCommandLine(requestedCommandLine)
                                        : requestedApplication;
 
-    if (::_wcsicmp(executableName(requested).c_str(), kBattlEyeExecutable) != 0) {
+    const std::wstring name = executableName(requested);
+
+    const bool isBattlEyeLink = ::_wcsicmp(name.c_str(), kBattlEyeExecutable) == 0;
+    const bool isGame = ::_wcsicmp(name.c_str(), kGameExecutable) == 0;
+
+    // Ловим оба имени, и это не перестраховка. Довод `-nobattleye`, которым игру
+    // просят запустить, лаунчер понимает сам: получив его, он поднимает GTA5.exe
+    // напрямую, минуя промежуточное звено. Подменять тогда нечего — зато
+    // командную строку всё ещё нужно поправить, иначе выбранный язык до игры не
+    // доедет, а показ Rockstar в Discord затрёт наш.
+    if (!isBattlEyeLink && !isGame) {
         return original(applicationName, commandLine, processAttributes, threadAttributes,
                         inheritHandles, creationFlags, environment, currentDirectory, startup,
                         information);
@@ -278,7 +288,7 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
     const BattlEyeLink::Order order = g_order ? g_order() : BattlEyeLink::Order{};
 
     if (!order.substitute) {
-        spdlog::debug("запуск не наш — звено BattlEye остаётся на месте");
+        spdlog::debug("not our launch: the BattlEye link stays in place");
 
         return original(applicationName, commandLine, processAttributes, threadAttributes,
                         inheritHandles, creationFlags, environment, currentDirectory, startup,
@@ -288,14 +298,17 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
     // Игра лежит там же, где промежуточное звено: подменяем имя файла, оставляя
     // каталог. Своего представления о том, где установлена игра, у нас здесь
     // нет и быть не должно — лаунчер знает это лучше.
+    //
+    // Запускали сразу игру — подменять нечего, и путь остаётся тем же.
     const std::wstring game =
-        (std::filesystem::path{requested}.parent_path() / kGameExecutable).wstring();
+        isGame ? requested
+               : (std::filesystem::path{requested}.parent_path() / kGameExecutable).wstring();
 
-    spdlog::debug("лаунчер запускает {}", std::filesystem::path{requested}.string());
+    spdlog::debug("the launcher is starting {}", std::filesystem::path{requested}.string());
 
     std::error_code ec;
     if (!std::filesystem::exists(game, ec)) {
-        spdlog::error("the game was not found next to the BattlEye link: {} — no patching",
+        spdlog::error("the game was not found next to the BattlEye link: {} - no patching",
                       std::filesystem::path{game}.string());
 
         return original(applicationName, commandLine, processAttributes, threadAttributes,
@@ -310,7 +323,7 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
         replacedCommandLine += L' ';
         replacedCommandLine += kStraightIntoFreemode;
 
-        spdlog::debug("игра пойдёт сразу в сетевой свободный режим, минуя сюжет");
+        spdlog::debug("the game goes straight into online freemode, skipping the story");
     }
 
     // CreateProcessW вправе изменить переданную ей командную строку, поэтому
@@ -327,7 +340,9 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
         return FALSE;
     }
 
-    spdlog::debug("вместо BattlEye запущена игра, процесс {}", information->dwProcessId);
+    spdlog::debug("the game was started {}, process {}",
+                  isGame ? "by the launcher itself" : "instead of BattlEye",
+                  information->dwProcessId);
 
     // Лаунчер получает описатели настоящей игры и дальше следит за ней сам:
     // ради этого подмена и затевалась. Нам остаётся сказать своим, за каким
@@ -344,7 +359,7 @@ BOOL WINAPI createProcessDetour(LPCWSTR applicationName, LPWSTR commandLine,
 std::unique_ptr<BattlEyeLink> BattlEyeLink::install(Reporter report, OrderQuery order,
                                                     std::string& error) {
     if (g_hook != nullptr) {
-        error = "подмена уже стоит";
+        error = "the patch is already in place";
         return nullptr;
     }
 

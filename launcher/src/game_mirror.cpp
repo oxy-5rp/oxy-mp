@@ -163,7 +163,7 @@ std::optional<std::size_t> mirrorTree(const std::filesystem::path& source,
     std::filesystem::create_directories(target, ec);
 
     if (ec) {
-        error = std::format("не удалось создать каталог {}: {}", target.string(), ec.message());
+        error = std::format("could not create the folder {}: {}", target.string(), ec.message());
         return std::nullopt;
     }
 
@@ -192,11 +192,11 @@ std::optional<std::size_t> mirrorTree(const std::filesystem::path& source,
 
         if (!linkEntry(entry.path(), destination, sameVolume, directory, needsAdministrator)) {
             error = needsAdministrator
-                        ? std::string{"Нужны права администратора: без них Windows не даёт "
-                                      "заводить ссылки на чужие файлы.\n"
-                                      "Включённый «режим разработчика» в настройках Windows "
-                                      "снимает это требование навсегда."}
-                        : std::format("не удалось связать {}: код {}", destination.string(),
+                        ? std::string{"Administrator rights are needed: without them Windows "
+                                      "refuses to make links to other people's files.\n"
+                                      "Turning on Developer Mode in Windows settings "
+                                      "lifts that requirement for good."}
+                        : std::format("could not link {}: code {}", destination.string(),
                                       ::GetLastError());
 
             return std::nullopt;
@@ -206,7 +206,7 @@ std::optional<std::size_t> mirrorTree(const std::filesystem::path& source,
     }
 
     if (ec) {
-        error = std::format("не удалось прочитать каталог {}: {}", source.string(), ec.message());
+        error = std::format("could not read the folder {}: {}", source.string(), ec.message());
         return std::nullopt;
     }
 
@@ -256,7 +256,7 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
         // случай нехватки прав, просто замеченный раньше, чем дошло до ссылок.
         needsAdministrator = ec.value() == ERROR_ACCESS_DENIED;
 
-        error = std::format("не удалось создать каталог {}: {}", mirror.string(), ec.message());
+        error = std::format("could not create the folder {}: {}", mirror.string(), ec.message());
         return std::nullopt;
     }
 
@@ -279,7 +279,7 @@ std::optional<GameMirror::Report> GameMirror::prepare(const GameLocation& game,
             const DWORD failure = ::GetLastError();
             needsAdministrator = failure == ERROR_ACCESS_DENIED;
 
-            error = std::format("не удалось скопировать GTA5.exe: код {}", failure);
+            error = std::format("could not copy GTA5.exe: code {}", failure);
             return std::nullopt;
         }
 

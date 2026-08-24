@@ -201,14 +201,14 @@ std::unique_ptr<Browser> Browser::create(HWND window, const std::wstring& userDa
                             ::GetClientRect(state->window, &bounds);
                             controller->put_Bounds(bounds);
 
-                            spdlog::debug("движок интерфейса готов, окно {}x{}",
+                            spdlog::debug("the interface engine is ready, window {}x{}",
                                          bounds.right - bounds.left, bounds.bottom - bounds.top);
 
                             if (!state->pending.empty()) {
                                 const std::wstring wide = widen(state->pending);
                                 const HRESULT shown = state->view->NavigateToString(wide.c_str());
 
-                                spdlog::debug("страница показана: {} символов, код {:#010x}",
+                                spdlog::debug("the page was shown: {} characters, code {:#010x}",
                                              wide.size(), static_cast<std::uint32_t>(shown));
 
                                 state->pending.clear();

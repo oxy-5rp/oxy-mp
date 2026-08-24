@@ -1,20 +1,24 @@
 include(embed_text)
 
 add_executable(oxymp_launcher
+    src/game_choice.cpp
     src/game_locator.cpp
     src/game_mirror.cpp
+    src/game_platform.cpp
     src/game_settings.cpp
     src/game_process.cpp
     src/game_store.cpp
     src/launcher_patch.cpp
     src/launcher_window.cpp
     src/main.cpp
+    src/page_text.cpp
     src/paths.cpp
     src/process_inject.cpp
     src/process_lookup.cpp
     src/registry.cpp
     src/rockstar_launcher.cpp
     src/session.cpp
+    src/setup_window.cpp
     src/skin_assets.cpp
 
     # Значок: лаунчер — это то, что игрок видит в проводнике и на панели задач.
@@ -41,6 +45,10 @@ target_link_options(oxymp_launcher PRIVATE /ENTRY:mainCRTStartup)
 # страница знает только, куда его подставить.
 oxymp_embed_text(oxymp_launcher ui/launcher_page.html launcherPage oxymp::launcher::ui)
 
+# Страница окна установки — того, в котором спрашивают каталог игры и площадку.
+# Показывается один раз, пока в oxymp.toml нет пути к игре.
+oxymp_embed_text(oxymp_launcher ui/setup_page.html setupPage oxymp::launcher::ui)
+
 target_link_libraries(oxymp_launcher PRIVATE
     oxymp::shared
     oxymp::options
@@ -66,6 +74,10 @@ target_link_libraries(oxymp_launcher PRIVATE version)
 # Launcher лежит зашифрованным, и без него не найти копию, купленную в Steam или
 # Epic, — в реестре они записаны под другими именами значений.
 target_link_libraries(oxymp_launcher PRIVATE bcrypt)
+
+# Окно выбора каталога в установке. IFileOpenDialog живёт в оболочке Windows, а
+# заводится он через COM — отсюда обе библиотеки.
+target_link_libraries(oxymp_launcher PRIVATE ole32 shell32)
 
 # Лаунчер бесполезен без того, что он внедряет: модуля в игру, подмены звена
 # BattlEye в лаунчер Rockstar и хозяйства Chromium, которым модуль рисует

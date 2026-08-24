@@ -4,11 +4,13 @@
 // В каталог игры ничего не записывается: все файлы проекта лежат рядом с этим
 // исполняемым файлом, а настройки уезжают в игру переменными окружения.
 
+#include "game_choice.hpp"
 #include "game_locator.hpp"
 #include "game_mirror.hpp"
 #include "launcher_window.hpp"
 #include "paths.hpp"
 #include "session.hpp"
+#include "setup_window.hpp"
 
 #include <oxymp/config/settings.hpp>
 #include <oxymp/shared/protocol/protocol_version.hpp>
@@ -18,6 +20,7 @@
 
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -26,66 +29,75 @@
 namespace {
 
 void printUsage() {
-    std::cerr << "Использование:\n"
-                 "  oxymp [--server <адрес:порт>] [--nickname <имя>]\n"
-                 "        [--game <каталог игры>] [--client <путь к модулю>]\n"
-                 "        [--direct | --attach | --standalone] [--freemode]\n"
+    std::cerr << "Usage:\n"
+                 "  oxymp [--server <address:port>] [--nickname <name>]\n"
+                 "        [--game <game folder>] [--client <module path>]\n"
+                 "        [--setup] [--direct | --attach | --standalone] [--freemode]\n"
                  "        [--netgame | --netgame-full] [--session] [--no-ui]\n\n"
-                 "  (по умолчанию) показать окно лаунчера и запустить игру. Игра\n"
-                 "             запускается через Rockstar Games Launcher, но вместо\n"
-                 "             GTA5_BE.exe тот поднимает сразу GTA5.exe: игра числится\n"
-                 "             запущенной, BattlEye не встаёт. Сервер при этом не\n"
-                 "             называется: его выбирают в меню внутри игры, по F1.\n"
-                 "  --server   идти к названному серверу, не спрашивая меню. Для скриптов\n"
-                 "             и проверок: в игре меню нажимать некому.\n"
-                 "  --no-ui    не показывать окно, запустить сразу — для скриптов.\n"
-                 "  --direct   запустить GTA5.exe напрямую, без лаунчера Rockstar. BattlEye\n"
-                 "             тоже не встаёт, но лаунчер об игре не знает и не показывает\n"
-                 "             её запущенной. Запасной путь на случай поломки основного.\n"
-                 "  --attach   не запускать игру, а внедриться в уже запущенный GTA5.exe.\n"
-                 "  --standalone  запускать свою копию игры вместо установленной. GTA5.exe\n"
-                 "             закрепляется в папке oxymp-backup внутри игры, остальное\n"
-                 "             связывается жёсткими ссылками и места не занимает. Смысл в\n"
-                 "             том, что обновление Rockstar меняет установленную игру, а\n"
-                 "             закреплённая остаётся той, под которую написаны сигнатуры.\n"
-                 "             Включает прямой запуск: закреплённую копию поднять нечем\n"
-                 "             больше.\n"
-                 "  --freemode вести игру сразу в сетевой свободный режим, минуя сюжет.\n"
-                 "             Путь, которым oxyMP пойдёт, когда научится подставлять игре\n"
-                 "             сессию. Пока не научился, игра по нему остаётся на вечной\n"
-                 "             загрузке GTA Online.\n"
-                 "  --netgame  подделать игре признак установившейся сетевой игры. Разведка:\n"
-                 "             от него ветвятся пауза, карта, население и порядок смерти,\n"
-                 "             но объектов сессии за ним нет, и вылет — ожидаемый исход.\n"
-                 "             Что изменилось, видно в журнале клиента.\n"
-                 "  --netgame-full  то же плюс промежуточное «подключаемся». Этот признак\n"
-                 "             ближе к машине состояний сессии, и спрос с него строже.\n"
-                 "  --session  попросить игру поднять настоящую сетевую сессию её же\n"
-                 "             функцией. В отличие от --netgame признак выставит сама игра,\n"
-                 "             вместе с объектами сессии — тем, чего подделке не хватало.\n"
-                 "             Вызов пока вслепую: что игра сделает без живого слоя\n"
-                 "             Rockstar Online, заранее не известно.\n";
+                 "  (default)  show the launcher window and start the game the same way\n"
+                 "             alt:V does: the platform the game was bought on is asked to\n"
+                 "             start it (Rockstar Games Launcher, Steam or Epic Games Store),\n"
+                 "             BattlEye is kept out with -nobattleye, and GTA5.exe is then\n"
+                 "             found by name. The server is not named here - it is picked in\n"
+                 "             the in-game menu, F1.\n"
+                 "  --setup    ask for the GTA V folder and the platform again, even if they\n"
+                 "             are already written in oxymp.toml.\n"
+                 "  --server   go straight to the named server instead of opening the menu.\n"
+                 "             For scripts and tests, where nobody is there to press a key.\n"
+                 "  --no-ui    do not show the window, just start - for scripts.\n"
+                 "  --direct   start GTA5.exe ourselves instead of asking the platform. The\n"
+                 "             platform then does not know the game is running. Kept for the\n"
+                 "             pinned copy and for when the normal path misbehaves.\n"
+                 "  --attach   do not start the game, inject into a running GTA5.exe.\n"
+                 "  --standalone  run a pinned copy of the game instead of the installed one.\n"
+                 "             GTA5.exe is pinned inside the oxymp-backup folder, the rest is\n"
+                 "             hard-linked and takes no space. The point is that a Rockstar\n"
+                 "             update changes the installed game, while the pinned one stays\n"
+                 "             the build the signatures were written for.\n"
+                 "  --freemode start the game straight into online freemode, skipping the\n"
+                 "             story. The road oxyMP takes once it can hand the game a\n"
+                 "             session. Until then the game sits on the GTA Online loading\n"
+                 "             screen forever.\n"
+                 "  --netgame  fake the 'network game is up' flag for the game. Recon: pause,\n"
+                 "             map, population and the order of death all branch off it, but\n"
+                 "             the session objects behind it are missing, and a crash is the\n"
+                 "             expected outcome. What changed is in the client log.\n"
+                 "  --netgame-full  the same plus the intermediate 'connecting' state. That\n"
+                 "             flag sits closer to the session state machine and is stricter.\n"
+                 "  --session  ask the game to bring up a real network session with its own\n"
+                 "             function. Unlike --netgame the flag is set by the game itself,\n"
+                 "             together with the session objects the fake was missing.\n";
 }
 
-/// Язык, на котором просят запустить игру, из настроек рядом с лаунчером.
+/// Что лаунчер берёт из настроек рядом с собой.
 ///
-/// Пусто, если настройка не заполнена, — тогда язык остаётся тем, что назначил
-/// лаунчер Rockstar.
-///
-/// Файл тот же, что правит меню внутри игры: настройка одна на обоих, и второй
-/// такой же файл был бы вторым местом, где её ищут.
-std::wstring gameLanguage(const oxymp::launcher::Paths& paths) {
+/// Читается один раз: файл общий с меню внутри игры, и второе его чтение было бы
+/// вторым местом, где решают, что в нём написано.
+struct LauncherSettings {
+    /// На каком языке просить игру запуститься: `ru-RU`, `en-US`.
+    ///
+    /// Пусто, если настройка не заполнена, — тогда язык остаётся тем, что
+    /// назначил лаунчер Rockstar.
+    std::wstring gameLanguage;
+
+    /// Писать ли в журнал подробности. Настройка `debug`, та же, что у alt:V.
+    bool verbose = false;
+};
+
+LauncherSettings readLauncherSettings(const oxymp::launcher::Paths& paths) {
     const oxymp::config::Settings settings =
         oxymp::config::Settings::load(paths.root / "oxymp.toml");
 
-    const std::string chosen = settings.text("gameLanguage");
-    if (chosen.empty()) {
-        return {};
-    }
+    LauncherSettings chosen;
+    chosen.verbose = settings.flag("debug");
+
+    const std::string language = settings.text("gameLanguage");
 
     // Название языка — латиница и дефис (`ru-RU`), так что расширение до
     // широких знаков посимвольно здесь честно и не портит ничего.
-    return std::wstring{chosen.begin(), chosen.end()};
+    chosen.gameLanguage = std::wstring{language.begin(), language.end()};
+
+    return chosen;
 }
 
 } // namespace
@@ -112,10 +124,20 @@ int main(int argc, char** argv) {
     // Язык игры берётся из тех же настроек, что правит меню внутри игры, — и
     // читает их лаунчер, а не клиент. Иначе и нельзя: игре язык называют при
     // запуске, а к тому мгновению клиента ещё нет.
-    settings.gameLanguage = gameLanguage(paths);
+    const LauncherSettings chosen = readLauncherSettings(paths);
+
+    settings.gameLanguage = chosen.gameLanguage;
+    settings.verbose = chosen.verbose;
+
+    // Подробности в журнале включаются настройкой, а не сборкой, и это не
+    // мелочь: строки уровня `debug` в коде были всегда, а увидеть их не мог
+    // никто — уровень не выставлялся вовсе. Разбираться в чужой поломке было
+    // не по чему.
+    spdlog::set_level(chosen.verbose ? spdlog::level::debug : spdlog::level::info);
 
     bool showWindow = true;
     bool prepareMirrorOnly = false;
+    bool askAgain = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
@@ -142,6 +164,8 @@ int main(int argc, char** argv) {
             settings.networkGameFake = "full";
         } else if (argument == "--direct") {
             settings.launchMode = oxymp::launcher::LaunchMode::Direct;
+        } else if (argument == "--setup") {
+            askAgain = true;
         } else if (argument == "--standalone") {
             // Прямой запуск включается заодно, а не требуется отдельным ключом:
             // закреплённую копию поднять больше нечем, и заставлять человека
@@ -164,16 +188,90 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (!showWindow) {
+        // Лаунчер объявлен оконным, и своей консоли у него нет вовсе — чёрное
+        // окно больше не мигает при запуске. Но запущенный из командной строки
+        // он обязан в неё же и говорить, иначе вывод пропадает бесследно.
+        //
+        // Подключаемся к консоли того, кто нас позвал. Позвали не из консоли —
+        // подключаться не к чему, и это не ошибка.
+        if (::AttachConsole(ATTACH_PARENT_PROCESS) != 0) {
+            FILE* stream = nullptr;
+            ::freopen_s(&stream, "CONOUT$", "w", stdout);
+            ::freopen_s(&stream, "CONOUT$", "w", stderr);
+        }
+    } else {
+        // Журнал уходит в файл: окна консоли у оконного приложения нет, а
+        // разбираться в том, что пошло не так у игрока, по чему-то надо.
+        //
+        // Заводится до окна установки, а не после: оно тоже пишет в журнал, и
+        // потерять его записи значило бы остаться без объяснений ровно там, где
+        // они нужнее всего — при первом знакомстве.
+        try {
+            auto logger = spdlog::basic_logger_mt("launcher",
+                                                  (paths.logs() / "launcher.log").string(), true);
+            logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
+            logger->flush_on(spdlog::level::debug);
+            logger->set_level(chosen.verbose ? spdlog::level::debug : spdlog::level::info);
+            spdlog::set_default_logger(std::move(logger));
+        } catch (const spdlog::spdlog_ex&) {
+            // Без журнала лаунчер работает, падать из-за него — нельзя.
+        }
+    }
+
+    // Где лежит игра, спрашивается один раз и записывается в oxymp.toml. Поиск
+    // при каждом запуске был ошибкой: одна и та же работа повторялась, исход её
+    // зависел от чужих файлов, и человек не мог ни поправить его, ни узнать
+    // заранее. Порядок здесь такой:
+    //
+    //   --game       сказано прямо, значит спорить не с чем;
+    //   oxymp.toml   уже выбрано однажды;
+    //   окно         не выбрано ещё ни разу — спрашиваем и записываем.
+    if (settings.gameDirectory.empty()) {
+        std::optional<oxymp::launcher::GameLocation> game;
+
+        if (!askAgain) {
+            game = oxymp::launcher::chosenGame(paths.root / "oxymp.toml");
+        }
+
+        if (!game) {
+            if (showWindow) {
+                game = oxymp::launcher::SetupWindow::ask(paths);
+            } else {
+                // Без окна спросить некого, и единственное, что остаётся, — найти
+                // игру самим. Найденное сразу же записывается: следующий запуск
+                // искать уже не будет.
+                std::string error;
+
+                game = oxymp::launcher::locateGame(error);
+                if (!game) {
+                    spdlog::error("{}", error);
+                    spdlog::error("Pass --game <folder>, or run oxymp.exe with no arguments "
+                                  "to pick it");
+                    return 1;
+                }
+
+                oxymp::launcher::rememberGame(paths.root / "oxymp.toml", *game);
+            }
+        }
+
+        if (!game) {
+            // Окно установки закрыли, ничего не выбрав. Запускать нечего, и это
+            // не поломка: человек передумал.
+            return 1;
+        }
+
+        settings.gameDirectory = game->directory;
+        settings.gameStore = game->store;
+    }
+
     if (prepareMirrorOnly) {
         // Этот запуск идёт с правами администратора и не делает ничего, кроме
         // сборки копии. Ни игры, ни сети, ни окна: чем меньше сделано с правами,
         // тем меньше их достанется тому, кому они не нужны.
         std::string error;
 
-        const auto installed = settings.gameDirectory.empty()
-                                   ? oxymp::launcher::locateGame(error)
-                                   : oxymp::launcher::gameInDirectory(settings.gameDirectory,
-                                                                      error);
+        const auto installed = oxymp::launcher::gameInDirectory(settings.gameDirectory, error);
         if (!installed) {
             spdlog::error("{}", error);
             return 1;
@@ -193,33 +291,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (!showWindow) {
-        // Лаунчер объявлен оконным, и своей консоли у него нет вовсе — чёрное
-        // окно больше не мигает при запуске. Но запущенный из командной строки
-        // он обязан в неё же и говорить, иначе вывод пропадает бесследно.
-        //
-        // Подключаемся к консоли того, кто нас позвал. Позвали не из консоли —
-        // подключаться не к чему, и это не ошибка.
-        if (::AttachConsole(ATTACH_PARENT_PROCESS) != 0) {
-            FILE* stream = nullptr;
-            ::freopen_s(&stream, "CONOUT$", "w", stdout);
-            ::freopen_s(&stream, "CONOUT$", "w", stderr);
-        }
-    }
-
     if (showWindow) {
-        // Журнал уходит в файл: окна консоли у оконного приложения нет, а
-        // разбираться в том, что пошло не так у игрока, по чему-то надо.
-        try {
-            auto logger = spdlog::basic_logger_mt("launcher",
-                                                  (paths.logs() / "launcher.log").string(), true);
-            logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
-            logger->flush_on(spdlog::level::debug);
-            spdlog::set_default_logger(std::move(logger));
-        } catch (const spdlog::spdlog_ex&) {
-            // Без журнала лаунчер работает, падать из-за него — нельзя.
-        }
-
         return oxymp::launcher::LauncherWindow::run(paths, std::move(settings));
     }
 

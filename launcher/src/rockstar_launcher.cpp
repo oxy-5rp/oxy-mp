@@ -15,10 +15,6 @@ constexpr const wchar_t* kRegistryPath = L"SOFTWARE\\WOW6432Node\\Rockstar Games
 
 constexpr const wchar_t* kLauncherExecutableName = L"Launcher.exe";
 
-/// Пускатель Rockstar в каталоге игры. Сам ничего не решает: разыскивает
-/// Rockstar Games Launcher и передаёт запуск ему.
-constexpr const wchar_t* kStarterName = L"PlayGTAV.exe";
-
 /// Канал, который лаунчер держит открытым, пока готов обслуживать игры.
 ///
 /// Имя выяснено наблюдением за работающим лаунчером. Внутри GTA5.exe лежит ещё
@@ -51,7 +47,7 @@ bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& erro
 
     const auto installFolder = readLocalMachineString(kRegistryPath, L"InstallFolder");
     if (!installFolder) {
-        error = "Rockstar Games Launcher не найден в реестре — без него игра не запустится";
+        error = "Rockstar Games Launcher is not in the registry - the game will not start without it";
         return false;
     }
 
@@ -60,7 +56,7 @@ bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& erro
 
     std::error_code ec;
     if (!std::filesystem::exists(executable, ec)) {
-        error = std::format("Rockstar Games Launcher не найден: {}", executable.string());
+        error = std::format("Rockstar Games Launcher not found: {}", executable.string());
         return false;
     }
 
@@ -74,7 +70,7 @@ bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& erro
     if (::CreateProcessW(executable.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE,
                          0, nullptr, executable.parent_path().wstring().c_str(), &startup,
                          &information) == FALSE) {
-        error = std::format("не удалось запустить Rockstar Games Launcher: код ошибки Windows {}",
+        error = std::format("could not start Rockstar Games Launcher: Windows error {}",
                             ::GetLastError());
         return false;
     }
@@ -94,40 +90,8 @@ bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& erro
         ::Sleep(kPollIntervalMs);
     }
 
-    error = "Rockstar Games Launcher запущен, но так и не начал отвечать";
+    error = "Rockstar Games Launcher started but never began answering";
     return false;
-}
-
-bool startGameThroughLauncher(const GameLocation& location, std::string& error) {
-    const std::filesystem::path starter = location.directory / kStarterName;
-
-    std::error_code ec;
-    if (!std::filesystem::exists(starter, ec)) {
-        error = std::format("пускатель игры не найден: {}", starter.string());
-        return false;
-    }
-
-    std::wstring commandLine = L"\"" + starter.wstring() + L"\"";
-
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-
-    PROCESS_INFORMATION information{};
-
-    if (::CreateProcessW(starter.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
-                         nullptr, location.directory.wstring().c_str(), &startup,
-                         &information) == FALSE) {
-        error = std::format("не удалось запустить {}: код ошибки Windows {}",
-                            starter.filename().string(), ::GetLastError());
-        return false;
-    }
-
-    // Пускатель заканчивает работу сразу, передав просьбу лаунчеру: держать его
-    // описатели незачем, игру он не создаёт.
-    ::CloseHandle(information.hThread);
-    ::CloseHandle(information.hProcess);
-
-    return true;
 }
 
 } // namespace oxymp::launcher

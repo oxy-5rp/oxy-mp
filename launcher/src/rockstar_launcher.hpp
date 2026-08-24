@@ -1,7 +1,5 @@
 #pragma once
 
-#include "game_locator.hpp"
-
 #include <chrono>
 #include <string>
 
@@ -21,16 +19,5 @@ namespace oxymp::launcher {
 /// Вход в учётную запись при этом не проверяется и проверен быть не может:
 /// об отсутствии прав на игру сообщает уже сама игра.
 [[nodiscard]] bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& error);
-
-/// Просит Rockstar Games Launcher запустить игру.
-///
-/// Просит, а не запускает: PlayGTAV.exe — это пускатель, который сам ничего не
-/// решает, а передаёт просьбу работающему лаунчеру. Процесс игры создаёт
-/// лаунчер, поэтому описателей нам отсюда не достаётся — номер запущенного
-/// процесса приходит от подмены звена BattlEye, которая стоит внутри лаунчера.
-///
-/// Именно этим путём игра и должна запускаться: лаунчер следит за тем
-/// процессом, который создал сам, и только так показывает игру запущенной.
-[[nodiscard]] bool startGameThroughLauncher(const GameLocation& location, std::string& error);
 
 } // namespace oxymp::launcher

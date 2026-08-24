@@ -28,7 +28,7 @@ shared::LaunchHandoff& handoffOf(void* pointer) {
 std::string failureText(const shared::LaunchHandoff& handoff) {
     const std::string reported = handoff.error;
 
-    return reported.empty() ? "подмена не сообщила причины" : reported;
+    return reported.empty() ? "the patch gave no reason" : reported;
 }
 
 } // namespace
@@ -39,7 +39,7 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
                                                       std::string& error) {
     const std::uint32_t launcher = findProcessByName(kRockstarLauncherName);
     if (launcher == 0) {
-        error = "Rockstar Games Launcher не запущен — подменять звено BattlEye негде";
+        error = "Rockstar Games Launcher is not running - nowhere to replace the BattlEye link";
         return nullptr;
     }
 
@@ -52,7 +52,7 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
         ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                              sizeof(shared::LaunchHandoff), shared::kLaunchHandoffName);
     if (patch->mapping_ == nullptr) {
-        error = std::format("не удалось завести общий блок: код ошибки Windows {}",
+        error = std::format("could not create the shared block: Windows error {}",
                             ::GetLastError());
         return nullptr;
     }
@@ -60,7 +60,7 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
     patch->handoff_ = ::MapViewOfFile(patch->mapping_, FILE_MAP_ALL_ACCESS, 0, 0,
                                       sizeof(shared::LaunchHandoff));
     if (patch->handoff_ == nullptr) {
-        error = std::format("не удалось отобразить общий блок: код ошибки Windows {}",
+        error = std::format("could not map the shared block: Windows error {}",
                             ::GetLastError());
         return nullptr;
     }
@@ -83,6 +83,7 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
     // готовности, которую уже некому объявить.
     handoff.gameProcessId.store(0);
     handoff.straightIntoFreemode.store(order.straightIntoFreemode ? 1U : 0U);
+    handoff.verbose.store(order.verbose ? 1U : 0U);
 
     // Взводим последним: с этого мгновения ближайший запуск игры будет наш.
     handoff.armed.store(1);
@@ -90,8 +91,8 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
 
     const HANDLE process = ::OpenProcess(kInjectAccess, FALSE, launcher);
     if (process == nullptr) {
-        error = std::format("Rockstar Games Launcher найден, но доступ к нему закрыт: "
-                            "код ошибки Windows {}",
+        error = std::format("Rockstar Games Launcher was found, but access to it is denied: "
+                            "Windows error {}",
                             ::GetLastError());
         return nullptr;
     }
@@ -102,7 +103,7 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
     ::CloseHandle(process);
 
     if (!injected) {
-        error = "не удалось внедрить подмену в Rockstar Games Launcher: " + error;
+        error = "could not inject the patch into Rockstar Games Launcher: " + error;
         return nullptr;
     }
 
@@ -116,12 +117,12 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
         }
 
         if (state == shared::LaunchState::Failed) {
-            error = "подмена звена BattlEye не встала: " + failureText(handoff);
+            error = "the BattlEye link patch did not take: " + failureText(handoff);
             return nullptr;
         }
 
         if (std::chrono::steady_clock::now() >= deadline) {
-            error = "подмена звена BattlEye не отозвалась";
+            error = "the BattlEye link patch never answered";
             return nullptr;
         }
 
@@ -129,29 +130,8 @@ std::unique_ptr<LauncherPatch> LauncherPatch::install(const std::filesystem::pat
     }
 }
 
-std::uint32_t LauncherPatch::waitForGame(std::chrono::seconds timeout, std::string& error) {
-    shared::LaunchHandoff& handoff = handoffOf(handoff_);
-
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-
-    for (;;) {
-        if (const std::uint32_t game = handoff.gameProcessId.load(); game != 0) {
-            return game;
-        }
-
-        if (static_cast<shared::LaunchState>(handoff.state.load()) ==
-            shared::LaunchState::Failed) {
-            error = "запуск игры сорвался: " + failureText(handoff);
-            return 0;
-        }
-
-        if (std::chrono::steady_clock::now() >= deadline) {
-            error = "лаунчер Rockstar так и не запустил игру — проверьте, что в нём выполнен вход";
-            return 0;
-        }
-
-        ::Sleep(static_cast<DWORD>(kPollInterval.count()));
-    }
+std::uint32_t LauncherPatch::startedGame() const {
+    return handoffOf(handoff_).gameProcessId.load();
 }
 
 LauncherPatch::~LauncherPatch() {

@@ -2,10 +2,12 @@
 
 #include "game_locator.hpp"
 #include "game_mirror.hpp"
+#include "game_platform.hpp"
 #include "game_settings.hpp"
 #include "game_store.hpp"
 #include "launcher_patch.hpp"
 #include "rockstar_launcher.hpp"
+#include "text.hpp"
 
 #include <oxymp/gamesig/catalog.hpp>
 
@@ -81,7 +83,7 @@ std::filesystem::path localApplicationData() {
 bool buildMirrorElevated(const Session::Settings& settings, std::string& error) {
     wchar_t self[MAX_PATH]{};
     if (::GetModuleFileNameW(nullptr, self, MAX_PATH) == 0) {
-        error = "не удалось узнать собственный путь";
+        error = "could not read our own path";
         return false;
     }
 
@@ -105,9 +107,9 @@ bool buildMirrorElevated(const Session::Settings& settings, std::string& error) 
         // Отказ от прав — не поломка, а решение человека, и говорить о нём надо
         // так же.
         error = ::GetLastError() == ERROR_CANCELLED
-                    ? "Без прав администратора свою копию игры не собрать.\n"
-                      "Либо подтвердите запрос Windows, либо запускайте без --standalone."
-                    : "не удалось запросить права администратора";
+                    ? "The pinned copy cannot be built without administrator rights.\n"
+                      "Confirm the Windows prompt, or run without --standalone."
+                    : "could not ask for administrator rights";
         return false;
     }
 
@@ -118,7 +120,7 @@ bool buildMirrorElevated(const Session::Settings& settings, std::string& error) 
     ::CloseHandle(request.hProcess);
 
     if (code != 0) {
-        error = "сборка своей копии игры не удалась — подробности в журнале лаунчера";
+        error = "the pinned copy could not be built - see the launcher log";
         return false;
     }
 
@@ -159,7 +161,7 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         !setEnvironment(L"OXYMP_NETGAME", settings.networkGameFake) ||
         !setEnvironment(L"OXYMP_SESSION",
                         settings.hostSession ? (settings.sessionRaw ? "raw" : "1") : "0")) {
-        report(Progress::Failed, "Не удалось передать настройки игре");
+        report(Progress::Failed, "Could not pass the settings to the game");
         return nullptr;
     }
     writeSessionFile(settings.server, settings.nickname);
@@ -179,7 +181,7 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
     }
 
     if (settings.attach) {
-        report(Progress::Working, "Ищем запущенную игру");
+        report(Progress::Working, "Looking for a running game");
 
         auto game = GameProcess::attach(kProcessTimeout, error);
         if (!game) {
@@ -187,35 +189,52 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
             return nullptr;
         }
 
-        report(Progress::Working, "Игра найдена, внедряем модуль");
+        report(Progress::Working, "Game found, injecting the client");
 
         if (!game->injectWithRetries(settings.clientModule, kInjectTimeout, error)) {
-            report(Progress::Failed, "Не удалось внедрить модуль: " + error);
+            spdlog::error("{}: {}", text::kErrFailedToInject, error);
+
+            report(Progress::Failed, text::kErrFailedToInject);
             return nullptr;
         }
 
-        report(Progress::Ready, "Модуль внедрён, игра ваша");
+        report(Progress::Ready, "Injected");
         return game;
     }
+
+    report(Progress::Working, text::kCheckingPreconditions);
 
     // Вторую копию игра не поднимет: сессия Rockstar остаётся у первой, и новая
     // показывает «отсоединено». Молча запускать её — значит подсунуть
     // пользователю окно, которое выглядит сломанным без объяснений.
     if (std::string ignored; GameProcess::attach(std::chrono::seconds{0}, ignored)) {
-        report(Progress::Failed,
-               "GTA5.exe уже запущена.\nЗакройте её и попробуйте снова.");
+        report(Progress::Failed, text::kGtavAlreadyRunning);
         return nullptr;
     }
 
-    report(Progress::Working, "Ищем установленную игру");
+    // Игру здесь не разыскивают. Путь к ней — настройка `gtapath`, спрошенная
+    // один раз в окне установки; сюда он приходит готовым. Поиск при каждом
+    // запуске был ошибкой: он повторял одну и ту же работу, зависел от чужих
+    // файлов и не давал человеку ни поправить исход, ни узнать его заранее.
+    if (settings.gameDirectory.empty()) {
+        report(Progress::Failed,
+               "GTA V folder is not set.\nRun oxymp.exe with no arguments to pick it.");
+        return nullptr;
+    }
 
-    const auto installed = settings.gameDirectory.empty()
-                               ? locateGame(error)
-                               : gameInDirectory(settings.gameDirectory, error);
+    auto installed = gameInDirectory(settings.gameDirectory, error);
     if (!installed) {
         report(Progress::Failed, error);
         return nullptr;
     }
+
+    // Площадка, выбранная человеком, сильнее признаков в каталоге: выбирал он
+    // сам, и решать за него молча незачем.
+    if (settings.gameStore.has_value()) {
+        installed->store = *settings.gameStore;
+    }
+
+    spdlog::info("Game: {} ({})", installed->directory.string(), storeName(installed->store));
 
     // Версия сверяется здесь, до всего остального, и это не придирка.
     //
@@ -228,10 +247,10 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
     // причинам, к сборке отношения не имеющим, и тогда пусть решает клиент.
     if (!installed->version.empty() && installed->version != gamesig::kTargetGameVersion) {
         report(Progress::Failed,
-               std::format("У вас GTA V версии {}, а oxyMP собран под {}.\n\n"
-                           "Это не поправимо настройками: клиент узнаёт игру по её коду, "
-                           "а у другой сборки код другой.\n"
-                           "Нужна ровно та версия — либо новая сборка oxyMP под вашу.",
+               std::format("This is GTA V {}, but oxyMP is built for {}.\n\n"
+                           "No setting can bridge that: the client recognises the game by "
+                           "its code, and another build has other code.\n"
+                           "Install that exact version, or build oxyMP for yours.",
                            installed->version, gamesig::kTargetGameVersion));
         return nullptr;
     }
@@ -241,7 +260,7 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
     // игра закрывается, не дойдя до загрузки, и человек видит только мигнувшее
     // окно, а причину — нигде.
     if (installed->store != GameStore::Rockstar) {
-        report(Progress::Working, std::format("Готовим {}", storeName(installed->store)));
+        report(Progress::Working, std::format("Preparing {}", storeName(installed->store)));
     }
 
     if (!ensureStoreReady(installed->store, kStoreTimeout, error)) {
@@ -252,7 +271,7 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
     std::optional<GameLocation> location = installed;
 
     if (settings.standalone) {
-        report(Progress::Working, "Готовим свою копию игры");
+        report(Progress::Working, text::kValidatingBackup);
 
         // Рядом с oxymp.exe, в его же папке backup: человек видит, где лежит его
         // копия игры, и удаляет её вместе с модом, а не разыскивает по системе.
@@ -272,7 +291,7 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         // Поэтому под правами делается только то, ради чего они нужны: ссылки на
         // файлы игры. Сама игра запускается обычным порядком.
         if (!mirror && needsAdministrator) {
-            report(Progress::Working, "Нужны права администратора — подтвердите запрос Windows");
+            report(Progress::Working, "Administrator rights are needed - confirm the Windows prompt");
 
             if (!buildMirrorElevated(settings, error)) {
                 report(Progress::Failed, error);
@@ -290,15 +309,14 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         location = mirror->location;
 
         if (mirror->gameUpdated) {
-            report(Progress::Working, "Игра обновилась — запускаем закреплённую копию");
+            report(Progress::Working, "The game was updated - starting the pinned copy");
         }
     }
 
     // Права на игру выдаёт лаунчер Rockstar, и спрашивают их в первые же
-    // мгновения после старта. Поэтому лаунчер поднимается до игры: иначе она
-    // закроется с ERR_NO_LAUNCHER, не дойдя до загрузки.
-    report(Progress::Working, "Готовим Rockstar Games Launcher");
-
+    // мгновения после старта — на всех трёх площадках, а не только у себя.
+    // Поэтому лаунчер поднимается до игры: иначе она закроется с
+    // ERR_NO_LAUNCHER, не дойдя до загрузки.
     if (!ensureRockstarLauncherReady(kLauncherTimeout, error)) {
         report(Progress::Failed, error);
         return nullptr;
@@ -306,69 +324,102 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
 
     std::unique_ptr<GameProcess> game;
 
-    // Закреплённую копию поднять может только прямой запуск: лаунчер Rockstar
-    // запускает свою игру, и сказать ему про другой файл нечем. Ключ --standalone
-    // поэтому и включает прямой запуск — здесь это лишь соблюдается.
     if (settings.launchMode == LaunchMode::Direct) {
-        report(Progress::Working, settings.standalone ? "Запускаем свою копию игры"
-                                                      : "Запускаем игру напрямую");
+        // Прямой запуск нужен закреплённой копии: площадка запускает свою игру,
+        // и сказать ей про другой файл нечем. Он же остаётся под рукой на
+        // случай, когда путь через площадку почему-то не работает.
+        report(Progress::Working, settings.standalone ? "Starting the pinned copy of the game"
+                                                      : text::kStartingGtav);
 
-        game = GameProcess::launchDirectly(*location, error);
+        game = GameProcess::launchDirectly(*location,
+                                           GameProcess::Arguments{
+                                               .language = settings.gameLanguage,
+                                               .straightIntoFreemode = settings.straightIntoFreemode,
+                                           },
+                                           error);
         if (!game) {
-            report(Progress::Failed, error);
+            report(Progress::Failed, std::string{text::kErrGameStart} + ": " + error);
             return nullptr;
         }
     } else {
-        // Подмена ставится до просьбы запустить игру, а не после: лаунчер
+        // Подмена ставится до просьбы запустить игру, а не после: площадка
         // создаёт процесс сразу, и опоздать здесь значит выпустить BattlEye.
-        report(Progress::Working, "Убираем BattlEye из запуска");
+        //
+        // Она стоит и тогда, когда игру поднимает не лаунчер Rockstar. Довод
+        // `-nobattleye` защиту и так не пускает, но у копии из Steam или Epic
+        // командную строку составляет площадка, и второй рубеж здесь не роскошь.
+        // Заодно им же доезжает до игры выбранный язык — там, где игру
+        // запускает лаунчер Rockstar.
+        report(Progress::Working, text::kInjectingLauncherPatches);
 
         auto patch = LauncherPatch::install(settings.launcherPatch,
                                             LauncherPatch::Order{
                                                 .logDirectory = settings.logDirectory,
                                                 .straightIntoFreemode = settings.straightIntoFreemode,
+                                                .verbose = settings.verbose,
                                                 .gameLanguage = settings.gameLanguage,
                                             },
                                             kPatchTimeout, error);
         if (!patch) {
+            spdlog::error("{}: {}", text::kErrFailedToPatchLauncher, error);
+
+            report(Progress::Failed, text::kErrFailedToPatchLauncher);
+            return nullptr;
+        }
+
+        report(Progress::Working, text::kStartingGtav);
+
+        if (!startGameThroughPlatform(*location, error)) {
             report(Progress::Failed, error);
             return nullptr;
         }
 
-        report(Progress::Working, "Просим Rockstar Games Launcher запустить игру");
+        // Процесс разыскивается по имени, а не берётся у подмены, и это главное
+        // изменение против того, как было. Прежде номер приходил от перехвата
+        // внутри Launcher.exe — и приходил только у копии Rockstar: игру из
+        // Steam или Epic лаунчер не создаёт сам, перехват не срабатывает ни
+        // разу, и лаунчер oxyMP молча ждал три минуты, пока рядом шла обычная
+        // GTA V. По имени процесс находится у всех трёх; так же поступает alt:V.
+        game = GameProcess::attach(kProcessTimeout, error);
 
-        if (!startGameThroughLauncher(*location, error)) {
-            report(Progress::Failed, error);
-            return nullptr;
-        }
+        // Сработал перехват или нет — видно только здесь, и знать это нужно:
+        // у копии из Steam или Epic он не срабатывает вовсе, и разбираться,
+        // почему у игры оказался BattlEye, придётся по этой строке.
+        spdlog::debug("the BattlEye link patch {}",
+                      patch->startedGame() != 0 ? "started the game itself"
+                                                : "never fired: the platform started the game");
 
-        const std::uint32_t started = patch->waitForGame(kProcessTimeout, error);
-        if (started == 0) {
-            report(Progress::Failed, error);
-            return nullptr;
-        }
-
-        game = GameProcess::attachTo(started, error);
         if (!game) {
-            report(Progress::Failed, error);
+            spdlog::error("the game process never appeared: {}", error);
+
+            report(Progress::Failed,
+                   std::format("{}\n\n{}\n- {}\n- {}", text::kErrGameStartTimeout,
+                               text::kPossibleSolutions,
+                               location->store == GameStore::Rockstar
+                                   ? text::kSolRestartPlatformRgl
+                                   : std::format(text::kSolRestartPlatform,
+                                                 storeName(location->store)),
+                               text::kSolStartGameOnce));
             return nullptr;
         }
     }
 
-    report(Progress::Working, "Игра запущена, внедряем модуль");
+    report(Progress::Working, text::kLoadingClient);
 
     // Окна игры дожидаться нечего: при прямом запуске оно появляется много позже
     // готовности загрузчика модулей, а иногда не появляется вовсе. Единственный
     // надёжный признак готовности — удавшееся внедрение.
     if (!game->injectWithRetries(settings.clientModule, kInjectTimeout, error)) {
-        report(Progress::Failed, "Не удалось внедрить модуль: " + error);
+        spdlog::error("{}: {}", text::kErrFailedToInject, error);
+
+        report(Progress::Failed, text::kErrFailedToInject);
         return nullptr;
     }
 
     // Слой поднимается сразу после внедрения, а не по готовности игры: смысл
     // его в том, чтобы заслонить собой заставку и страницу выбора режима, а они
     // начнутся через считанные секунды.
-    report(Progress::Ready, "Модуль внедрён, ждём загрузки игры");
+    report(Progress::Ready, "Injected, waiting for the game to load");
     return game;
 }
 

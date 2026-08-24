@@ -12,7 +12,7 @@ namespace {
 constexpr DWORD kInjectTimeoutMs = 30'000;
 
 std::string lastErrorText() {
-    return std::format("код ошибки Windows {}", ::GetLastError());
+    return std::format("Windows error {}", ::GetLastError());
 }
 
 } // namespace
@@ -20,7 +20,7 @@ std::string lastErrorText() {
 bool injectModule(void* process, const std::filesystem::path& module, std::string& error) {
     std::error_code ec;
     if (!std::filesystem::exists(module, ec)) {
-        error = std::format("модуль не найден: {}", module.string());
+        error = std::format("the module was not found: {}", module.string());
         return false;
     }
 
@@ -30,7 +30,7 @@ bool injectModule(void* process, const std::filesystem::path& module, std::strin
     void* remotePath =
         ::VirtualAllocEx(process, nullptr, pathBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (remotePath == nullptr) {
-        error = std::format("не удалось выделить память в чужом процессе: {}", lastErrorText());
+        error = std::format("could not allocate memory in the other process: {}", lastErrorText());
         return false;
     }
 
@@ -42,7 +42,7 @@ bool injectModule(void* process, const std::filesystem::path& module, std::strin
         SIZE_T written = 0;
         if (::WriteProcessMemory(process, remotePath, path.c_str(), pathBytes, &written) == 0 ||
             written != pathBytes) {
-            error = std::format("не удалось передать путь к модулю: {}", lastErrorText());
+            error = std::format("could not pass the module path over: {}", lastErrorText());
             break;
         }
 
@@ -50,14 +50,14 @@ bool injectModule(void* process, const std::filesystem::path& module, std::strin
         const auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
             reinterpret_cast<void*>(::GetProcAddress(kernel32, "LoadLibraryW")));
         if (loadLibrary == nullptr) {
-            error = "не удалось найти LoadLibraryW";
+            error = "LoadLibraryW was not found";
             break;
         }
 
         const HANDLE remoteThread =
             ::CreateRemoteThread(process, nullptr, 0, loadLibrary, remotePath, 0, nullptr);
         if (remoteThread == nullptr) {
-            error = std::format("не удалось создать поток в чужом процессе: {}", lastErrorText());
+            error = std::format("could not create a thread in the other process: {}", lastErrorText());
             break;
         }
 
@@ -68,14 +68,14 @@ bool injectModule(void* process, const std::filesystem::path& module, std::strin
         ::CloseHandle(remoteThread);
 
         if (waited != WAIT_OBJECT_0) {
-            error = "внедрение не завершилось за отведённое время";
+            error = "the injection did not finish in time";
             break;
         }
 
         // Возвращается младшая половина описателя загруженного модуля.
         // Ноль означает, что LoadLibraryW отказал.
         if (result == 0) {
-            error = "процесс отказался загружать модуль";
+            error = "the process refused to load the module";
             break;
         }
 

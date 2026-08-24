@@ -1,9 +1,11 @@
 #pragma once
 
 #include "game_process.hpp"
+#include "game_store.hpp"
 
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -11,17 +13,25 @@ namespace oxymp::launcher {
 
 /// Каким путём поднимается игра.
 enum class LaunchMode {
-    /// Через Rockstar Games Launcher, с подменой звена BattlEye внутри него.
+    /// Через площадку, у которой она куплена. Штатный путь, и он же — путь alt:V.
     ///
-    /// Штатный путь oxyMP. Игру создаёт лаунчер Rockstar — поэтому он и
-    /// показывает её запущенной, — но вместо GTA5_BE.exe запускает сразу
-    /// GTA5.exe, и защита сетевого режима не встаёт.
-    ViaRockstarLauncher,
+    /// Rockstar — `GTAVLauncher.exe -nobattleye`, Steam — `steam://run/271590/`,
+    /// Epic — `com.epicgames.launcher://apps/...`. Процесс создаёт площадка, а
+    /// мы разыскиваем `GTA5.exe` по имени: это единственный способ, работающий
+    /// на всех трёх сразу.
+    ///
+    /// Прежде здесь стоял третий режим — «через лаунчер Rockstar, взяв номер
+    /// процесса у подмены звена BattlEye». Он работал ровно для копии Rockstar:
+    /// игру из Steam или Epic лаунчер не создаёт сам, перехват не срабатывал ни
+    /// разу, и человек получал обычную GTA V. Режима больше нет, а подмена
+    /// осталась — она стоит теперь при всяком запуске через площадку.
+    Platform,
 
-    /// Прямой запуск GTA5.exe. Запасной путь.
+    /// Прямой запуск GTA5.exe нами самими.
     ///
-    /// Работает без всяких подмен, но лаунчер Rockstar об игре не знает: он
-    /// следит за тем процессом, который создал сам.
+    /// Нужен закреплённой копии: площадка поднимает свою игру, и указать ей
+    /// другой файл нечем. Он же остаётся под рукой, когда путь через площадку
+    /// почему-то не работает.
     Direct,
 };
 
@@ -47,7 +57,20 @@ public:
     struct Settings {
         std::string server;
         std::string nickname;
+
+        /// Каталог с GTA5.exe.
+        ///
+        /// Приходит из `gtapath` в `oxymp.toml` или из ключа `--game`. Пустым не
+        /// бывает: разыскивать игру при каждом запуске — не дело запуска, этим
+        /// занимается окно установки, и один раз.
         std::filesystem::path gameDirectory;
+
+        /// Площадка, записанная в `gtaPlatform`.
+        ///
+        /// Пусто означает «узнать по каталогу игры». Записанное человеком
+        /// сильнее: площадку он выбирал сам, в окне установки.
+        std::optional<GameStore> gameStore;
+
         std::filesystem::path clientModule;
 
 
@@ -64,7 +87,7 @@ public:
         /// монопольного полноэкранного режима не показать ничего.
         std::filesystem::path backupDirectory;
 
-        LaunchMode launchMode = LaunchMode::ViaRockstarLauncher;
+        LaunchMode launchMode = LaunchMode::Platform;
 
         /// Вести игру сразу в сетевой свободный режим, минуя сюжет.
         ///
@@ -80,6 +103,12 @@ public:
         /// даёт: меню паузы там сетевое, и выбранную строку оно возвращает
         /// обратно — так же, как в обычной GTA Online.
         std::wstring gameLanguage;
+
+        /// Писать ли в журнал подробности — настройка `debug` из `oxymp.toml`.
+        ///
+        /// Едет отсюда в подмену звена BattlEye: та живёт в чужом процессе и
+        /// прочитать настройку сама не может.
+        bool verbose = false;
 
         /// Не запускать игру, а внедриться в уже запущенную.
         bool attach = false;

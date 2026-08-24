@@ -25,6 +25,19 @@ enum class GameStore {
 /// Название площадки — для журнала и для человека.
 [[nodiscard]] std::string_view storeName(GameStore store) noexcept;
 
+/// Название площадки в настройках: `rgl`, `steam`, `epic`.
+///
+/// Имена не наши: так их пишет alt:V в `gtaPlatform`, и файл настроек переносят
+/// с одного мультиплеера на другой руками. Своё название означало бы, что
+/// перенесённый файл читается наполовину.
+[[nodiscard]] std::string_view storeKey(GameStore store) noexcept;
+
+/// Площадка по названию из настроек.
+///
+/// Неизвестное имя означает Rockstar — то же, что и пустое: у копии Rockstar
+/// своего признака нет вовсе, и «ничего особенного» здесь и есть она.
+[[nodiscard]] GameStore storeFromKey(std::string_view key) noexcept;
+
 /// Поднимает клиент площадки, без которого игра не запустится.
 ///
 /// Копия из Steam спрашивает права у steam_api64.dll, а та — у запущенного

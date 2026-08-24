@@ -1,5 +1,6 @@
 #include "launcher_window.hpp"
 
+#include "page_text.hpp"
 #include "skin_assets.hpp"
 
 #include <oxymp/webui/browser.hpp>
@@ -40,77 +41,6 @@ constexpr UINT kGameUpMessage = WM_APP + 2;
 /// Сообщение «игра закончилась». По нему окно закрывается само.
 constexpr UINT kGameGoneMessage = WM_APP + 3;
 
-/// Экранирует строку для вставки в JSON.
-///
-/// Своими силами, без библиотеки: наружу уходят два поля, и заводить ради них
-/// зависимость — это менять понятный десяток строк на непонятную сотню
-/// килобайт. Внутрь при этом не попадает ничего чужого: все строки наши.
-std::string escape(std::string_view text) {
-    std::string escaped;
-    escaped.reserve(text.size() + 16);
-
-    for (const char symbol : text) {
-        switch (symbol) {
-        case '"':
-            escaped += "\\\"";
-            break;
-        case '\\':
-            escaped += "\\\\";
-            break;
-        case '\n':
-            escaped += "\\n";
-            break;
-        case '\r':
-            break;
-        case '\t':
-            escaped += "\\t";
-            break;
-        default:
-            escaped += symbol;
-            break;
-        }
-    }
-
-    return escaped;
-}
-
-/// Достаёт строковое поле из JSON.
-///
-/// Разбор нарочно поверхностный: сообщения приходят с нашей же страницы и
-/// состоят из двух полей. Полноценный разбор здесь решал бы задачу, которой нет.
-std::string field(std::string_view json, std::string_view name) {
-    const std::string key = '"' + std::string{name} + "\"";
-
-    const std::size_t at = json.find(key);
-    if (at == std::string_view::npos) {
-        return {};
-    }
-
-    const std::size_t colon = json.find(':', at + key.size());
-    if (colon == std::string_view::npos) {
-        return {};
-    }
-
-    const std::size_t open = json.find('"', colon);
-    if (open == std::string_view::npos) {
-        return {};
-    }
-
-    std::string value;
-    for (std::size_t i = open + 1; i < json.size(); ++i) {
-        if (json[i] == '\\' && i + 1 < json.size()) {
-            value += json[++i];
-            continue;
-        }
-        if (json[i] == '"') {
-            break;
-        }
-        value += json[i];
-    }
-
-    return value;
-}
-
 std::string_view describe(Progress progress) {
     switch (progress) {
     case Progress::Working:
@@ -121,39 +51,6 @@ std::string_view describe(Progress progress) {
         return "bad";
     }
     return "idle";
-}
-
-/// Подставляет в страницу то, что известно только на запуске.
-///
-/// Замена по месту, а не шаблонизатор: подстановок четыре, и каждая встречается
-/// однажды. Строки при этом наши целиком — фон приходит из skin.bin уже в
-/// base64, то есть без кавычек и угловых скобок по устройству.
-std::string fillPage(std::string page, std::string_view token, std::string_view value) {
-    const std::size_t at = page.find(token);
-    if (at == std::string::npos) {
-        return page;
-    }
-
-    page.replace(at, token.size(), value);
-    return page;
-}
-
-std::wstring widen(std::string_view text) {
-    if (text.empty()) {
-        return {};
-    }
-
-    const int size = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
-                                           nullptr, 0);
-    if (size <= 0) {
-        return {};
-    }
-
-    std::wstring wide(static_cast<std::size_t>(size), L'\0');
-    ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(),
-                          size);
-
-    return wide;
 }
 
 /// Состояние окна. Одно на процесс: окон лаунчера не бывает двух.
@@ -177,7 +74,7 @@ void report(Progress progress, std::string_view text) {
 
     g_window->browser->post(std::string{"{\"action\":\"status\",\"kind\":\""} +
                             std::string{describe(progress)} + "\",\"text\":\"" +
-                            escape(text) + "\"}");
+                            escapeJson(text) + "\"}");
 }
 
 /// Кладёт строку состояния в очередь окна. Можно из любого потока.
@@ -231,7 +128,7 @@ void handlePageMessage(std::string_view json) {
     // временный объект пережил бы сам объект. Ровно на этом сломались разом
     // запуск игры, перетаскивание окна и его кнопки — сравнивалась
     // освобождённая память, и не совпадало ничего.
-    const std::string action = field(json, "action");
+    const std::string action = jsonField(json, "action");
 
     // Кнопки окна нарисованы на странице, а делает по ним всё равно окно: у
     // страницы своего окна нет, она живёт внутри нашего.
@@ -240,7 +137,7 @@ void handlePageMessage(std::string_view json) {
             return;
         }
 
-        const std::string command = field(json, "command");
+        const std::string command = jsonField(json, "command");
 
         if (command == "close") {
             ::PostMessageW(g_window->handle, WM_CLOSE, 0, 0);
@@ -371,8 +268,8 @@ int LauncherWindow::run(const Paths& paths, Session::Settings settings) {
     window.browser = webui::Browser::create(window.handle, paths.browserCache().wstring(), false,
                                             error);
     if (window.browser == nullptr) {
-        ::MessageBoxW(window.handle, L"Не удалось запустить движок интерфейса.\n"
-                                     L"Установите Microsoft Edge WebView2 Runtime.",
+        ::MessageBoxW(window.handle, L"The interface engine could not be started.\n"
+                                     L"Install the Microsoft Edge WebView2 Runtime.",
                       title.c_str(), MB_ICONERROR | MB_OK);
         spdlog::error("{}", error);
         return 1;

@@ -85,6 +85,11 @@ void setUpLogging() {
         auto logger = spdlog::basic_logger_mt("rglpatch", path.string(), true);
         logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
         logger->flush_on(spdlog::level::debug);
+
+        // Уровень задаёт лаунчер настройкой `debug`: подмена живёт в чужом
+        // процессе, и спросить её больше не у кого.
+        logger->set_level(g_handoff->verbose.load() != 0 ? spdlog::level::debug
+                                                         : spdlog::level::info);
         spdlog::set_default_logger(std::move(logger));
     } catch (const spdlog::spdlog_ex&) {
         // Без журнала подмена работает, отказываться от неё из-за журнала — нет.
@@ -104,7 +109,7 @@ DWORD WINAPI worker(LPVOID) {
 
     setUpLogging();
 
-    spdlog::debug("модуль в Rockstar Games Launcher, ставим подмену");
+    spdlog::debug("the module is inside Rockstar Games Launcher, installing the patch");
 
     std::string error;
 
@@ -139,7 +144,7 @@ DWORD WINAPI worker(LPVOID) {
         return 1;
     }
 
-    spdlog::debug("подмена стоит: запуск игры пойдёт мимо BattlEye");
+    spdlog::debug("the patch is in place: the game launch will skip BattlEye");
     publish(oxymp::shared::LaunchState::Hooked);
 
     return 0;

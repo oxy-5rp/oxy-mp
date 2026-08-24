@@ -49,8 +49,8 @@ bool steamSignedIn() {
 bool startSteam(std::string& error) {
     const auto executable = readCurrentUserString(kSteamRegistryPath, kSteamExecutableName);
     if (!executable) {
-        error = "игра куплена в Steam, но самого Steam на этом компьютере нет.\n"
-                "Установите Steam и войдите в него.";
+        error = "the game is a Steam copy, but Steam itself is not installed here.\n"
+                "Install Steam and sign in.";
         return false;
     }
 
@@ -59,8 +59,8 @@ bool startSteam(std::string& error) {
 
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) {
-        error = std::format("Steam числится установленным, но {} на месте нет.\n"
-                            "Переустановите Steam.",
+        error = std::format("Steam is listed as installed, but {} is not there.\n"
+                            "Reinstall Steam.",
                             path.string());
         return false;
     }
@@ -77,7 +77,7 @@ bool startSteam(std::string& error) {
     if (::CreateProcessW(path.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0,
                          nullptr, path.parent_path().wstring().c_str(), &startup,
                          &information) == FALSE) {
-        error = std::format("не удалось запустить Steam: код ошибки Windows {}", ::GetLastError());
+        error = std::format("could not start Steam: Windows error {}", ::GetLastError());
         return false;
     }
 
@@ -110,8 +110,8 @@ bool ensureSteamReady(std::chrono::seconds timeout, std::string& error) {
         ::Sleep(kPollIntervalMs);
     }
 
-    error = "Steam запущен, но в него никто не вошёл — прав на игру ему выдать не от кого.\n"
-            "Войдите в Steam и попробуйте снова.";
+    error = "Steam is running, but nobody is signed in - it has no one to get the "
+            "entitlement from.\nSign in to Steam and try again.";
 
     return false;
 }
@@ -136,16 +136,43 @@ GameStore storeOf(const std::filesystem::path& directory) {
 }
 
 std::string_view storeName(GameStore store) noexcept {
+    // Названия дословно те же, что у alt:V: человек читает их и в наших
+    // отказах, и в его, и должен узнавать одно и то же.
     switch (store) {
     case GameStore::Steam:
         return "Steam";
     case GameStore::Epic:
-        return "Epic Games";
+        return "Epic Games Store";
     case GameStore::Rockstar:
         break;
     }
 
-    return "Rockstar Games";
+    return "Rockstar Games Launcher";
+}
+
+std::string_view storeKey(GameStore store) noexcept {
+    switch (store) {
+    case GameStore::Steam:
+        return "steam";
+    case GameStore::Epic:
+        return "epic";
+    case GameStore::Rockstar:
+        break;
+    }
+
+    return "rgl";
+}
+
+GameStore storeFromKey(std::string_view key) noexcept {
+    if (key == "steam") {
+        return GameStore::Steam;
+    }
+
+    if (key == "epic") {
+        return GameStore::Epic;
+    }
+
+    return GameStore::Rockstar;
 }
 
 bool ensureStoreReady(GameStore store, std::chrono::seconds timeout, std::string& error) {

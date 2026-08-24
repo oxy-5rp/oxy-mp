@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -49,25 +50,25 @@ bool fatal(DWORD code) {
 std::string_view describe(DWORD code) {
     switch (code) {
     case EXCEPTION_ACCESS_VIOLATION:
-        return "обращение по недоступному адресу";
+        return "access violation";
     case EXCEPTION_ILLEGAL_INSTRUCTION:
-        return "недопустимая инструкция";
+        return "illegal instruction";
     case EXCEPTION_PRIV_INSTRUCTION:
-        return "запрещённая инструкция";
+        return "privileged instruction";
     case EXCEPTION_IN_PAGE_ERROR:
-        return "страница памяти недоступна";
+        return "in-page error";
     case EXCEPTION_INT_DIVIDE_BY_ZERO:
-        return "деление на ноль";
+        return "integer divide by zero";
     case EXCEPTION_STACK_OVERFLOW:
-        return "переполнение стека";
+        return "stack overflow";
     case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
-        return "выход за границы";
+        return "array bounds exceeded";
     case EXCEPTION_NONCONTINUABLE_EXCEPTION:
-        return "исключение без продолжения";
+        return "noncontinuable exception";
     case STATUS_FATAL_APP_EXIT:
-        return "игра сама объявила о непоправимом";
+        return "the game called it fatal itself";
     default:
-        return "неизвестное";
+        return "unknown";
     }
 }
 
@@ -77,13 +78,15 @@ std::string_view describe(DWORD code) {
 /// же место в коде выглядит от запуска к запуску по-разному. Смещение же
 /// сравнивается напрямую — и с прошлыми падениями, и с адресами из каталога
 /// сигнатур.
+constexpr const char* kUnknownModule = "outside known modules";
+
 std::string locate(const void* address) {
     HMODULE module = nullptr;
 
     if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                  GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                              static_cast<LPCWSTR>(address), &module) == 0) {
-        return "вне известных модулей";
+        return kUnknownModule;
     }
 
     std::wstring path(MAX_PATH, L'\0');
@@ -97,6 +100,63 @@ std::string locate(const void* address) {
     return std::format("{}+{:#x}", std::filesystem::path{path}.filename().string(), offset);
 }
 
+/// Откуда пришли к месту падения.
+///
+/// Настоящей раскрутки стека здесь нет, и она не нужна: символов у игры не
+/// бывает, а назвать требуется лишь модуль и смещение в нём. Поэтому стек
+/// просматривается сверху вниз, и всякое слово, попавшее внутрь загруженного
+/// модуля, считается вероятным адресом возврата.
+///
+/// Способ грубый: среди названного окажутся и случайные совпадения. Зато он
+/// отвечает на главный вопрос — чей код привёл к падению, наш или игры, — а
+/// точнее без символов всё равно не выйдет. Без этого следа падение внутри игры
+/// неотличимо от падения из-за игры: адрес один и тот же, а причина разная.
+void reportStack(const CONTEXT& context) {
+    /// Сколько строк показать: дальше начинается прошлое, к падению отношения
+    /// не имеющее.
+    constexpr std::size_t kDepth = 14;
+
+    /// Сколько слов стека просмотреть.
+    constexpr std::size_t kWords = 512;
+
+    MEMORY_BASIC_INFORMATION region{};
+
+    // Стек спрашивается у Windows, а не берётся с запасом: за его концом лежит
+    // сторожевая страница, и чтение из неё уронило бы нас прямо в обработчике
+    // чужого падения.
+    if (::VirtualQuery(reinterpret_cast<const void*>(context.Rsp), &region, sizeof(region)) == 0) {
+        return;
+    }
+
+    const auto top = reinterpret_cast<std::uintptr_t>(region.BaseAddress) + region.RegionSize;
+
+    if (top <= context.Rsp) {
+        return;
+    }
+
+    const auto* const stack = reinterpret_cast<const std::uintptr_t*>(context.Rsp);
+    const std::size_t available = (top - context.Rsp) / sizeof(std::uintptr_t);
+
+    std::size_t shown = 0;
+
+    for (std::size_t i = 0; i < std::min(kWords, available) && shown < kDepth; ++i) {
+        const std::uintptr_t value = stack[i];
+
+        // Мелкие числа — это счётчики и длины, а не адреса.
+        if (value < 0x10000) {
+            continue;
+        }
+
+        const std::string where = locate(reinterpret_cast<const void*>(value));
+        if (where == kUnknownModule) {
+            continue;
+        }
+
+        spdlog::critical("  called from {} ({:#x})", where, value);
+        ++shown;
+    }
+}
+
 LONG CALLBACK onException(EXCEPTION_POINTERS* pointers) {
     if (pointers == nullptr || pointers->ExceptionRecord == nullptr) {
         return EXCEPTION_CONTINUE_SEARCH;
@@ -108,7 +168,7 @@ LONG CALLBACK onException(EXCEPTION_POINTERS* pointers) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
-    spdlog::critical("игра упала: {} ({:#010x}) по адресу {:#x} — {}",
+    spdlog::critical("the game crashed: {} ({:#010x}) at {:#x} - {}",
                      describe(record.ExceptionCode),
                      static_cast<std::uint32_t>(record.ExceptionCode),
                      reinterpret_cast<std::uintptr_t>(record.ExceptionAddress),
@@ -118,13 +178,13 @@ LONG CALLBACK onException(EXCEPTION_POINTERS* pointers) {
     // по какому адресу. Ради них исключение и разбирается: «писали в ноль» и
     // «читали из освобождённой памяти» — разные поломки с разными причинами.
     if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2) {
-        constexpr std::array<const char*, 9> kOperations = {"чтение", "запись", "", "", "",
-                                                            "", "", "", "исполнение"};
+        constexpr std::array<const char*, 9> kOperations = {"read", "write", "", "", "",
+                                                            "", "", "", "execute"};
 
         const auto operation = record.ExceptionInformation[0];
 
-        spdlog::critical("  {} по адресу {:#x}",
-                         operation < kOperations.size() ? kOperations[operation] : "доступ",
+        spdlog::critical("  {} at {:#x}",
+                         operation < kOperations.size() ? kOperations[operation] : "access",
                          record.ExceptionInformation[1]);
     }
 
@@ -133,6 +193,8 @@ LONG CALLBACK onException(EXCEPTION_POINTERS* pointers) {
 
         spdlog::critical("  rip={:#x} rsp={:#x} rcx={:#x} rdx={:#x} r8={:#x} r9={:#x}", context.Rip,
                          context.Rsp, context.Rcx, context.Rdx, context.R8, context.R9);
+
+        reportStack(context);
     }
 
     spdlog::default_logger()->flush();

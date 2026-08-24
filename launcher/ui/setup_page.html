@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>oxyMP</title>
+<style>
+  /* Окно выбора каталога игры. Показывается, пока в настройках нет пути к ней.
+
+     Списано с окна `gamepath` у alt:V, вплоть до слов: заголовок, приглашение,
+     строка «выберу сам». Слова взяты из его таблицы переводов, английской её
+     половины, и лежат у нас в `text.hpp`; сюда они подставляются лаунчером.
+
+     Устройство оттуда же: найденное показывается **списком**, а не одним полем.
+     Копий игры у человека бывает две — обычная и Legacy, с разных площадок, — и
+     выбирает из них он, а не мы за него.
+
+     Фон свой — `installerBackground` из skin.bin, — и размер окна равен размеру
+     картинки: у образца это 800 на 600. */
+  :root {
+    --accent: {{accent}};
+    --background: {{background}};
+    --text: #ffffff;
+    --dim: rgba(255, 255, 255, .62);
+    --line: rgba(255, 255, 255, .14);
+    --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    background: #0a0c10;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+  }
+
+  .window {
+    position: relative;
+    height: 100%;
+    background-color: #0a0c10;
+    background-image: var(--background);
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  /* Окно таскают за картинку — своей полосы заголовка нет. Подвал из этого
+     исключён: в нём нажимают, а не тянут. */
+  .drag { position: absolute; inset: 0; }
+
+  .buttons {
+    position: absolute;
+    top: 0; right: 0;
+    display: flex;
+    z-index: 3;
+  }
+
+  .buttons button {
+    width: 34px; height: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .buttons button:hover { color: var(--text); background: rgba(255, 255, 255, .12); }
+  .buttons button.close:hover { background: #c4362f; color: #fff; }
+
+  /* Подложка нужна: под ней картинка, и белые буквы на светлом её месте не
+     читались бы. */
+  .panel {
+    position: relative;
+    z-index: 2;
+    padding: 20px 28px 22px;
+    background: linear-gradient(to bottom, rgba(8, 9, 12, 0), rgba(8, 9, 12, .94) 16%);
+  }
+
+  h1 {
+    margin: 0 0 3px;
+    font-size: 19px;
+    font-weight: 600;
+  }
+
+  .lead {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--dim);
+    max-width: 640px;
+  }
+
+  .label {
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+
+  /* Список найденного. Высота ограничена: установок бывает и одна, и пять, а
+     окно у нас ровно такое, каким его нарисовал художник. */
+  .list {
+    max-height: 168px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, .05);
+  }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, .07);
+    cursor: pointer;
+  }
+
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: rgba(255, 255, 255, .07); }
+
+  .item.picked { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+
+  .item__mark {
+    flex: none;
+    width: 13px; height: 13px;
+    border: 1px solid rgba(255, 255, 255, .38);
+    border-radius: 50%;
+  }
+
+  .item.picked .item__mark {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: inset 0 0 0 3px rgba(10, 12, 16, .85);
+  }
+
+  .item__text { min-width: 0; }
+
+  .item__name {
+    font-size: 12.5px;
+    line-height: 1.25;
+  }
+
+  .item__path {
+    font-size: 11px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+  }
+
+  .platforms {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .platforms button {
+    flex: 1;
+    height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, .06);
+    color: var(--dim);
+    font-family: var(--sans);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .platforms button:hover { background: rgba(255, 255, 255, .13); color: var(--text); }
+
+  .platforms button.picked {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+    color: var(--text);
+  }
+
+  .note {
+    min-height: 30px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--dim);
+    white-space: pre-line;
+  }
+
+  .note.bad { color: #ff8a7a; }
+
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .version {
+    font-size: 10.5px;
+    letter-spacing: .04em;
+    color: var(--dim);
+  }
+
+  button.go {
+    height: 38px;
+    padding: 0 28px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  button.go:disabled {
+    background: rgba(255, 255, 255, .1);
+    color: rgba(255, 255, 255, .35);
+    cursor: default;
+  }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="drag" id="drag"></div>
+
+    <div class="buttons">
+      <button id="minimize" title="Minimize">&#8211;</button>
+      <button id="close" class="close" title="Close">&#10005;</button>
+    </div>
+
+    <div class="panel">
+      <h1 id="title">{{title}}</h1>
+      <p class="lead" id="lead">{{lead}}</p>
+
+      <div class="label">{{location}}</div>
+      <div class="list" id="list"></div>
+
+      <div class="label">{{platform}}</div>
+      <div class="platforms">
+        <button data-platform="rgl">Rockstar Games Launcher</button>
+        <button data-platform="steam">Steam</button>
+        <button data-platform="epic">Epic Games Store</button>
+      </div>
+
+      <div class="note" id="note"></div>
+
+      <div class="foot">
+        <span class="version">{{version}}</span>
+        <button class="go" id="accept" disabled>{{confirm}}</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
+
+  function send(message) {
+    if (bridge) bridge.postMessage(message);
+  }
+
+  const list = document.getElementById('list');
+  const lead = document.getElementById('lead');
+  const note = document.getElementById('note');
+  const accept = document.getElementById('accept');
+  const platforms = Array.from(document.querySelectorAll('.platforms button'));
+
+  document.getElementById('close').addEventListener('click',
+    () => send({ action: 'window', command: 'close' }));
+  document.getElementById('minimize').addEventListener('click',
+    () => send({ action: 'window', command: 'minimize' }));
+
+  document.getElementById('drag').addEventListener('mousedown', event => {
+    if (event.button === 0) send({ action: 'drag' });
+  });
+
+  platforms.forEach(button => button.addEventListener('click',
+    () => send({ action: 'platform', value: button.dataset.platform })));
+
+  accept.addEventListener('click', () => send({ action: 'accept' }));
+
+  // Строку списка рисуем сами, а не подставляем разметку из лаунчера: пути
+  // приходят из файловой системы, то есть снаружи, и вставлять их разметкой
+  // значило бы отдать чужой строке власть над страницей.
+  function row(item, index, selected) {
+    const element = document.createElement('div');
+    element.className = 'item' + (index === selected ? ' picked' : '');
+
+    const mark = document.createElement('div');
+    mark.className = 'item__mark';
+
+    const text = document.createElement('div');
+    text.className = 'item__text';
+
+    const name = document.createElement('div');
+    name.className = 'item__name';
+    name.textContent = item.name;
+
+    const path = document.createElement('div');
+    path.className = 'item__path';
+    // Обратная запись пути — ради обрезки: длинный путь важен концом, а не
+    // началом, и многоточие должно съедать голову, а не хвост.
+    path.textContent = item.path ? '‪' + item.path + '‬' : '';
+
+    text.appendChild(name);
+    if (item.path) text.appendChild(path);
+
+    element.appendChild(mark);
+    element.appendChild(text);
+
+    element.addEventListener('click', () => {
+      if (item.browse) send({ action: 'browse' });
+      else send({ action: 'pick', value: String(index) });
+    });
+
+    return element;
+  }
+
+  if (bridge) {
+    bridge.addEventListener('message', event => {
+      const message = event.data;
+      if (!message || message.action !== 'games') return;
+
+      list.replaceChildren();
+      (message.items || []).forEach((item, index) =>
+        list.appendChild(row(item, index, message.selected)));
+
+      lead.textContent = message.lead || '';
+      lead.style.display = message.lead ? '' : 'none';
+
+      platforms.forEach(button =>
+        button.classList.toggle('picked', button.dataset.platform === message.platform));
+
+      note.textContent = message.note || '';
+      note.className = 'note' + (message.kind ? ' ' + message.kind : '');
+
+      accept.disabled = !message.ok;
+    });
+
+    // Лаунчер начинает разыскивать игру раньше, чем движок покажет страницу, и
+    // без этой строки первый же список пропал бы: сообщения, отправленные до
+    // загрузки, никто не принимает. Поэтому о готовности говорит страница, а не
+    // лаунчер о ней догадывается.
+    send({ action: 'ready' });
+  }
+</script>
+</body>
+</html>
