@@ -6,6 +6,7 @@
 #include <node.h>
 #include <v8.h>
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -163,10 +164,31 @@ private:
     Announce announce_;
     Roster roster_;
 
-    v8::Global<v8::FunctionTemplate> playerShape_;
-    v8::Global<v8::FunctionTemplate> vehicleShape_;
-    v8::Global<v8::FunctionTemplate> objectShape_;
-    v8::Global<v8::FunctionTemplate> pedShape_;
+    /// Заготовки классов сущностей, которые слой завёл в этом изоляте.
+    ///
+    /// **Массивом, а не четырьмя полями, и это не причёсывание.** Полями они и
+    /// были, а уборка перечисляла их поимённо — в двух местах, в отказе запуска
+    /// и в разборе. Когда к игроку и машине добавились предмет и кукла, в оба
+    /// перечня их вписать забыли: две ссылки переживали разбор изолята, и их
+    /// деструкторы срабатывали по мёртвой памяти. Сервер от этого падал молча —
+    /// целиком, с `Check failed: node->IsInUse()`, — стоило одному ресурсу
+    /// отказать при запуске. То есть опечатка в чужом режиме уносила сессию всех.
+    ///
+    /// Массив это исключает: уборка ходит по нему циклом, и новая заготовка
+    /// попадает в неё сама, одной строкой в перечислении ниже.
+    enum class Shape : std::size_t { Player, Vehicle, Object, Ped, kCount };
+
+    [[nodiscard]] v8::Local<v8::FunctionTemplate> shapeOf(Shape which) const;
+    void setShape(Shape which, v8::Local<v8::FunctionTemplate> value);
+
+    /// Отпускает всё, что держит изолят.
+    ///
+    /// Зовётся из единственного места на каждый путь — и из отказа запуска, и из
+    /// разбора. Звать её обязательно **до** того, как изолят разобран: отпустить
+    /// ссылку можно только изнутри живого изолята.
+    void releaseHandles();
+
+    std::array<v8::Global<v8::FunctionTemplate>, static_cast<std::size_t>(Shape::kCount)> shapes_;
 };
 
 } // namespace oxymp::script::js

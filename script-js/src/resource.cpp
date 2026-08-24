@@ -107,9 +107,7 @@ Resource::~Resource() {
         const v8::HandleScope handles{isolate};
         const v8::Context::Scope contextScope{setup_->context()};
 
-        handlers_.clear();
-        playerShape_.Reset();
-        vehicleShape_.Reset();
+        releaseHandles();
     }
 
     // Остановка — снаружи блокировки, и это не вкусовщина: так делает
@@ -194,9 +192,7 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
         if (loaded && !started) {
             loaded = false;
 
-            handlers_.clear();
-            playerShape_.Reset();
-            vehicleShape_.Reset();
+            releaseHandles();
         } else if (!loaded) {
             if (caught.HasCaught()) {
                 error = fromJs(isolate, caught.Exception());
@@ -215,9 +211,7 @@ bool Resource::start(const std::filesystem::path& main, std::string& error) {
                 error = "точка входа не исполнилась";
             }
 
-            handlers_.clear();
-            playerShape_.Reset();
-            vehicleShape_.Reset();
+            releaseHandles();
         }
     }
 
@@ -322,40 +316,56 @@ void Resource::subscribe(std::string name, v8::Local<v8::Function> handler) {
     handlers_[std::move(name)].emplace_back(setup_->isolate(), handler);
 }
 
+v8::Local<v8::FunctionTemplate> Resource::shapeOf(Shape which) const {
+    const v8::Global<v8::FunctionTemplate>& shape = shapes_[static_cast<std::size_t>(which)];
+
+    return shape.IsEmpty() ? v8::Local<v8::FunctionTemplate>{} : shape.Get(setup_->isolate());
+}
+
+void Resource::setShape(Shape which, v8::Local<v8::FunctionTemplate> value) {
+    shapes_[static_cast<std::size_t>(which)].Reset(setup_->isolate(), value);
+}
+
+void Resource::releaseHandles() {
+    handlers_.clear();
+
+    // Циклом, а не перечислением: перечисление здесь однажды разошлось с
+    // составом полей, и сервер падал целиком от отказа одного ресурса.
+    for (v8::Global<v8::FunctionTemplate>& shape : shapes_) {
+        shape.Reset();
+    }
+}
+
 v8::Local<v8::FunctionTemplate> Resource::playerShape() const {
-    return playerShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
-                                  : playerShape_.Get(setup_->isolate());
+    return shapeOf(Shape::Player);
 }
 
 v8::Local<v8::FunctionTemplate> Resource::vehicleShape() const {
-    return vehicleShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
-                                   : vehicleShape_.Get(setup_->isolate());
+    return shapeOf(Shape::Vehicle);
 }
 
 v8::Local<v8::FunctionTemplate> Resource::objectShape() const {
-    return objectShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
-                                   : objectShape_.Get(setup_->isolate());
-}
-
-void Resource::setPlayerShape(v8::Local<v8::FunctionTemplate> value) {
-    playerShape_.Reset(setup_->isolate(), value);
-}
-
-void Resource::setVehicleShape(v8::Local<v8::FunctionTemplate> value) {
-    vehicleShape_.Reset(setup_->isolate(), value);
+    return shapeOf(Shape::Object);
 }
 
 v8::Local<v8::FunctionTemplate> Resource::pedShape() const {
-    return pedShape_.IsEmpty() ? v8::Local<v8::FunctionTemplate>{}
-                               : pedShape_.Get(setup_->isolate());
+    return shapeOf(Shape::Ped);
 }
 
-void Resource::setPedShape(v8::Local<v8::FunctionTemplate> value) {
-    pedShape_.Reset(setup_->isolate(), value);
+void Resource::setPlayerShape(v8::Local<v8::FunctionTemplate> value) {
+    setShape(Shape::Player, value);
+}
+
+void Resource::setVehicleShape(v8::Local<v8::FunctionTemplate> value) {
+    setShape(Shape::Vehicle, value);
 }
 
 void Resource::setObjectShape(v8::Local<v8::FunctionTemplate> value) {
-    objectShape_.Reset(setup_->isolate(), value);
+    setShape(Shape::Object, value);
+}
+
+void Resource::setPedShape(v8::Local<v8::FunctionTemplate> value) {
+    setShape(Shape::Ped, value);
 }
 
 void Resource::deliver(std::string_view name, std::string_view payload) {

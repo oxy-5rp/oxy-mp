@@ -126,6 +126,7 @@ if(OXYMP_BUILD_TESTS)
     add_subdirectory(client/tests)
     add_subdirectory(server/tests)
     add_subdirectory(script/tests)
+    add_subdirectory(script-js/tests)
     add_subdirectory(client-js/tests)
 endif()
 
