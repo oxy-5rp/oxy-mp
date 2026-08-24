@@ -140,6 +140,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       described_(described),
       archives_(archives),
       manifests_(manifests),
+      placements_(table),
       gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
@@ -360,6 +361,10 @@ void GameSession::serveFiles() {
         (void)manifests_->pump(*files_);
     }
 
+    for (std::string& name : mail_.takeMapPlacements()) {
+        placements_.add(std::move(name));
+    }
+
     // Архивы — после описаний и до отчёта: открытый архив тут же обходится, и
     // его содержимое встанет в те же очереди, что и россыпь файлов, только
     // следующим кадром.
@@ -369,6 +374,18 @@ void GameSession::serveFiles() {
         for (const std::string& prefix : archives_->pump(gameFiles_)) {
             declareArchive(prefix);
         }
+    }
+
+    // Расстановка просится последней и **только когда очереди опустели**.
+    //
+    // Это не осторожность, а условие: игра применяет расстановку, опираясь на
+    // объявленные ей файлы, архетипы и опись. Попроси её раньше — она не найдёт
+    // ничего и промолчит. Проверено вылазкой: просьба ушла на девятнадцать
+    // секунд раньше, чем были объявлены файлы, и из четырёхсот двух расстановок
+    // встала ровно ноль.
+    if (mounted == 0 && streamed == 0 && described == 0) {
+        watch_.mark("placing the map");
+        (void)placements_.pump();
     }
 
     // Счёт копится, а строка пишется одна — когда очереди опустеют.

@@ -22,6 +22,16 @@ namespace oxymp::client::game::natives {
 /// Игра обновилась — значения нужно пересобрать: см. README.
 
 /// WAIT, канонический хеш 0X4EDE34FBADD967A6.
+/// REQUEST_IPL — просьба поставить расстановку карты.
+///
+/// Тем же нативом расстановку грузят в одиночной игре все, кто ставит карты
+/// руками. Имя — короткое, без пути и расширения.
+inline constexpr std::uint64_t kRequestIpl = 0xECFC57F5F11BCD83;
+
+/// IS_IPL_ACTIVE — встала ли расстановка. Единственный способ отличить
+/// поставленную карту от молча пропущенной.
+inline constexpr std::uint64_t kIsIplActive = 0x5AEB336317DC4151;
+
 inline constexpr std::uint64_t kWait = 0X4EDE34FBADD967A6;
 
 /// GET_GAME_TIMER, канонический хеш 0X9CD27B0045628463.

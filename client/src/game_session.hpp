@@ -13,6 +13,7 @@
 #include "game/frontend.hpp"
 #include "game/hud.hpp"
 #include "game/manifests.hpp"
+#include "game/map_placements.hpp"
 #include "game/markers.hpp"
 #include "game/nameplates.hpp"
 #include "game/ped_animation.hpp"
@@ -407,6 +408,9 @@ private:
 
     /// Разбор описей карты. Пусто — адреса не разрешились.
     game::Manifests* manifests_ = nullptr;
+
+    /// Просьба игре поставить расстановку чужой карты.
+    game::MapPlacements placements_;
 
     /// Чтение файлов средствами самой игры — им и проверяется, что подмена
     /// дошла до неё, а не осталась нашей выдумкой.

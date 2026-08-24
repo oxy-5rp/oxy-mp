@@ -430,6 +430,27 @@ public:
         return std::exchange(clientResources_, {});
     }
 
+    // --- Расстановка чужой карты -----------------------------------------------
+
+    /// Сеть узнала имена расстановки; просить игру будет игровой поток.
+    ///
+    /// Через почту, а не напрямую, по той же причине, что и всё остальное здесь:
+    /// просьба идёт нативом, а нативы игра принимает только из своего потока.
+    void deliverMapPlacements(std::vector<std::string> names) {
+        if (names.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        mapPlacements_.insert(mapPlacements_.end(), std::make_move_iterator(names.begin()),
+                              std::make_move_iterator(names.end()));
+    }
+
+    [[nodiscard]] std::vector<std::string> takeMapPlacements() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(mapPlacements_, {});
+    }
+
     // --- Чтение файлов ресурса -------------------------------------------------
 
     /// Чем достают содержимое файла ресурса. false — такого файла нет.
@@ -608,6 +629,9 @@ private:
 
     /// Чем читают файлы ресурсов. Пусто, пока сеть не разобрала ни одного.
     ResourceReader resourceReader_;
+
+    /// Имена расстановки, о которых ещё не просили игру.
+    std::vector<std::string> mapPlacements_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
