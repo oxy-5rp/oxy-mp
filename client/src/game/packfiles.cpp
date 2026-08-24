@@ -31,21 +31,40 @@ constexpr std::uint32_t kArchiveMagic = 0x52504637U;
 /// Длина заголовка архива: метка, число записей, длина имён, метка шифрования.
 constexpr std::size_t kArchiveHeaderLength = 16;
 
-/// Метки шифрования оглавления, которые игра умеет читать.
+/// Метка зашифрованного оглавления — та, что стоит в настоящих архивах.
 ///
-/// Их две: обычная (AES) и та, у которой ключ выбирается по имени и размеру
-/// файла. Третья, `OPEN`, означает незашифрованное оглавление — и вот её игра не
-/// принимает: путей без расшифровки у неё нет вовсе.
+/// Какая именно это схема — обычная AES или та, где ключ выбирается по имени и
+/// размеру, — здесь не утверждается: проверить это нечем, а гадать про архивы
+/// уже стоило вылетов. Установлено о ней ровно два факта, и оба наблюдением:
+/// она стоит на архивах, которые раздают люди, и игра на ней падает.
 ///
-/// **Отсеивать такие обязательно.** Игра на них не отказывается — она
-/// **зависает** внутри открытия, и картинка встаёт намертво. Поймано сторожем
-/// кадра на живом архиве: «the game frame has been stuck for 5 s at opening game
-/// archives». Без этой проверки один такой файл на сервере вешал бы всех, кто
-/// зашёл.
-constexpr std::uint32_t kEncryptedAes = 0x0FEFFFFFU;
-constexpr std::uint32_t kEncryptedNg = 0x0FEFFFFEU;
+/// Прежде эта же метка звалась здесь `kEncryptedAes` и **принималась**, а рядом
+/// лежала вторая, `0x0FEFFFFE`, — на единицу меньше и не встречающаяся нигде.
+/// Обе были выведены рассуждением, а не сняты с файла.
+///
+/// **Принимать её нельзя, и это выяснено вылетом, а не рассуждением.** Игра
+/// такой архив открывает, но оглавление у неё остаётся зашифрованным (см.
+/// `docs/altv-next.md`, раздел про архивы): условие, при котором она пускает
+/// ключ в ход для чужого архива, до сих пор не найдено. Дальше она читает из
+/// шифротекста число записей и смещения — то есть из мусора — и пишет за концом
+/// отведённого:
+///
+///     0xC0000005 в GTA5.exe+0x1362ed3, запись, вызвано из oxymp-client.dll
+///
+/// Тот же адрес, что и у битого заголовка, и та же причина: игра идёт по
+/// оглавлению, которого не поняла. Поймано на живом архиве машины 24 августа
+/// 2026 — игра падала через четыре миллисекунды после разбора заголовка.
+///
+/// Отсюда правило: пока не найдено, чем заставить игру расшифровать оглавление
+/// чужого архива, такой архив ей не отдаётся вовсе. Отказ в журнале несравнимо
+/// лучше вылета: у отказа видна причина, а вылет уносит игру целиком.
+constexpr std::uint32_t kEncryptedTable = 0x0FEFFFFFU;
 
 /// «OPEN» буквами — метка незашифрованного оглавления.
+///
+/// Её игра не просто не принимает — она **зависает** внутри открытия, и картинка
+/// встаёт намертво. Поймано сторожем кадра: «the game frame has been stuck for
+/// 5 s at opening game archives».
 constexpr std::uint32_t kOpenTable = 0x4E45504FU;
 
 /// Сколько записей в архиве считать возможным.
@@ -71,13 +90,13 @@ constexpr std::uint32_t kMaxArchiveEntries = 1'000'000;
     const auto size = std::filesystem::file_size(path, failed);
 
     if (failed || size < kArchiveHeaderLength) {
-        why = "файл короче заголовка";
+        why = "the file is shorter than a header";
         return false;
     }
 
     std::FILE* file = nullptr;
     if (::fopen_s(&file, path.string().c_str(), "rb") != 0 || file == nullptr) {
-        why = "файл не открылся";
+        why = "the file did not open";
         return false;
     }
 
@@ -86,7 +105,7 @@ constexpr std::uint32_t kMaxArchiveEntries = 1'000'000;
     std::fclose(file);
 
     if (!read) {
-        why = "заголовок не прочёлся";
+        why = "the header did not read";
         return false;
     }
 
@@ -98,7 +117,7 @@ constexpr std::uint32_t kMaxArchiveEntries = 1'000'000;
     };
 
     if (little(0) != kArchiveMagic) {
-        why = "нет метки RPF7";
+        why = "no RPF7 mark";
         return false;
     }
 
@@ -106,15 +125,12 @@ constexpr std::uint32_t kMaxArchiveEntries = 1'000'000;
     const std::uint32_t namesLength = little(8);
     const std::uint32_t encryption = little(12);
 
-    if (encryption != kEncryptedAes && encryption != kEncryptedNg) {
-        why = encryption == kOpenTable
-                  ? std::string{"оглавление незашифровано (OPEN), а такие игра не открывает"}
-                  : std::format("неизвестная метка шифрования оглавления: {:#010x}", encryption);
-        return false;
-    }
-
+    // Проверки формы идут первыми и остаются живыми, хотя вердикт ниже сегодня
+    // и так отрицательный. Они написаны по вылетам, и терять их нельзя: решится
+    // вопрос с оглавлением — они снова окажутся единственным, что стоит между
+    // недокачанным файлом на сервере и падением у всех, кто зашёл.
     if (entries == 0 || entries > kMaxArchiveEntries) {
-        why = std::format("невозможное число записей: {}", entries);
+        why = std::format("impossible number of entries: {}", entries);
         return false;
     }
 
@@ -124,11 +140,35 @@ constexpr std::uint32_t kMaxArchiveEntries = 1'000'000;
                                  static_cast<std::uint64_t>(entries) * 16 + namesLength;
 
     if (needed > size) {
-        why = std::format("оглавление не помещается: нужно {} байт при размере {}", needed, size);
+        why = std::format("the table of contents does not fit: {} bytes needed, file is {}", needed,
+                          size);
         return false;
     }
 
-    return true;
+    // А дальше — вердикт по оглавлению, и сегодня он отрицательный для всякой
+    // встречающейся метки. Это состояние честное, а не затычка: обе, что бывают
+    // на самом деле, игру убивают — `OPEN` зависанием, «ключ по имени и размеру»
+    // вылетом. Отдавать ей архив, зная это, значит ронять игрока сознательно.
+    //
+    // Сама дорога при этом остаётся рабочей и проверенной до последнего шага:
+    // устройство отдаёт файл, игра его открывает, заполняет объект и вешает на
+    // приставку. Не хватает ровно одного звена — того, чем её заставить
+    // расшифровать чужое оглавление, — и оно названо в `docs/altv-next.md`.
+    // Найдётся оно — здесь появится метка, которая проходит, и всё остальное
+    // заработает без единой правки.
+    if (encryption == kOpenTable) {
+        why = "the table of contents is unencrypted (OPEN), and the game hangs on those";
+        return false;
+    }
+
+    if (encryption == kEncryptedTable) {
+        why = "the game will not decrypt this table of contents for an archive of ours, "
+              "and walking it undecrypted crashes the game";
+        return false;
+    }
+
+    why = std::format("unknown table-of-contents encryption mark: {:#010x}", encryption);
+    return false;
 }
 
 /// Где в объекте архива лежит признак «пускать к корню».
@@ -153,7 +193,7 @@ std::unique_ptr<Packfiles> Packfiles::create(const EngineAddresses& addresses,
     const auto mountAt = addresses.pointerTo<MountAt>("packfile_mount");
 
     if (construct == nullptr || open == nullptr || mountAt == nullptr) {
-        error = "адреса работы с архивами игры не разрешились";
+        error = "the game archive addresses did not resolve";
         return nullptr;
     }
 
@@ -237,6 +277,8 @@ std::vector<std::string> Packfiles::pump(const FileSystem& files) {
 
         const std::string path = each.request;
 
+        spdlog::debug("opening archive {}", path);
+
         if (!open_(object, path.c_str(), true, kPlainArchive, 0)) {
             // Молчать нельзя: архив, который не открылся, проявится не ошибкой,
             // а пустым местом в мире — и искать причину будут долго.
@@ -251,46 +293,6 @@ std::vector<std::string> Packfiles::pump(const FileSystem& files) {
         //
         // Без него игра не отдаёт устройству пути, начинающиеся с корня её
         // пространства имён, — а именно такие у неё все.
-        // Признак «пускать к корню» ставится прямо в поле объекта: Mount
-        // берёт его оттуда, а не из довода. Смещение снято с кода самой игры —
-        // `mov r8b, [rcx+114h]` перед вызовом MountGlobal, а третий довод у
-        // MountGlobal это как раз allowRoot.
-        //
-        // Без него игра не отдаёт устройству пути, начинающиеся с корня её
-        // пространства имён, — а именно такие у неё все.
-        {
-            // ВРЕМЕННО: смотрим, заполнила ли игра объект вообще.
-            const auto* const bytes = static_cast<const std::uint8_t*>(object);
-            std::string head;
-            for (std::size_t i = 0; i < 0x60; ++i) {
-                head += std::format("{:02x}", bytes[i]);
-                if (i % 8 == 7) {
-                    head += ' ';
-                }
-            }
-            spdlog::warn("ARC object after open: {}", head);
-
-            // Смотрим, что лежит по указателям из объекта: где-то там имена
-            // записей, уже расшифрованные игрой.
-            for (const std::size_t at : {std::size_t{0x10}, std::size_t{0x20},
-                                         std::size_t{0x50}}) {
-                const auto* const where =
-                    *reinterpret_cast<const std::uint8_t* const*>(bytes + at);
-
-                if (where == nullptr) {
-                    continue;
-                }
-
-                std::string text;
-                for (std::size_t i = 0; i < 160; ++i) {
-                    const std::uint8_t c = where[i];
-                    text += (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.';
-                }
-
-                spdlog::warn("ARC at +{:#x}: {}", at, text);
-            }
-        }
-
         static_cast<std::uint8_t*>(object)[kAllowRootFlag] = 1;
 
         mountAt_(object, each.prefix.c_str());
