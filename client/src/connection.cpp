@@ -80,19 +80,24 @@ std::uint64_t nowMilliseconds() {
 } // namespace
 
 std::string_view describe(shared::RejectReason reason) noexcept {
+    // По-английски, и это тот же довод, по какому по-английски говорит лаунчер:
+    // строка уходит разом в журнал и в окно поверх игры, а присланный снимок
+    // окна и присланный журнал обязаны читаться как одно. Прежде здесь было
+    // по-русски, а «Connection refused: » перед ней — по-английски, и в
+    // присланном журнале это выглядело поломкой кодировки.
     switch (reason) {
     case shared::RejectReason::ProtocolMismatch:
-        return "версия протокола не совпадает с серверной";
+        return "the server runs another protocol version";
     case shared::RejectReason::ServerFull:
-        return "на сервере нет свободных мест";
+        return "the server is full";
     case shared::RejectReason::InvalidNickname:
-        return "имя недопустимо";
+        return "that nickname is not allowed";
     case shared::RejectReason::NicknameTaken:
-        return "имя занято";
+        return "that nickname is taken";
     case shared::RejectReason::WrongPassword:
-        return "пароль сервера неверен";
+        return "wrong server password";
     }
-    return "причина не указана";
+    return "no reason given";
 }
 
 std::string_view describe(ConnectionState state) noexcept {
@@ -238,7 +243,7 @@ void Connection::noticeSilence() {
     // сами: сервер, молчащий пять секунд подряд, для игры уже мёртв, а
     // повторные попытки начнутся тем раньше, чем раньше мы это признаем.
     disconnect_ = DisconnectReason::Lost;
-    fallBackToWaiting("сервер замолчал");
+    fallBackToWaiting("the server went silent");
 }
 
 void Connection::beginAttempt() {
@@ -248,7 +253,7 @@ void Connection::beginAttempt() {
     if (host_ == nullptr) {
         spdlog::warn("could not start connecting to {}:{}: {}", settings_.address,
                      settings_.port, error);
-        fallBackToWaiting("подключение не началось");
+        fallBackToWaiting("the connection did not start");
         return;
     }
 
@@ -275,8 +280,8 @@ void Connection::handleEvent(const net::Event& event) {
 
         // Разрыв на этапе представления почти всегда означает отказ сервера,
         // но точную причину мы уже могли получить отдельным сообщением.
-        fallBackToWaiting(state_ == ConnectionState::Connecting ? "сервер недоступен"
-                                                                : "соединение потеряно");
+        fallBackToWaiting(state_ == ConnectionState::Connecting ? "the server is unreachable"
+                                                                : "the connection was lost");
         return;
 
     case net::Event::Type::Message:
@@ -589,7 +594,7 @@ void Connection::handleReject(const shared::ServerReject& reject) {
     // бы не вернуться в игру после единственного разрыва связи.
     if (reject.reason == shared::RejectReason::NicknameTaken) {
         spdlog::warn("Connection refused: {}", describe(reject.reason));
-        fallBackToWaiting("имя пока занято");
+        fallBackToWaiting("that nickname is still taken");
         return;
     }
 
@@ -973,6 +978,11 @@ void Connection::sendQueued() {
 }
 
 void Connection::fallBackToWaiting(std::string_view reason) {
+    // Причина по-английски, как и весь журнал, и это не мелочь: строка уходит
+    // уровнем warning, то есть попадает в тот журнал, который игрок присылает,
+    // когда у него что-то не работает. Половина строк была здесь по-русски, а
+    // вторая половина — «retrying in N ms» — по-английски, и присланная строка
+    // читалась как поломка кодировки.
     if (state_ == ConnectionState::Rejected) {
         return;
     }

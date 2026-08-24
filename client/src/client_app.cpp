@@ -916,7 +916,7 @@ void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed,
 
             menu->failed(connection.rejectReason().has_value()
                              ? describe(*connection.rejectReason())
-                             : std::string_view{"сервер отказал"});
+                             : std::string_view{"the server refused the connection"});
         }
         return;
     }
@@ -926,7 +926,7 @@ void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed,
     if (progress.stage == MenuStage::Connected &&
         connection.disconnectReason() == DisconnectReason::Lost) {
         progress.stage = MenuStage::Lost;
-        menu->disconnected("связь с сервером потеряна");
+        menu->disconnected("the connection to the server was lost");
         return;
     }
 
@@ -1543,7 +1543,7 @@ void run() {
             // разобрать загруженную GTA обратно клиент не умеет. Игрок
             // возвращается в меню, но игра под ним та же.
             if (menu != nullptr) {
-                menu->disconnected("вы отключились от сервера");
+                menu->disconnected("you left the server");
             }
 
             status.update(ConnectionState::Waiting, shared::kInvalidPlayerId);
