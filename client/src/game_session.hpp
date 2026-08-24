@@ -12,6 +12,7 @@
 #include "game/file_system.hpp"
 #include "game/frontend.hpp"
 #include "game/hud.hpp"
+#include "game/manifests.hpp"
 #include "game/markers.hpp"
 #include "game/nameplates.hpp"
 #include "game/ped_animation.hpp"
@@ -121,6 +122,7 @@ public:
                                                              game::StreamingFiles* streamed,
                                                              game::DataFiles* described,
                                                              game::Packfiles* archives,
+                                                             game::Manifests* manifests,
                                                              std::string& error);
 
     ~GameSession();
@@ -146,7 +148,8 @@ private:
                 Settings settings, const SessionStatus& status, const RemoteRoster& roster,
                 LocalState& localState, SessionMail& mail, UiFeed& feed, FrameWatch& watch,
                 game::FileDevice* files, game::StreamingFiles* streamed,
-                game::DataFiles* described, game::Packfiles* archives);
+                game::DataFiles* described, game::Packfiles* archives,
+                game::Manifests* manifests);
 
     /// Вешает отложенные подмены файлов и один раз проверяет, что игра берёт
     /// файлы у нас.
@@ -401,6 +404,9 @@ private:
     /// Архивы игры, присланные сервером. Открывает их она сама; наше дело —
     /// попросить и потом объявить ей то, что внутри.
     game::Packfiles* archives_ = nullptr;
+
+    /// Разбор описей карты. Пусто — адреса не разрешились.
+    game::Manifests* manifests_ = nullptr;
 
     /// Чтение файлов средствами самой игры — им и проверяется, что подмена
     /// дошла до неё, а не осталась нашей выдумкой.

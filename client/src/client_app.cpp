@@ -14,6 +14,7 @@
 #include "game/environment.hpp"
 #include "game/data_files.hpp"
 #include "game/file_device.hpp"
+#include "game/manifests.hpp"
 #include "game/file_system.hpp"
 #include "game/streaming_files.hpp"
 #include "game/focus_pause.hpp"
@@ -989,6 +990,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
                                               game::StreamingFiles* streamed,
                                               game::DataFiles* described,
                                               game::Packfiles* archives,
+                                              game::Manifests* manifests,
                                               std::unique_ptr<game::ScriptStartup>& startup) {
     std::string error;
 
@@ -1032,7 +1034,7 @@ std::unique_ptr<GameSession> startGameSession(const game::EngineAddresses& addre
 
     auto session = GameSession::create(addresses, std::move(sessionSettings), status, roster,
                                        localState, mail, feed, watch, files, streamed, described,
-                                       archives, error);
+                                       archives, manifests, error);
     if (session == nullptr) {
         spdlog::error("the game session was not created: {}", error);
     }
@@ -1394,6 +1396,10 @@ void run() {
     // бывает. Без них у неё есть модель, но нет машины.
     std::unique_ptr<game::DataFiles> dataFiles;
 
+    // И четвёртая, без которой карта доезжает, но в мир не встаёт: опись
+    // содержимого. Из неё игра узнаёт, что расстановку вообще надо ставить.
+    std::unique_ptr<game::Manifests> manifests;
+
     std::unique_ptr<GameSession> session;
 
     if (engine != nullptr && hooksReady && probeNatives(*engine)) {
@@ -1431,6 +1437,13 @@ void run() {
             spdlog::warn("nothing to hand our data files to the game with: {}", dataError);
         }
 
+        std::string manifestError;
+        manifests = game::Manifests::create(*engine, manifestError);
+
+        if (manifests == nullptr) {
+            spdlog::warn("nothing to read map manifests with: {}", manifestError);
+        }
+
         std::string archiveError;
         packfiles = game::Packfiles::create(*engine, archiveError);
 
@@ -1444,7 +1457,8 @@ void run() {
 
         session = startGameSession(*engine, settings, status, roster, localState, mail, feed,
                                    frameWatch, fileDevice.get(), streamedFiles.get(),
-                                   dataFiles.get(), packfiles.get(), scriptStartup);
+                                   dataFiles.get(), packfiles.get(), manifests.get(),
+                                   scriptStartup);
     }
 
     // Соединения нет, пока его не попросят, и это главная перемена устройства
@@ -1756,6 +1770,18 @@ void run() {
                     // он нужен игре дважды — и файлом, и описанием, — а описание
                     // ему выпишется тут же, ниже.
                     if (describes(entry) && !game::isArchetypeList(streamed)) {
+                        continue;
+                    }
+
+                    // Опись содержимого — не модель, и стримингу её объявлять
+                    // незачем. Но и выбрасывать нельзя: без неё расстановка
+                    // карты доезжает файлом и в мир не встаёт. Её разбирает
+                    // сама игра, отдельной дорогой.
+                    if (streamed.ends_with(".ymf")) {
+                        if (manifests != nullptr) {
+                            manifests->add(resources.resourceRoot() / entry.name,
+                                           entry.name.substr(0, entry.name.find('/')));
+                        }
                         continue;
                     }
 

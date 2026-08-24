@@ -670,6 +670,51 @@ inline constexpr std::array kSignatures = std::to_array<Signature>({
         .expectedMatches = 1,
     },
     {
+        .id = "manifest_load",
+        .description = "Разбор описи содержимого (`_manifest.ymf`) средствами самой игры. "
+                       "Без неё расстановка карты (.ymap) до игры доходит файлом, но в мир "
+                       "не встаёт: связывает расстановку с архетипами именно опись.",
+        .pattern = "49 8B F0 4C 8B F1 48 85 D2 0F 84",
+        .offset = -0x23,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
+    {
+        .id = "manifest_chunk",
+        .description = "Кусок памяти, в который игра складывает разобранную опись. "
+                       "Один на игру: разбор в него пишет, а чтение из него делает она сама.",
+        .pattern = "C7 80 ? 01 00 00 02 00 00 00 E8 ? ? ? ? 8B 06",
+        .offset = -4,
+        .resolution = Resolution::RipRelative,
+        .expectedMatches = 1,
+    },
+    {
+        .id = "manifest_chunk_init",
+        .description = "Готовит кусок к разбору. Зовётся до разбора описи.",
+        .pattern = "48 8D 4F 10 B2 01 48 89 2F",
+        .offset = -0x2E,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
+    {
+        .id = "manifest_chunk_apply",
+        .description = "Применяет разобранную опись: с этого мгновения игра знает про "
+                       "зависимости расстановки от архетипов. Зовётся после разбора.",
+        .pattern = "45 38 AE C0 00 00 00 0F 95 C3 E8",
+        .offset = -4,
+        .resolution = Resolution::RipRelative,
+        .expectedMatches = 1,
+    },
+    {
+        .id = "manifest_chunk_clear",
+        .description = "Освобождает кусок. Зовётся последней, иначе следующая опись "
+                       "ложится поверх предыдущей.",
+        .pattern = "33 FF 48 8D 4B 10 B2 01",
+        .offset = -0x15,
+        .resolution = Resolution::Address,
+        .expectedMatches = 1,
+    },
+    {
         .id = "packfile_mount",
         .description = "rage::fiPackfile::Mount — вешает открытый архив на приставку и запоминает "
                        "её в самом архиве. Второе не менее важно первого: без запомненной "

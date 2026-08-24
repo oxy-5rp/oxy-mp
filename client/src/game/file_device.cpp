@@ -358,15 +358,34 @@ struct FileDevice::Device {
     mutable std::mutex mutex;
     std::unordered_map<std::string, std::filesystem::path> files;
 
+    /// Приставки, под которыми отдаётся один файл на любой запрос.
+    ///
+    /// Их единицы, поэтому перечнем, а не таблицей: перебрать три записи дешевле,
+    /// чем считать хеш строки.
+    std::vector<std::pair<std::string, std::filesystem::path>> anything;
+
     [[nodiscard]] const std::filesystem::path* find(const char* gamePath) const {
         if (gamePath == nullptr) {
             return nullptr;
         }
 
+        const std::string wanted = normalize(gamePath);
+
         const std::lock_guard guard{mutex};
 
-        const auto found = files.find(normalize(gamePath));
-        return found == files.end() ? nullptr : &found->second;
+        // Точное соответствие сильнее приставки: под одной приставкой может
+        // лежать и названный файл, и подмена на всё остальное.
+        if (const auto found = files.find(wanted); found != files.end()) {
+            return &found->second;
+        }
+
+        for (const auto& [prefix, source] : anything) {
+            if (wanted.starts_with(prefix)) {
+                return &source;
+            }
+        }
+
+        return nullptr;
     }
 
     [[nodiscard]] static HANDLE toHandle(std::uint64_t handle) {
@@ -453,6 +472,33 @@ void FileDevice::serve(const std::string& gamePath, const std::filesystem::path&
 
     const std::lock_guard guard{device_->mutex};
     device_->files.insert_or_assign(normalize(gamePath), source);
+}
+
+void FileDevice::answerAllWith(const std::string& prefix, const std::filesystem::path& source) {
+    if (device_ == nullptr) {
+        return;
+    }
+
+    const std::string wanted = normalize(prefix.c_str());
+
+    const std::lock_guard guard{device_->mutex};
+
+    const auto found = std::ranges::find(device_->anything, wanted,
+                                         &std::pair<std::string, std::filesystem::path>::first);
+
+    if (source.empty()) {
+        if (found != device_->anything.end()) {
+            device_->anything.erase(found);
+        }
+        return;
+    }
+
+    if (found != device_->anything.end()) {
+        found->second = source;
+        return;
+    }
+
+    device_->anything.emplace_back(wanted, source);
 }
 
 std::size_t FileDevice::count() const noexcept {

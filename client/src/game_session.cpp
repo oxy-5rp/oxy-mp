@@ -115,7 +115,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
                          const RemoteRoster& roster, LocalState& localState, SessionMail& mail,
                          UiFeed& feed, FrameWatch& watch, game::FileDevice* files,
                          game::StreamingFiles* streamed, game::DataFiles* described,
-                         game::Packfiles* archives)
+                         game::Packfiles* archives, game::Manifests* manifests)
     : natives_(table),
       settings_(std::move(settings)),
       status_(status),
@@ -139,6 +139,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       streamed_(streamed),
       described_(described),
       archives_(archives),
+      manifests_(manifests),
       gameFiles_(addresses),
       controls_(table),
       onlineMap_(table),
@@ -171,6 +172,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
                                                  game::StreamingFiles* streamed,
                                                  game::DataFiles* described,
                                                  game::Packfiles* archives,
+                                                 game::Manifests* manifests,
                                                  std::string& error) {
     if (g_session != nullptr) {
         error = "игровая сессия уже создана";
@@ -185,7 +187,7 @@ std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& ad
 
     std::unique_ptr<GameSession> session{new GameSession{
         addresses, table, std::move(settings), status, roster, localState, mail, feed, watch,
-        files, streamed, described, archives}};
+        files, streamed, described, archives, manifests}};
 
     // Ни одна из частей не является обязательной для остальных, поэтому
     // ненайденные нативы не отменяют сессию, а лишь отключают своё. Молчать при
@@ -349,6 +351,14 @@ void GameSession::serveFiles() {
     // объявлено стримингу.
     watch_.mark("loading data descriptions");
     const std::size_t described = described_ != nullptr ? described_->pump() : 0;
+
+    // Описи карты — следом за описаниями, и порядок снова обязателен: опись
+    // ссылается на архетипы, а они к этому времени должны быть уже загружены.
+    // Без описи расстановка карты доезжает файлом и в мир не встаёт.
+    if (manifests_ != nullptr) {
+        watch_.mark("reading map manifests");
+        (void)manifests_->pump(*files_);
+    }
 
     // Архивы — после описаний и до отчёта: открытый архив тут же обходится, и
     // его содержимое встанет в те же очереди, что и россыпь файлов, только
