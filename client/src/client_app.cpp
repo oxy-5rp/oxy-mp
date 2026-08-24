@@ -1640,7 +1640,7 @@ void run() {
             // ещё через полминуты, уже войдя в мир.
             auto beatAt = std::chrono::steady_clock::now();
 
-            const auto report = [&](std::size_t done, std::size_t total, bool downloading) {
+            const auto report = [&](const ResourceCache::Report& progress) {
                 if (const auto now = std::chrono::steady_clock::now(); now - beatAt >= kSyncBeat) {
                     beatAt = now;
 
@@ -1653,10 +1653,15 @@ void run() {
                     return;
                 }
 
-                if (downloading) {
-                    menu->downloadingResources(done, total);
+                // Закачка показывается байтами, сверка — файлами, и это не
+                // прихоть страницы: сверка тысячи файлов проходит мгновенно и
+                // мерится их числом, а закачка весит гигабайты, и число файлов
+                // о её длительности не говорит ничего.
+                if (progress.downloading) {
+                    menu->downloadingResources(progress.bytesDone, progress.bytesTotal,
+                                               progress.bytesPerSecond);
                 } else {
-                    menu->validatingResources(done, total);
+                    menu->validatingResources(progress.filesDone, progress.filesTotal);
                 }
             };
 

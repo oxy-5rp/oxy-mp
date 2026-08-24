@@ -772,10 +772,23 @@ void Menu::validatingResources(std::size_t done, std::size_t total) {
     }
 }
 
-void Menu::downloadingResources(std::size_t done, std::size_t total) {
-    if (state_ != nullptr) {
-        state_->emit("connection:downloadingResources", nlohmann::json::array({done, total}));
+void Menu::downloadingResources(std::uint64_t bytesDone, std::uint64_t bytesTotal,
+                                std::uint64_t bytesPerSecond) {
+    if (state_ == nullptr) {
+        return;
     }
+
+    // Скорость — довод необязательный, и пустой она быть не должна: страница
+    // отличает «скорость не названа» от «скорость ноль» по самому наличию
+    // довода.
+    if (bytesPerSecond == 0) {
+        state_->emit("connection:downloadingResources",
+                     nlohmann::json::array({bytesDone, bytesTotal}));
+        return;
+    }
+
+    state_->emit("connection:downloadingResources",
+                 nlohmann::json::array({bytesDone, bytesTotal, bytesPerSecond}));
 }
 
 void Menu::loadingResources() {

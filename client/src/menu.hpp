@@ -141,8 +141,17 @@ public:
     /// Сверка того, что уже лежит в кеше, с тем, что предлагает сервер.
     void validatingResources(std::size_t done, std::size_t total);
 
-    /// Закачка недостающего.
-    void downloadingResources(std::size_t done, std::size_t total);
+    /// Закачка недостающего — **в байтах**, а не в файлах.
+    ///
+    /// Страница показывает это полосой с подписью и сама переводит числа в
+    /// килобайты и мегабайты (`progressInBytes`). Прежде сюда уходил счётчик
+    /// файлов, и человек читал «2 Б из 4691 Б» там, где качалось четыре
+    /// гигабайта карты.
+    ///
+    /// `bytesPerSecond` — ноль, пока считать не по чему: страница показывает
+    /// скорость, только если она названа.
+    void downloadingResources(std::uint64_t bytesDone, std::uint64_t bytesTotal,
+                              std::uint64_t bytesPerSecond);
 
     /// Ресурсы разложены, сервер их запускает.
     void loadingResources();

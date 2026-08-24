@@ -366,6 +366,48 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
     std::size_t done = 0;
 
+    // Байты считаются отдельно от файлов, и показываются они тоже по-разному:
+    // сверка — файлами, закачка — байтами. Общий вес берётся у списка сервера:
+    // он назвал размер каждого файла, и складывать их достовернее, чем гадать
+    // по числу.
+    std::uint64_t bytesTotal = 0;
+    for (const shared::ResourceEntry& entry : wanted) {
+        bytesTotal += entry.size;
+    }
+
+    std::uint64_t bytesDone = 0;
+
+    // Скорость считается только по тому, что действительно качалось: файл,
+    // взятый из кеша, приходит мгновенно, и включив его в счёт, мы показали бы
+    // человеку гигабайты в секунду.
+    std::uint64_t downloaded = 0;
+    const auto startedAt = std::chrono::steady_clock::now();
+
+    const auto speed = [&downloaded, startedAt]() -> std::uint64_t {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - startedAt);
+
+        // Первые полсекунды скорость не называется вовсе: на коротком отрезке
+        // она скачет так, что показывать её незачем.
+        if (downloaded == 0 || elapsed < std::chrono::milliseconds{500}) {
+            return 0;
+        }
+
+        return downloaded * 1000 / static_cast<std::uint64_t>(elapsed.count());
+    };
+
+    const auto tell = [&report, &done, &wanted, &bytesDone, &bytesTotal,
+                       &speed](bool downloading) {
+        if (report) {
+            report(Report{.filesDone = done,
+                          .filesTotal = wanted.size(),
+                          .bytesDone = bytesDone,
+                          .bytesTotal = bytesTotal,
+                          .bytesPerSecond = downloading ? speed() : 0,
+                          .downloading = downloading});
+        }
+    };
+
     // Разобранные свёртки этого обхода: качать один свёрток по разу на каждый
     // лежащий в нём файл значило бы четыре тысячи закачек вместо одной.
     std::map<std::string, bool> attempted;
@@ -393,10 +435,15 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
             // Закачкой считается только та, которой ещё не было: свёрток уже
             // лежащий здесь берётся мгновенно, и говорить о нём «качаем» значило
             // бы показывать человеку закачку там, где её нет.
-            if (report) {
-                report(done, wanted.size(), !bundles_->has(entry.bundle));
-            }
+            const bool have = bundles_->has(entry.bundle);
+
+            tell(!have);
             ++done;
+            bytesDone += entry.size;
+
+            if (!have) {
+                downloaded += entry.size;
+            }
 
             if (!ensureBundle(serverAddress, serverPort, entry.bundle, resource, attempted)) {
                 continue;
@@ -436,10 +483,13 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
             std::filesystem::exists(unpacked, ec) &&
             (!partOfResource || (laid != laid_.end() && laid->second == entry.hash));
 
-        if (report) {
-            report(done, wanted.size(), !cached);
-        }
+        tell(!cached);
         ++done;
+        bytesDone += entry.size;
+
+        if (!cached) {
+            downloaded += entry.size;
+        }
 
         if (cached) {
             spdlog::debug("resource file {} is already cached", entry.name);
@@ -504,9 +554,10 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
     // Последний доклад — о том, что разобраны все. Без него счётчик остановился
     // бы на предпоследнем: доклад идёт перед работой, а не после неё, потому что
     // закачка длится минутами и сказать о ней нужно до, а не потом.
-    if (report) {
-        report(wanted.size(), wanted.size(), false);
-    }
+    done = wanted.size();
+    bytesDone = bytesTotal;
+
+    tell(false);
 
     return ready;
 }
