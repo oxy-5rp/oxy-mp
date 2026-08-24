@@ -4,6 +4,7 @@ oxymp_library(shared
         src/mvalue.cpp
         src/mvalue_codec.cpp
         src/serialization.cpp
+        src/source_kind.cpp
         src/bundle.cpp
         src/vault.cpp
     INCLUDES include

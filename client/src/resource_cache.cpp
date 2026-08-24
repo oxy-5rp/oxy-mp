@@ -301,6 +301,38 @@ bool ResourceCache::ensureBundle(const std::string& serverAddress, std::uint16_t
     return remember(bundles_->bind(resource, hash, key));
 }
 
+void ResourceCache::sweep(const std::set<std::string>& sealed,
+                          const std::set<std::string>& offered) {
+    if (sealed.empty()) {
+        return;
+    }
+
+    std::error_code ec;
+    std::size_t gone = 0;
+
+    for (auto item = laid_.begin(); item != laid_.end();) {
+        const std::size_t slash = item->first.find('/');
+
+        // Имя без косой черты — игровой файл, а не часть ресурса: он лежит под
+        // отпечатком и к этой уборке отношения не имеет.
+        if (slash == std::string::npos || offered.contains(item->first) ||
+            !sealed.contains(item->first.substr(0, slash))) {
+            ++item;
+            continue;
+        }
+
+        if (std::filesystem::remove(resourceRoot() / item->first, ec)) {
+            ++gone;
+        }
+
+        item = laid_.erase(item);
+    }
+
+    if (gone != 0) {
+        spdlog::info("Removed {} stale files left by an earlier version of a resource", gone);
+    }
+}
+
 void ResourceCache::shed(const std::string& name) {
     const auto laid = laid_.find(name);
 
@@ -338,8 +370,15 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
     // лежащий в нём файл значило бы четыре тысячи закачек вместо одной.
     std::map<std::string, bool> attempted;
 
+    // Что сервер предложил и у каких ресурсов есть свёрток — по ним в конце
+    // подчищаются остатки прошлых сборок режима.
+    std::set<std::string> offered;
+    std::set<std::string> sealed;
+
     for (const shared::ResourceEntry& entry : wanted) {
         const std::size_t slash = entry.name.find('/');
+
+        offered.insert(entry.name);
 
         // Файл, лежащий в свёртке, на диск не ложится вовсе — ради этого свёрток
         // и заведён. Клиент кладёт себе свёрток целиком и читает из него по
@@ -364,6 +403,7 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
             }
 
             shed(entry.name);
+            sealed.insert(resource);
 
             ready.push_back(Ready{.name = entry.name, .path = {}, .bundled = true});
             continue;
@@ -447,6 +487,10 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         spdlog::debug("resource file {} is ready", entry.name);
         ready.push_back(Ready{.name = entry.name, .path = unpacked});
     }
+
+    // Остатки прошлых сборок режима — до записи описи: она пишется один раз, и
+    // выброшенное отсюда не должно в неё попасть.
+    sweep(sealed, offered);
 
     // Свёртки, которыми давно не пользовались, уезжают. Здесь, а не при заводе
     // кеша: к этому мгновению известно, какие из них нужны прямо сейчас, — а до

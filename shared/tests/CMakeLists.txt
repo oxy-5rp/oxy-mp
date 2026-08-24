@@ -3,6 +3,7 @@ add_executable(oxymp_shared_tests
     message_tests.cpp
     mvalue_tests.cpp
     serialization_tests.cpp
+    source_kind_tests.cpp
 )
 
 target_link_libraries(oxymp_shared_tests PRIVATE

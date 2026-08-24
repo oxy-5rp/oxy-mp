@@ -1,5 +1,7 @@
 #include "asset_kind.hpp"
 
+#include <oxymp/shared/resource/source_kind.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -20,6 +22,16 @@ std::string lowerSuffix(std::string_view fileName) {
 }
 
 bool worthStreaming(std::string_view fileName) {
+    // Исходники режима отвергаются первыми и по общему списку, а не по своему.
+    //
+    // Список один на клиента и сервер намеренно: сервер по нему решает, что
+    // запечатать в свёрток, и разойдись эти два ответа — файл, ушедший в
+    // свёрток, мы бы здесь пообещали игре как модель, а взять его с диска ей
+    // было бы неоткуда.
+    if (shared::isSourceOrMarkup(fileName)) {
+        return false;
+    }
+
     // `.ymf` здесь не по ошибке: расширение у игры своё, но читает такие файлы
     // не стриминг, а загрузчик содержимого DLC. Объявленный стримингу вручную,
     // он отвергается — что игра нам и отвечала.

@@ -1,5 +1,7 @@
 #include "server.hpp"
 
+#include <oxymp/shared/resource/source_kind.hpp>
+
 #ifdef OXYMP_WITH_JS
 #include "js_runtime.hpp"
 #endif
@@ -1670,6 +1672,15 @@ void Server::reject(net::PeerId peer, shared::RejectReason reason) {
     host_->disconnect(peer);
 }
 
+/// Сколько может весить файл, чтобы уехать в свёрток.
+///
+/// Шестнадцать мегабайт. Не больше — свёрток лежит у сервера в памяти целиком, а
+/// клиент качает его одним куском с потолком в две сотни мегабайт, и один
+/// толстый файл внутри означал бы, что не приедет ничего. Не меньше — собранный
+/// бандл режима со встроенными картинками легко берёт несколько мегабайт, и
+/// выставить его наружу было бы ровно тем, чего свёрток должен не допускать.
+constexpr std::uintmax_t kMaxBundledFile = 16ULL * 1024 * 1024;
+
 void Server::startResources() {
     for (const std::string& complaint : catalog_.load(config_.resourceDirectory,
                                                       config_.resources)) {
@@ -1720,10 +1731,18 @@ void Server::startResources() {
         std::vector<std::string> packable;
 
         for (const std::string& file : resource.clientFiles) {
-            if (goesIntoBundle(file)) {
+            std::error_code failed;
+            const std::uintmax_t size = std::filesystem::file_size(resource.root / file, failed);
+
+            if (goesIntoBundle(file, resource.dataFiles.contains(file),
+                               failed ? 0 : size)) {
                 packable.push_back(file);
                 continue;
             }
+
+            // О том, что осталось видимым, говорится в журнал: хозяин сервера
+            // вправе знать, какие его файлы лежат у игрока обычным текстом.
+            spdlog::debug("resource \"{}\": {} is served as a plain file", resource.name, file);
 
             if (!resources_.add(resource.root / file,
                                 std::format("{}/{}", resource.name, file))) {
@@ -1756,25 +1775,54 @@ void Server::startResources() {
     }
 }
 
-bool Server::goesIntoBundle(std::string_view file) {
-    // Список — белый, и это выбрано нарочно, ровно наоборот тому, как выбран
-    // чёрный список у клиента.
-    //
-    // Прячем мы исходники режима и страницы интерфейса — то, что читает наш же
-    // клиент. Всё, чего мы здесь не узнали, остаётся отдельным файлом, потому
-    // что его может читать сама игра, а свёрток ей не открыть. Ошибка в белом
-    // списке — файл, оставшийся видимым; ошибка в чёрном была бы игрой без
-    // машины и без карты.
-    static constexpr std::array kSource = std::to_array<std::string_view>(
-        {".js", ".cjs", ".mjs", ".ts", ".jsx", ".tsx", ".json", ".html", ".htm", ".css", ".scss",
-         ".map", ".vue", ".svelte", ".md", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-         ".webp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3", ".ogg", ".wav"});
+bool Server::goesIntoBundle(std::string_view file, bool described, std::uintmax_t size) {
+    // Описание игры не прячется никогда, и это первая проверка, а не последняя.
+    // Читает такие файлы загрузчик данных игры, а подать ему свёрток нечем: он
+    // умеет путь на диске и больше ничего.
+    if (described || shared::isGameDescription(file)) {
+        return false;
+    }
 
-    // Каталог моделей — тот же, о котором договорились alt:V и FiveM, и он
-    // сильнее расширения: рядом с моделью кладут и `.json`, который читает игра.
+    // Крупное остаётся снаружи независимо от рода.
+    //
+    // Свёрток лежит у сервера в памяти целиком и качается клиентом одним куском,
+    // с потолком в две сотни мегабайт. Один огромный файл внутри — и не приедет
+    // весь свёрток, то есть режим не поднимется вовсе. Снаружи он в худшем
+    // случае виден; это несравнимо меньшая беда.
+    if (size > kMaxBundledFile) {
+        return false;
+    }
+
+    // Исходник режима прячется всегда — где бы он ни лежал.
+    //
+    // **Каталог `stream/` здесь ничего не решает, и это исправление.** Прежде он
+    // решал всё: под ним по уговору alt:V и FiveM лежат модели, и оттуда не
+    // бралось ничего. Но чужие режимы кладут туда и свой интерфейс — у режима,
+    // на котором это проверялось, под `stream/browsers/` нашлось 504 файла кода
+    // и разметки, три четверти всей его клиентской логики, — и все они ложились
+    // игроку на диск открытым текстом. Место файла не говорит о его роде.
+    //
+    // Безопасно это потому, что до игры файл ресурса доходит ровно двумя
+    // дорогами, и обе для исходника закрыты: стримингу клиент их не объявляет
+    // сам (`worthStreaming` спрашивает тот же общий список), а загрузчику данных
+    // попадает лишь названное в `[meta]` — оно отсечено выше.
+    if (shared::isSourceOrMarkup(file)) {
+        return true;
+    }
+
+    // Дальше — не исходники, а всё прочее: картинки, звуки, шрифты, модели.
+    // Здесь `stream/` по-прежнему решает: под ним лежит то, что читает игра.
     if (file.starts_with("stream/") || file.find("/stream/") != std::string_view::npos) {
         return false;
     }
+
+    // Список — белый, и это выбрано нарочно. Прячем то, что читает наш же
+    // клиент; всё, чего мы здесь не узнали, остаётся отдельным файлом, потому
+    // что его может читать сама игра. Ошибка в белом списке — файл, оставшийся
+    // видимым; ошибка в чёрном была бы игрой без машины и без карты.
+    static constexpr std::array kMedia = std::to_array<std::string_view>(
+        {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".woff", ".woff2", ".ttf",
+         ".otf", ".eot", ".mp3", ".ogg", ".wav"});
 
     const std::size_t dot = file.rfind('.');
     if (dot == std::string_view::npos) {
@@ -1785,7 +1833,7 @@ bool Server::goesIntoBundle(std::string_view file) {
     std::ranges::transform(suffix, suffix.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-    return std::ranges::find(kSource, suffix) != kSource.end();
+    return std::ranges::find(kMedia, suffix) != kMedia.end();
 }
 
 void Server::stopResources() {
