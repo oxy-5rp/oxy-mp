@@ -2,15 +2,19 @@
 
 #include <include/cef_parser.h>
 #include <include/cef_scheme.h>
+#include <include/wrapper/cef_byte_read_handler.h>
 #include <include/wrapper/cef_stream_resource_handler.h>
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace oxymp::cefui {
 namespace {
@@ -129,6 +133,177 @@ private:
     IMPLEMENT_REFCOUNTING(UiSchemeFactory);
 };
 
+/// Способ читать файлы ресурсов и замок к нему.
+///
+/// Ставится из сетевого потока, читается из потока ввода-вывода Chromium.
+/// Копия под замком, а не ссылка: обработчик живёт долго, а поставить новый
+/// могут посреди его работы.
+std::mutex& readerLock() {
+    static std::mutex lock;
+    return lock;
+}
+
+ResourceReader& readerSlot() {
+    static ResourceReader reader;
+    return reader;
+}
+
+[[nodiscard]] ResourceReader currentReader() {
+    const std::lock_guard guard{readerLock()};
+    return readerSlot();
+}
+
+/// Держатель байтов, которые отданы Chromium.
+///
+/// Нужен потому, что `CefByteReadHandler` память не присваивает — он берёт
+/// указатель и того, кто её держит. Держим здесь: страница читает свой файл не
+/// мгновенно, а кусками, и временный буфер к третьему куску был бы уже мёртв.
+class BytesHolder : public CefBaseRefCounted {
+public:
+    explicit BytesHolder(std::vector<std::uint8_t> data) : data_{std::move(data)} {}
+
+    [[nodiscard]] const std::vector<std::uint8_t>& data() const noexcept { return data_; }
+
+private:
+    std::vector<std::uint8_t> data_;
+
+    IMPLEMENT_REFCOUNTING(BytesHolder);
+};
+
+/// Отдаёт файлы ресурсов: сперва из свёртка, потом с диска.
+///
+/// Порядок именно такой. В свёртке лежит то, что читает наш же клиент, —
+/// исходники и страницы; на диске остаётся то, что читает сама игра, — модели и
+/// звуки. Страница вправе попросить и то и другое.
+class ResourceSchemeFactory : public CefSchemeHandlerFactory {
+public:
+    explicit ResourceSchemeFactory(std::filesystem::path directory)
+        : directory_{std::move(directory)} {}
+
+    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                         const CefString&,
+                                         CefRefPtr<CefRequest> request) override {
+        const std::string path = pathOf(request->GetURL().ToString());
+        if (path.empty()) {
+            return nullptr;
+        }
+
+        // Первый кусок пути — имя ресурса, остальное — путь внутри него. Так
+        // страницы режимов и написаны под alt:V, и делить иначе нельзя: имена
+        // файлов у разных ресурсов совпадают сплошь и рядом.
+        const std::size_t slash = path.find('/');
+        if (slash == std::string::npos) {
+            return nullptr;
+        }
+
+        const std::string_view resource{path.data(), slash};
+        const std::string_view file{path.data() + slash + 1, path.size() - slash - 1};
+
+        if (file.empty()) {
+            return nullptr;
+        }
+
+        if (const ResourceReader reader = currentReader(); reader) {
+            std::vector<std::uint8_t> contents;
+
+            if (reader(resource, file, contents)) {
+                const CefRefPtr<BytesHolder> holder = new BytesHolder{std::move(contents)};
+
+                const CefRefPtr<CefStreamReader> stream = CefStreamReader::CreateForHandler(
+                    new CefByteReadHandler{holder->data().data(), holder->data().size(), holder});
+
+                return new CefStreamResourceHandler{mimeType(std::filesystem::path{file}), stream};
+            }
+        }
+
+        const std::filesystem::path onDisk = resolve(path);
+        if (onDisk.empty()) {
+            return nullptr;
+        }
+
+        const CefRefPtr<CefStreamReader> reader = CefStreamReader::CreateForFile(onDisk.string());
+
+        if (reader == nullptr) {
+            // Отладочным уровнем: браузер сам просит favicon.ico у всякой
+            // страницы, и своего у ресурса обычно нет.
+            spdlog::debug("страница ресурса просит {}, а его нет нигде", path);
+            return nullptr;
+        }
+
+        return new CefStreamResourceHandler{mimeType(onDisk), reader};
+    }
+
+private:
+    /// Путь из ссылки, без доводов и якоря. Пусто — ссылка не разобралась.
+    [[nodiscard]] static std::string pathOf(const std::string& url) {
+        CefURLParts parts;
+        if (!CefParseURL(url, parts)) {
+            return {};
+        }
+
+        std::string path = CefString{&parts.path}.ToString();
+
+        for (const char separator : {'?', '#'}) {
+            if (const std::size_t at = path.find(separator); at != std::string::npos) {
+                path.resize(at);
+            }
+        }
+
+        while (!path.empty() && path.front() == '/') {
+            path.erase(0, 1);
+        }
+
+        // Ссылка приходит в виде, пригодном для адреса: пробелы и кириллица в
+        // ней записаны процентами. В свёртке же имя лежит таким, каким его
+        // написал автор ресурса.
+        return CefURIDecode(path, true, static_cast<cef_uri_unescape_rule_t>(
+                                            UU_SPACES | UU_URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS))
+            .ToString();
+    }
+
+    /// Путь на диске, если он лежит внутри каталога. Пусто — отказ.
+    [[nodiscard]] std::filesystem::path resolve(const std::string& path) const {
+        std::error_code ec;
+
+        const std::filesystem::path inside =
+            std::filesystem::weakly_canonical(directory_ / path, ec);
+        if (ec) {
+            return {};
+        }
+
+        const std::filesystem::path root = std::filesystem::weakly_canonical(directory_, ec);
+        if (ec) {
+            return {};
+        }
+
+        // Проверка счётом, а не просмотром пути на точки: `..` можно записать
+        // по-разному, а приведённый к каноническому виду путь либо лежит внутри,
+        // либо нет.
+        const auto shared = std::mismatch(root.begin(), root.end(), inside.begin(), inside.end());
+        if (shared.first != root.end()) {
+            spdlog::warn("the page asks for {}: that is outside its directory", path);
+            return {};
+        }
+
+        return inside;
+    }
+
+    [[nodiscard]] static CefString mimeType(const std::filesystem::path& file) {
+        std::string extension = file.extension().string();
+        if (!extension.empty() && extension.front() == '.') {
+            extension.erase(0, 1);
+        }
+
+        const std::string known = CefGetMimeType(extension).ToString();
+
+        return known.empty() ? CefString{"application/octet-stream"} : CefString{known};
+    }
+
+    std::filesystem::path directory_;
+
+    IMPLEMENT_REFCOUNTING(ResourceSchemeFactory);
+};
+
 } // namespace
 
 void registerUiScheme(std::string page, const std::filesystem::path& directory) {
@@ -151,16 +326,20 @@ void registerUiScheme(std::string page, const std::filesystem::path& directory) 
     }
 }
 
+void setResourceReader(ResourceReader reader) {
+    const std::lock_guard guard{readerLock()};
+    readerSlot() = std::move(reader);
+}
+
 void registerResourceScheme(const std::filesystem::path& directory) {
-    // Тот же обработчик, что и у меню, но без встроенной страницы: здесь всё
-    // приходит с диска, из того, что клиент скачал у сервера.
     if (!CefRegisterSchemeHandlerFactory("http", "resource",
-                                         new UiSchemeFactory{std::string{}, directory})) {
+                                         new ResourceSchemeFactory{directory})) {
         spdlog::error("the http://resource scheme was not registered: mode pages will not open");
         return;
     }
 
-    spdlog::debug("страницы ресурсов берутся из {}", directory.string());
+    spdlog::debug("страницы ресурсов берутся из свёртков, а недостающее — из {}",
+                  directory.string());
 }
 
 } // namespace oxymp::cefui

@@ -196,6 +196,42 @@ void playerName(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(toJs(isolate, fromAbi(name)));
 }
 
+/// Содержимое файла ресурса.
+///
+/// Отвечает строкой, а не буфером, и это не упрощение: спрашивают отсюда
+/// исходный текст модуля, а загрузчик модулей Node принимает именно текст.
+/// Двоичное содержимое сюда не ходит — картинки и шрифты страница берёт своей
+/// схемой в Chromium, минуя изолят.
+///
+/// `undefined` — такого файла в свёртке нет. Отличать его от пустого файла
+/// обязательно: пустой файл законен, и приняв его за отсутствующий, загрузчик
+/// пошёл бы искать модуль дальше по дереву и пожаловался бы не на то.
+void readResourceFile(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    Resource& resource = resourceOf(isolate);
+    const OxympJsHost& host = resource.host();
+
+    if (host.readResourceFile == nullptr || info.Length() < 1) {
+        return;
+    }
+
+    const std::string file = fromJs(isolate, info[0]);
+
+    const OxympJsBytes contents =
+        host.readResourceFile(host.context, toAbi(resource.name()), toAbi(file));
+
+    if (contents.data == nullptr) {
+        return;
+    }
+
+    // Содержимое принадлежит клиенту и живо до следующего вызова — поэтому оно
+    // копируется в V8 здесь же, а не запоминается указателем.
+    const std::string_view text{reinterpret_cast<const char*>(contents.data), contents.length};
+
+    info.GetReturnValue().Set(toJs(isolate, text));
+}
+
 // --- Окна интерфейса --------------------------------------------------------
 
 void createWebView(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -314,6 +350,8 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, native, "sessionHandle", sessionHandle);
     addFunction(context, native, "sessionId", sessionId);
     addFunction(context, native, "playerName", playerName);
+
+    addFunction(context, native, "readResourceFile", readResourceFile);
 
     addFunction(context, native, "createWebView", createWebView);
     addFunction(context, native, "destroyWebView", destroyWebView);

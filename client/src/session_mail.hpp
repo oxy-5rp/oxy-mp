@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -429,6 +430,32 @@ public:
         return std::exchange(clientResources_, {});
     }
 
+    // --- Чтение файлов ресурса -------------------------------------------------
+
+    /// Чем достают содержимое файла ресурса. false — такого файла нет.
+    ///
+    /// `resource` — имя ресурса, `file` — путь от его корня.
+    using ResourceReader = std::function<bool(std::string_view resource, std::string_view file,
+                                              std::vector<std::uint8_t>& contents)>;
+
+    /// Ставит способ читать файлы ресурсов. Ставит сеть, спрашивают двое других.
+    ///
+    /// Через почту, а не прямой ссылкой, по той же причине, что и мостик к
+    /// окнам: свёртки живут у кеша в сетевом потоке, а спрашивают из них
+    /// скриптовая машина (кадр игры) и страницы интерфейса (поток Chromium).
+    ///
+    /// Пустой обработчик означает «читать неоткуда»: ресурс тогда не поднимется,
+    /// и это честнее, чем поднять его с пустыми файлами.
+    void setResourceReader(ResourceReader reader) {
+        const std::lock_guard guard{mutex_};
+        resourceReader_ = std::move(reader);
+    }
+
+    [[nodiscard]] ResourceReader resourceReader() const {
+        const std::lock_guard guard{mutex_};
+        return resourceReader_;
+    }
+
     // --- Окна интерфейса, которыми распоряжается ресурс ------------------------
 
     /// Чем игровой поток дотягивается до слоя интерфейса.
@@ -578,6 +605,9 @@ private:
     std::vector<ViewEvent> viewEvents_;
     std::vector<KeyEvent> keys_;
     ViewBridge viewBridge_;
+
+    /// Чем читают файлы ресурсов. Пусто, пока сеть не разобрала ни одного.
+    ResourceReader resourceReader_;
     std::vector<shared::Vec3> teleports_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;

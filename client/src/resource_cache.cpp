@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <span>
 #include <fstream>
 
@@ -28,6 +29,14 @@ constexpr DWORD kTimeout = 30'000;
 
 /// Размер куска, которым читается ответ.
 constexpr DWORD kChunkLength = 64 * 1024;
+
+/// Сколько свёрток лежит в кеше, если к нему не обращаются.
+///
+/// Две недели. Не меньше — человек играет на нескольких серверах и возвращается
+/// на прежний через неделю, а стёртый свёрток означает повторную закачку в сотню
+/// мегабайт. И не больше — иначе кеш растёт от каждого обновления режима, и
+/// растёт незаметно.
+constexpr auto kBundleLifetime = std::chrono::hours{24 * 14};
 
 /// Предел на размер одного ресурса, в байтах.
 ///
@@ -112,7 +121,9 @@ struct InternetHandle {
 
 } // namespace
 
-ResourceCache::ResourceCache(std::filesystem::path directory) : directory_(std::move(directory)) {
+ResourceCache::ResourceCache(std::filesystem::path directory)
+    : directory_(std::move(directory)),
+      bundles_(std::make_shared<BundleStore>(directory_ / "bundles")) {
     std::error_code ec;
     std::filesystem::create_directories(directory_, ec);
 
@@ -235,88 +246,77 @@ void ResourceCache::writeIndex() const {
     }
 }
 
-const std::vector<std::uint8_t>* ResourceCache::openBundle(
-    const std::string& serverAddress, std::uint16_t serverPort, const std::string& hash,
-    std::unordered_map<std::string, std::vector<std::uint8_t>>& opened,
-    const std::vector<std::uint8_t>& key) {
-    if (const auto known = opened.find(hash); known != opened.end()) {
-        return known->second.empty() ? nullptr : &known->second;
+bool ResourceCache::ensureBundle(const std::string& serverAddress, std::uint16_t serverPort,
+                                 const std::string& hash, const std::string& resource,
+                                 std::map<std::string, bool>& attempted) {
+    // Ключ у свёртка тот же, что и у всего остального: он один на сборку.
+    const std::vector<std::uint8_t> key = shared::Vault::builtInKey();
+
+    // Пара «свёрток и ресурс», а не один свёрток: один и тот же свёрток может
+    // достаться двум ресурсам только по совпадению содержимого, но привязать его
+    // надо к обоим, а качать — один раз.
+    const std::string mark = hash + ' ' + resource;
+
+    if (const auto known = attempted.find(mark); known != attempted.end()) {
+        return known->second;
     }
 
-    const std::string url = std::format("http://{}:{}/resources/dlcpacks/{}.resource",
-                                        serverAddress, serverPort, hash);
+    const auto remember = [&attempted, &mark](bool outcome) {
+        attempted.emplace(mark, outcome);
+        return outcome;
+    };
 
-    spdlog::debug("downloading bundle {}", hash);
+    if (!bundles_->has(hash)) {
+        const std::string url = std::format("http://{}:{}/resources/dlcpacks/{}.resource",
+                                            serverAddress, serverPort, hash);
 
-    std::string error;
+        spdlog::debug("downloading bundle {} of resource {}", hash, resource);
 
-    // Размер заранее неизвестен: в списке названы файлы, а не свёрток. Предел
-    // тот же, что и у прочей закачки, — его назначает download.
-    std::vector<std::uint8_t> packed = download(url, 0, error);
+        std::string error;
 
-    if (packed.empty()) {
-        spdlog::error("bundle {} failed to download: {}", hash, error);
+        // Размер заранее неизвестен: в списке названы файлы, а не свёрток. Предел
+        // тот же, что и у прочей закачки, — его назначает download.
+        const std::vector<std::uint8_t> packed = download(url, 0, error);
 
-        // Пустая запись — отметка «не вышло»: иначе за ним пошли бы ещё
-        // четыре тысячи раз, по разу на каждый файл внутри.
-        opened.emplace(hash, std::vector<std::uint8_t>{});
-        return nullptr;
+        if (packed.empty()) {
+            spdlog::error("bundle {} failed to download: {}", hash, error);
+            return remember(false);
+        }
+
+        if (const std::string actual = shared::fingerprint(packed); actual != hash) {
+            spdlog::error("bundle {} arrived corrupted: checksum mismatch", hash);
+            return remember(false);
+        }
+
+        if (!shared::Bundle::readHeader(packed).has_value()) {
+            spdlog::error("bundle {} is not a bundle", hash);
+            return remember(false);
+        }
+
+        if (!bundles_->keep(hash, packed)) {
+            return remember(false);
+        }
     }
 
-    if (const std::string actual = shared::fingerprint(packed); actual != hash) {
-        spdlog::error("bundle {} arrived corrupted: checksum mismatch", hash);
-        opened.emplace(hash, std::vector<std::uint8_t>{});
-        return nullptr;
-    }
-
-    if (!shared::Bundle::readHeader(packed).has_value()) {
-        spdlog::error("bundle {} is not a bundle", hash);
-        opened.emplace(hash, std::vector<std::uint8_t>{});
-        return nullptr;
-    }
-
-    (void)key;
-
-    const auto placed = opened.emplace(hash, std::move(packed));
-    return &placed.first->second;
+    return remember(bundles_->bind(resource, hash, key));
 }
 
-bool ResourceCache::takeFromBundle(const std::vector<std::uint8_t>& bundle,
-                                   const std::string& name,
-                                   const std::vector<std::uint8_t>& key,
-                                   std::vector<std::uint8_t>& contents) {
-    const auto header = shared::Bundle::readHeader(bundle);
-    if (!header) {
-        return false;
+void ResourceCache::shed(const std::string& name) {
+    const auto laid = laid_.find(name);
+
+    // Опись — единственное, что помнит о разложенном. Не значившегося в ней мы
+    // не раскладывали, и трогать чужое в кеше незачем.
+    if (laid == laid_.end()) {
+        return;
     }
 
-    const std::vector<shared::Bundle::Entry> index = shared::Bundle::readIndex(
-        *header,
-        std::span{bundle}.subspan(shared::Bundle::kHeaderLength, header->indexLength), key);
+    std::error_code ec;
 
-    // Внутри свёртка путь от корня ресурса, а в списке имя составное — с именем
-    // ресурса впереди. Отрезаем его: имя ресурса свёртку неизвестно и не нужно.
-    const std::size_t slash = name.find('/');
-    const std::string inside = slash == std::string::npos ? name : name.substr(slash + 1);
-
-    const auto found = std::ranges::find(index, inside, &shared::Bundle::Entry::path);
-    if (found == index.end()) {
-        return false;
+    if (std::filesystem::remove(resourceRoot() / name, ec)) {
+        spdlog::debug("{} no longer lies on the disk: it is read from the bundle", name);
     }
 
-    const auto at = static_cast<std::size_t>(header->bodyStart() + found->offset);
-    const auto size = static_cast<std::size_t>(found->size);
-
-    if (at + size > bundle.size()) {
-        return false;
-    }
-
-    contents.assign(bundle.begin() + static_cast<std::ptrdiff_t>(at),
-                    bundle.begin() + static_cast<std::ptrdiff_t>(at + size));
-
-    shared::Bundle::openBody(contents, found->offset, *header, key);
-
-    return true;
+    laid_.erase(laid);
 }
 
 std::vector<ResourceCache::Ready> ResourceCache::sync(
@@ -334,11 +334,41 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
     std::size_t done = 0;
 
-    // Уже скачанные свёртки. Живут ровно столько, сколько идёт разбор: из них
-    // достают файлы и забывают — держать гигабайты чужой карты в памяти незачем.
-    std::unordered_map<std::string, std::vector<std::uint8_t>> bundles;
+    // Разобранные свёртки этого обхода: качать один свёрток по разу на каждый
+    // лежащий в нём файл значило бы четыре тысячи закачек вместо одной.
+    std::map<std::string, bool> attempted;
 
     for (const shared::ResourceEntry& entry : wanted) {
+        const std::size_t slash = entry.name.find('/');
+
+        // Файл, лежащий в свёртке, на диск не ложится вовсе — ради этого свёрток
+        // и заведён. Клиент кладёт себе свёрток целиком и читает из него по
+        // одному файлу, когда спросят: исходники режима так и не становятся у
+        // игрока обычным текстом.
+        //
+        // Составное имя обязательно: в свёртке лежат части ресурсов, а имя без
+        // косой черты — это игровой файл, и свёртка у него быть не может.
+        if (!entry.bundle.empty() && slash != std::string::npos) {
+            const std::string resource = entry.name.substr(0, slash);
+
+            // Закачкой считается только та, которой ещё не было: свёрток уже
+            // лежащий здесь берётся мгновенно, и говорить о нём «качаем» значило
+            // бы показывать человеку закачку там, где её нет.
+            if (report) {
+                report(done, wanted.size(), !bundles_->has(entry.bundle));
+            }
+            ++done;
+
+            if (!ensureBundle(serverAddress, serverPort, entry.bundle, resource, attempted)) {
+                continue;
+            }
+
+            shed(entry.name);
+
+            ready.push_back(Ready{.name = entry.name, .path = {}, .bundled = true});
+            continue;
+        }
+
         // Куда лечь — решает вид имени.
         //
         // Игровой файл (`amgone.rpf`) ложится под отпечатком: имя у разных
@@ -350,7 +380,7 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         // тянет `./assets/app.js`. Разложи мы их под отпечатками — ни один из
         // этих путей не нашёл бы ничего, а поправить их некому: писал их
         // хозяин сервера под alt:V, где дерево сохраняется.
-        const bool partOfResource = entry.name.find('/') != std::string::npos;
+        const bool partOfResource = slash != std::string::npos;
 
         const std::filesystem::path unpacked =
             partOfResource ? resourceRoot() / entry.name
@@ -373,36 +403,6 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
 
         if (cached) {
             spdlog::debug("resource file {} is already cached", entry.name);
-            ready.push_back(Ready{.name = entry.name, .path = unpacked});
-            continue;
-        }
-
-        // Файл из свёртка берётся не отдельной закачкой, а из него.
-        //
-        // Свёрток качается один раз на весь ресурс: на чужой карте это разница
-        // между одним запросом и четырьмя с половиной тысячами. Раскладывается
-        // он по тем же местам, что и отдельные файлы, — снаружи ничего не
-        // меняется.
-        if (!entry.bundle.empty()) {
-            const std::vector<std::uint8_t>* const opened =
-                openBundle(serverAddress, serverPort, entry.bundle, bundles, key);
-
-            if (opened == nullptr) {
-                continue;
-            }
-
-            std::vector<std::uint8_t> plain;
-            if (!takeFromBundle(*opened, entry.name, key, plain)) {
-                spdlog::error("resource file {} is not in its bundle", entry.name);
-                continue;
-            }
-
-            if (!writeFile(unpacked, plain)) {
-                spdlog::error("resource file {} could not be written to the cache", entry.name);
-                continue;
-            }
-
-            laid_[entry.name] = entry.hash;
             ready.push_back(Ready{.name = entry.name, .path = unpacked});
             continue;
         }
@@ -447,6 +447,11 @@ std::vector<ResourceCache::Ready> ResourceCache::sync(
         spdlog::debug("resource file {} is ready", entry.name);
         ready.push_back(Ready{.name = entry.name, .path = unpacked});
     }
+
+    // Свёртки, которыми давно не пользовались, уезжают. Здесь, а не при заводе
+    // кеша: к этому мгновению известно, какие из них нужны прямо сейчас, — а до
+    // разбора списка нужным выглядит всякий.
+    bundles_->prune(kBundleLifetime);
 
     // Опись пишется один раз, в конце: полторы тысячи записей на диск после
     // каждого файла стоили бы дороже самой закачки.

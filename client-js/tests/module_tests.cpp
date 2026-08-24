@@ -54,6 +54,17 @@ struct Recorder {
     /// Строка, отданная границе последней. Граница обещает, что она жива до
     /// следующего вызова, — значит, хранить её обязан клиент, а не вызов.
     std::string lastName;
+
+    /// Подставной свёрток ресурса: путь от его корня в содержимое файла.
+    ///
+    /// Настоящий клиент читает это из запечатанного файла в кеше; здесь довольно
+    /// таблицы. Проверяется не шифр — он проверен своим набором, — а то, что
+    /// машина берёт файлы отсюда, а не с диска: на диске их в этих проверках нет
+    /// вовсе.
+    std::map<std::string, std::string> bundle;
+
+    /// Содержимое, отданное границе последним. По той же причине, что и имя.
+    std::string lastFile;
 };
 
 Recorder& recorder() {
@@ -96,8 +107,26 @@ std::int32_t onLocalPlayerId(void*) {
     return recorder().selfId;
 }
 
-OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
-    return OxympJsBytes{nullptr, 0};
+OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText file) {
+    Recorder& kept = recorder();
+
+    const auto found = kept.bundle.find(toText(file));
+
+    if (found == kept.bundle.end()) {
+        return OxympJsBytes{nullptr, 0};
+    }
+
+    kept.lastFile = found->second;
+
+    // Пустой файл законен, и отдавать на него нулевой указатель нельзя: машина
+    // приняла бы его за отсутствующий и пошла бы искать модуль дальше.
+    if (kept.lastFile.empty()) {
+        static constexpr std::uint8_t kNothing = 0;
+        return OxympJsBytes{&kNothing, 0};
+    }
+
+    return OxympJsBytes{reinterpret_cast<const std::uint8_t*>(kept.lastFile.data()),
+                        static_cast<std::uint32_t>(kept.lastFile.size())};
 }
 
 const std::vector<std::pair<std::int32_t, std::int32_t>>& listFor(OxympJsEntityKind kind) {
@@ -274,6 +303,32 @@ private:
     const std::string root = kept.back()->root();
 
     if (Engine::instance()->startResource(text(name), text(root), text(entry)) == 0) {
+        return false;
+    }
+
+    Engine::instance()->tick();
+    return true;
+}
+
+/// Поднимает ресурс, у которого на диске нет ни одного файла.
+///
+/// Ровно так он и приезжает к игроку: клиентская половина лежит в запечатанном
+/// свёртке в кеше, а на диск не раскладывается никогда. Корень здесь нарочно
+/// несуществующий — пойди машина хоть раз на диск, ресурс не поднялся бы, и это
+/// увидела бы первая же проверка.
+[[nodiscard]] bool runFromBundle(std::string_view name,
+                                 std::map<std::string, std::string> files,
+                                 std::string_view entry = "client/index.js") {
+    recorder().bundle = std::move(files);
+
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("oxymp-only-in-bundle-" + std::to_string(::GetTickCount64()) + "-" +
+         std::to_string(recorder().nextView));
+
+    const std::string rootText = root.string();
+
+    if (Engine::instance()->startResource(text(name), text(rootText), text(entry)) == 0) {
         return false;
     }
 
@@ -993,4 +1048,95 @@ TEST_CASE("a websocket says once that it cannot carry extra headers", "[client][
 
     CHECK(said("websocket.setExtraHeader"));
     CHECK(said("после заголовка выполнение продолжилось"));
+}
+
+
+// --- Ресурс, целиком живущий в свёртке ---------------------------------------
+//
+// Ради этого свёрток и заведён: исходники режима не должны ложиться игроку на
+// диск обычным текстом. Всё, что ниже, проверяет одно — машина берёт файлы
+// оттуда, а не с диска: на диске их в этих проверках нет вовсе.
+
+TEST_CASE("a resource runs with no file of its own on the disk", "[client][js][bundle]") {
+    REQUIRE(runFromBundle("sealed",
+                          {{"client/index.js",
+                            "import * as alt from 'alt-client';\n"
+                            "alt.log('поднялся из свёртка');\n"}}));
+
+    CHECK(said("поднялся из свёртка"));
+}
+
+TEST_CASE("a neighbour module is read from the bundle too", "[client][js][bundle]") {
+    REQUIRE(runFromBundle("sealedneighbour",
+                          {{"client/index.js",
+                            "import { приветствие } from './рядом.js';\n"
+                            "import * as alt from 'alt-client';\n"
+                            "alt.log(приветствие);\n"},
+                           {"client/рядом.js", "export const приветствие = 'сосед приехал';\n"}}));
+
+    CHECK(said("сосед приехал"));
+}
+
+TEST_CASE("a require without an extension finds its file in the bundle",
+          "[client][js][bundle]") {
+    // Собранные бандлы приходят и с `require('./chunk')` — без окончания.
+    // Отказать им значило бы не поднять половину чужих режимов.
+    REQUIRE(runFromBundle("sealedguess",
+                          {{"client/index.js",
+                            "const { имя } = require('./кусок');\n"
+                            "require('alt-client').log(имя);\n"},
+                           {"client/кусок.js", "module.exports = { имя: 'кусок нашёлся' };\n"}}));
+
+    CHECK(said("кусок нашёлся"));
+}
+
+TEST_CASE("a directory in the bundle is entered through its index", "[client][js][bundle]") {
+    REQUIRE(runFromBundle("sealedindex",
+                          {{"client/index.js",
+                            "const { где } = require('./часть');\n"
+                            "require('alt-client').log(где);\n"},
+                           {"client/часть/index.js", "module.exports = { где: 'через index' };\n"}}));
+
+    CHECK(said("через index"));
+}
+
+TEST_CASE("json from the bundle arrives parsed", "[client][js][bundle]") {
+    REQUIRE(runFromBundle("sealedjson",
+                          {{"client/index.js",
+                            "const настройки = require('./настройки.json');\n"
+                            "require('alt-client').log('порт=' + настройки.порт);\n"},
+                           {"client/настройки.json", "{ \"\u043f\u043e\u0440\u0442\": 7788 }"}}));
+
+    CHECK(said("порт=7788"));
+}
+
+TEST_CASE("a package the resource brought with it is found in the bundle",
+          "[client][js][bundle]") {
+    // Ресурс волен привезти свои зависимости с собой, и лежат они там же, где их
+    // ищет Node, — в node_modules. Свёрток от этого ничего не меняет.
+    REQUIRE(runFromBundle(
+        "sealedpackage",
+        {{"client/index.js",
+          "const { считать } = require('счёты');\n"
+          "require('alt-client').log('сумма=' + считать(2, 3));\n"},
+         {"node_modules/счёты/package.json", "{ \"main\": \"lib/счёты.js\" }"},
+         {"node_modules/счёты/lib/счёты.js",
+          "module.exports = { считать: (a, b) => a + b };\n"}}));
+
+    CHECK(said("сумма=5"));
+}
+
+TEST_CASE("an entry that is in neither place refuses out loud", "[client][js][bundle]") {
+    // Молчаливый отказ здесь стоил бы дороже всего: ресурс, который «просто не
+    // работает», ищут часами.
+    CHECK_FALSE(runFromBundle("sealedmissing", {{"client/другое.js", "\n"}}));
+
+    CHECK(said("нет ни на диске, ни в свёртке"));
+}
+
+TEST_CASE("a module missing from the bundle names itself", "[client][js][bundle]") {
+    REQUIRE(runFromBundle("sealedbroken",
+                          {{"client/index.js", "require('./потерянный');\n"}}) == false);
+
+    CHECK(said("потерянный"));
 }

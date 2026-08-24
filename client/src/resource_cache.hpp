@@ -1,13 +1,15 @@
 #pragma once
 
+#include "bundle_store.hpp"
+
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <span>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace oxymp::client {
@@ -34,8 +36,17 @@ public:
         /// Исходное имя, как у хозяина сервера: `amgone.rpf`.
         std::string name;
 
-        /// Где лежит расшифрованный файл.
+        /// Где лежит расшифрованный файл. Пусто у того, что лежит в свёртке:
+        /// своего файла на диске у него нет и не будет.
         std::filesystem::path path;
+
+        /// Читается ли он из свёртка, а не с диска.
+        ///
+        /// Различать обязательно, и не ради удобства: игре нужен файл на диске —
+        /// архив она открывает по пути, — а исходники режима на диск не ложатся
+        /// вовсе. Спутать их значило бы либо отдать игре пустоту, либо снова
+        /// разложить исходники открытым текстом.
+        bool bundled = false;
     };
 
     /// Как идут дела: сколько ресурсов разобрано из скольких и качаем ли мы
@@ -58,25 +69,19 @@ public:
     ///
     /// Неудача по одному ресурсу не отменяет остальные: пропавший файл — повод
     /// обойтись без него, а не отказаться играть.
-    /// Скачивает свёрток и запоминает его на время разбора. Пусто — не вышло.
-    ///
-    /// Свёрток качается один раз на весь ресурс, а не по разу на файл внутри: на
-    /// чужой карте это разница между одним запросом и тысячами.
-    [[nodiscard]] const std::vector<std::uint8_t>* openBundle(
-        const std::string& serverAddress, std::uint16_t serverPort, const std::string& hash,
-        std::unordered_map<std::string, std::vector<std::uint8_t>>& opened,
-        const std::vector<std::uint8_t>& key);
-
-    /// Достаёт из свёртка один файл по его составному имени.
-    [[nodiscard]] static bool takeFromBundle(const std::vector<std::uint8_t>& bundle,
-                                             const std::string& name,
-                                             const std::vector<std::uint8_t>& key,
-                                             std::vector<std::uint8_t>& contents);
-
     [[nodiscard]] std::vector<Ready> sync(const std::string& serverAddress,
                                           std::uint16_t serverPort,
                                           const std::vector<shared::ResourceEntry>& wanted,
                                           const Progress& report);
+
+    /// Свёртки ресурсов — то место, откуда клиент читает их файлы.
+    ///
+    /// Отдаётся наружу разделяемым указателем, и это не украшение. Спрашивают из
+    /// него не здесь и не в этом потоке: скриптовая машина — из кадра игры,
+    /// страницы интерфейса — из потока ввода-вывода Chromium. Оба переживают
+    /// кеш, заведённый на время одного подключения, и голая ссылка означала бы
+    /// чтение по мёртвому указателю при переходе на другой сервер.
+    [[nodiscard]] std::shared_ptr<const BundleStore> bundles() const noexcept { return bundles_; }
 
     /// Корень, в котором лежат разложенные ресурсы сервера.
     ///
@@ -86,6 +91,23 @@ public:
     [[nodiscard]] std::filesystem::path resourceRoot() const;
 
 private:
+    /// Добывает свёрток: качает, если его ещё нет, и привязывает к ресурсу.
+    ///
+    /// `attempted` помнит уже разобранные свёртки на время одного обхода: файлов
+    /// в свёртке тысячи, и без памяти он качался бы по разу на каждый.
+    [[nodiscard]] bool ensureBundle(const std::string& serverAddress, std::uint16_t serverPort,
+                                    const std::string& hash, const std::string& resource,
+                                    std::map<std::string, bool>& attempted);
+
+    /// Убирает с диска то, что прежде раскладывалось открытым текстом.
+    ///
+    /// Нужен ради тех, у кого кеш остался от прошлых сборок. Прежде клиент
+    /// раскладывал файлы ресурса деревом под настоящими именами, и после
+    /// обновления они остались бы лежать: свёрток их больше не перезаписывает, а
+    /// значит исходники режима так и лежали бы у игрока открытым текстом — ровно
+    /// то, ради избавления от чего свёрток и заведён.
+    void shed(const std::string& name);
+
     /// Качает один ресурс. Возвращает зашифрованное содержимое.
     [[nodiscard]] std::vector<std::uint8_t> download(const std::string& url,
                                                      std::uint64_t expectedSize,
@@ -98,6 +120,9 @@ private:
     void writeIndex() const;
 
     std::filesystem::path directory_;
+
+    /// Свёртки ресурсов, лежащие нераспакованными.
+    std::shared_ptr<BundleStore> bundles_;
 
     /// Что уже разложено и с каким содержимым.
     ///

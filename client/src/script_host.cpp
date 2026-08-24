@@ -61,6 +61,9 @@ struct ScriptHost::State {
     /// указатель: отдай мы его на временную, машина прочла бы освобождённую
     /// память. Граница обещает ровно это — строка жива до следующего вызова.
     std::string lastName;
+
+    /// Содержимое файла ресурса, отданное машине последним. По той же причине.
+    std::vector<std::uint8_t> lastFile;
 };
 
 namespace {
@@ -152,11 +155,30 @@ std::int32_t onLocalPlayerId(void*) {
     return state != nullptr && state->hooks.localPlayerId ? state->hooks.localPlayerId() : -1;
 }
 
-OxympJsBytes onReadResourceFile(void*, OxympJsText, OxympJsText) {
-    // Файлы ресурса клиент уже разложил на диске (см. ResourceCache), и машина
-    // читает их обычным путём — своим require. Отдельный путь через границу
-    // понадобится тогда, когда ресурсы перестанут ложиться файлами.
-    return OxympJsBytes{nullptr, 0};
+OxympJsBytes onReadResourceFile(void*, OxympJsText resource, OxympJsText file) {
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr || !state->hooks.readResourceFile) {
+        return OxympJsBytes{nullptr, 0};
+    }
+
+    // Прежнее содержимое отпускается до чтения, а не после: граница обещает
+    // жизнь до следующего вызова, и следующий вызов — это он и есть.
+    state->lastFile.clear();
+
+    if (!state->hooks.readResourceFile(view(resource), view(file), state->lastFile)) {
+        return OxympJsBytes{nullptr, 0};
+    }
+
+    // Пустой файл — файл законный: в собранной странице интерфейса такие есть.
+    // Отдать на него нулевой указатель значило бы сказать «файла нет», и машина
+    // пошла бы искать его дальше по дереву модулей.
+    if (state->lastFile.empty()) {
+        static constexpr std::uint8_t kNothing = 0;
+        return OxympJsBytes{&kNothing, 0};
+    }
+
+    return OxympJsBytes{state->lastFile.data(), static_cast<std::uint32_t>(state->lastFile.size())};
 }
 
 /// Список сущностей сессии этого рода.

@@ -82,6 +82,15 @@ public:
 
         Entities entities;
 
+        /// Прочитать файл ресурса. false — такого файла нет.
+        ///
+        /// Обработчиком, а не корнем на диске, и это существенно: файлы ресурса
+        /// лежат в свёртке, и своего файла на диске у них нет вовсе. Машина
+        /// поэтому спрашивает содержимое, а не путь, — и спросить ей больше
+        /// негде.
+        std::function<bool(std::string_view resource, std::string_view file,
+                           std::vector<std::uint8_t>& contents)> readResourceFile;
+
         /// Завести окно интерфейса. Ноль — отказ.
         std::function<std::uint32_t(std::string_view resource, std::string_view url)> createView;
 

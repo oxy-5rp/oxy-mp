@@ -131,6 +131,19 @@ std::int32_t setUp() {
     return 1;
 }
 
+/// Лежит ли такой файл в свёртке ресурса.
+///
+/// Спрашивается у клиента: свёрток и ключ к нему принадлежат ему, а не машине.
+[[nodiscard]] bool bundleHas(OxympJsText resource, const std::string& file) {
+    const OxympJsHost& client = host();
+
+    if (client.readResourceFile == nullptr) {
+        return false;
+    }
+
+    return client.readResourceFile(client.context, resource, toAbi(file)).data != nullptr;
+}
+
 std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry) {
     if (!process().ready) {
         return 0;
@@ -142,14 +155,32 @@ std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry
         return 0;
     }
 
-    const std::filesystem::path rootPath = fromAbi(root);
-    const std::filesystem::path entryPath = rootPath / fromAbi(entry);
+    const std::string entryName = fromAbi(entry);
 
+    // Корень приводится к каноническому виду, а точка входа собирается уже от
+    // него, а не приводится отдельно. Иначе они разъезжаются: у временного
+    // каталога Windows отдаёт короткое имя (`RUNNER~1`), канонический вид его
+    // разворачивает, — и корень, оставшийся коротким, перестал бы быть началом
+    // пути точки входа. Слой на JavaScript решает «свой ли это файл» сравнением
+    // начала адреса, и такое расхождение стоило бы ему всех файлов ресурса.
     std::error_code failure;
-    const std::filesystem::path resolved = std::filesystem::weakly_canonical(entryPath, failure);
+    const std::filesystem::path rootPath =
+        std::filesystem::weakly_canonical(std::filesystem::path{fromAbi(root)}, failure);
 
-    if (failure || !std::filesystem::exists(resolved)) {
-        report(kOxympJsLogError, "точки входа \"" + entryPath.string() + "\" нет");
+    if (failure) {
+        report(kOxympJsLogError, "корень ресурса \"" + fromAbi(root) + "\" не разобрать");
+        return 0;
+    }
+
+    const std::filesystem::path resolved = rootPath / entryName;
+
+    // Точки входа на диске может не быть вовсе, и это обычный случай, а не
+    // поломка: клиентская половина ресурса приезжает одним запечатанным свёртком
+    // и на диск не раскладывается никогда. Поэтому спрашиваются оба места, а
+    // отказ — только если её нет нигде.
+    if (!std::filesystem::exists(resolved) && !bundleHas(name, entryName)) {
+        report(kOxympJsLogError, "точки входа \"" + resolved.string() +
+                                     "\" нет ни на диске, ни в свёртке ресурса");
         return 0;
     }
 

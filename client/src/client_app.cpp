@@ -36,6 +36,7 @@
 #include "game/packfiles.hpp"
 #include "session_status.hpp"
 
+#include <oxymp/cefui/browser.hpp>
 #include <oxymp/client/connection.hpp>
 
 #include <spdlog/sinks/basic_file_sink.h>
@@ -1455,6 +1456,23 @@ void run() {
     // Кеш ресурсов рядом с клиентом, а не в системных каталогах: игрок должен
     // видеть, чем занято место, и уметь очистить его, просто удалив папку.
     ResourceCache resources{clientDirectory() / "cache"};
+
+    // Читать файлы ресурсов будут не здесь: скриптовая машина — из кадра игры,
+    // страницы интерфейса — из потока Chromium. Способ им отдаётся один раз и
+    // держит свёртки за разделяемый указатель, а не за этот кеш: тот живёт по
+    // подключение, а окно ресурса переживает переход на другой сервер.
+    const auto readFromBundle = [bundles = resources.bundles()](std::string_view resource,
+                                                                std::string_view file,
+                                                                std::vector<std::uint8_t>& out) {
+        return bundles->read(resource, file, out);
+    };
+
+    mail.setResourceReader(readFromBundle);
+
+    // Страницы режима читают свои файлы той же дорогой. Схема `http://resource`
+    // заведена раньше — вместе с CEF, при запуске клиента, — и способ чтения ей
+    // ставится теперь, когда свёртки есть чем открывать.
+    cefui::setResourceReader(readFromBundle);
 
     // Discord держится сетевым потоком, а не игровым: кадр игры не имеет права
     // ждать чужой процесс, а Discord может быть закрыт или не установлен вовсе.

@@ -24,6 +24,7 @@ include(embed_text)
 # Живёт в каталоге проекта: в папку игры не копируется ничего.
 if(WIN32)
     add_library(oxymp_client SHARED
+        src/bundle_store.cpp
         src/client_app.cpp
         src/dllmain.cpp
         src/discord_presence.cpp

@@ -1208,6 +1208,15 @@ void GameSession::runScripts() {
             return {};
         };
 
+        // Файлы ресурса читаются из свёртка, а не с диска: своего файла на
+        // диске у них нет вовсе. Обработчик ставит сеть — она эти свёртки и
+        // скачала.
+        hooks.readResourceFile = mail_.resourceReader();
+
+        if (!hooks.readResourceFile) {
+            spdlog::warn("no resource reader: client resources will not run");
+        }
+
         // Мостик к слою интерфейса берётся один раз: слой живёт до конца
         // процесса, и спрашивать о нём заново на каждое окно незачем.
         const SessionMail::ViewBridge views = mail_.viewBridge();
