@@ -28,8 +28,27 @@ constexpr auto kHelloTimeout = std::chrono::seconds{10};
 constexpr float kNearRing = 50.0F * 50.0F;
 constexpr float kFarRing = 150.0F * 150.0F;
 
-constexpr unsigned int kMidEvery = 2;
-constexpr unsigned int kFarEvery = 4;
+/// Сколько снимков в секунду довольно на среднем и дальнем круге.
+///
+/// Частотой, а не «каждый второй» и «каждый четвёртый», и это перемена. Пока
+/// такт был один-единственный, разницы не было: тридцать тактов, поделённые на
+/// два и на четыре, и давали эти пятнадцать и семь. Но такт стал настройкой, и
+/// делитель перестал что-либо означать — на сотне тактов «каждый четвёртый»
+/// это двадцать пять снимков в секунду человеку, который виден точкой.
+///
+/// Числа те же, что и были при тридцати тактах: пятнадцать снимков в секунду
+/// фигуре за сотню метров и семь — точке за двести. Разглядеть на них разницу
+/// нельзя никому, а платят за них все.
+constexpr std::uint16_t kMidRate = 15;
+constexpr std::uint16_t kFarRate = 7;
+
+/// Через сколько тактов снимок уходит на круг, которому довольно такой частоты.
+///
+/// Не реже одного такта: частота, названная больше самого такта, означает
+/// «каждый», а не «чаще, чем бывает».
+[[nodiscard]] unsigned int everyTicks(std::uint16_t tickRate, std::uint16_t wanted) noexcept {
+    return wanted >= tickRate ? 1U : static_cast<unsigned int>(tickRate / wanted);
+}
 
 /// Какой промежуток между снимками игрока считается молчанием.
 ///
@@ -937,6 +956,15 @@ void Server::broadcastStates() {
 
     const std::vector<std::uint8_t>& blob = blob_.bytes();
 
+    // Через сколько тактов снимок уходит на средний и дальний круг. Считается
+    // один раз на такт, а не на каждую пару: пар столько же, сколько игроков в
+    // квадрате.
+    // Не mid и far: far — это макрос из windows.h, оставшийся там с
+    // шестнадцатиразрядных времён. Он пуст, и переменная с таким именем просто
+    // исчезает, оставляя после себя невнятную ошибку разбора.
+    const unsigned int midEvery = everyTicks(config_.tickRate, kMidRate);
+    const unsigned int farEvery = everyTicks(config_.tickRate, kFarRate);
+
     // Второй проход: каждому получателю — его связка.
     for (const StateSlot& listener : slots_) {
         const auto send = [this, &listener](shared::ByteView bundle) {
@@ -971,9 +999,8 @@ void Server::broadcastStates() {
             // добавкой номера игрока. Добавка нужна, чтобы дальние обновлялись
             // вразнобой: без неё все они пришли бы одним тактом, и сеть шла бы
             // рывками.
-            const unsigned int every = distance > kFarRing  ? kFarEvery
-                                       : distance > kNearRing ? kMidEvery
-                                                              : 1U;
+            const unsigned int every =
+                distance > kFarRing ? farEvery : distance > kNearRing ? midEvery : 1U;
 
             // Молчавшего прореживать нельзя: его снимок и без того редок, и
             // пропущенный он оставит получателя без вестей на столько, что тот
@@ -1038,6 +1065,10 @@ void Server::broadcastVehicleStates() {
 
     const std::vector<std::uint8_t>& blob = vehicleBlob_.bytes();
 
+    // Те же круги и та же частота, что и у игроков.
+    const unsigned int midEvery = everyTicks(config_.tickRate, kMidRate);
+    const unsigned int farEvery = everyTicks(config_.tickRate, kFarRate);
+
     // Второй проход: каждому получателю — его связка.
     for (const auto& [peer, player] : players_) {
         const auto send = [this, listener = peer](shared::ByteView bundle) {
@@ -1067,9 +1098,8 @@ void Server::broadcastVehicleStates() {
             // всем, кто видит» проредить снимки не давала вовсе.
             const float distance = shared::distanceSquared(player.position, slot.position);
 
-            const unsigned int every = distance > kFarRing    ? kFarEvery
-                                       : distance > kNearRing ? kMidEvery
-                                                              : 1U;
+            const unsigned int every =
+                distance > kFarRing ? farEvery : distance > kNearRing ? midEvery : 1U;
 
             // Вразнобой, как и у игроков: добавка номера машины разводит
             // дальних по разным тактам. Без неё все они пришли бы одним, и сеть
