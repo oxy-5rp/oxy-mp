@@ -29,11 +29,16 @@ constexpr auto kPingInterval = std::chrono::seconds{2};
 /// Названное сервером число приходит по сети, и верить ему на слово нельзя:
 /// поделить на ноль или отвести снимку целую секунду не выйдет. Границы общие с
 /// сервером — shared::kMinTickRate.
-[[nodiscard]] std::chrono::milliseconds stateInterval(std::uint16_t tickRate) noexcept {
+///
+/// В микросекундах, как и такт у сервера, и по той же причине: шестьдесят
+/// тактов это 16.67 миллисекунды, а округлённые до шестнадцати они дают 62.5
+/// снимка в секунду. Округли одна сторона в свою сторону, другая в свою — и
+/// снимки пошли бы вразнобой с тактами.
+[[nodiscard]] std::chrono::microseconds stateInterval(std::uint16_t tickRate) noexcept {
     const std::uint16_t rate =
         std::clamp(tickRate, shared::kMinTickRate, shared::kMaxTickRate);
 
-    return std::chrono::milliseconds{1000 / rate};
+    return std::chrono::microseconds{1'000'000 / rate};
 }
 
 

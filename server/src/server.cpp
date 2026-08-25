@@ -61,26 +61,46 @@ constexpr auto kStateKeepalive = std::chrono::seconds{1};
 /// после, а не абсолютный байт.
 constexpr auto kTrafficInterval = std::chrono::seconds{10};
 
+/// Какую долю обещанной частоты сервер обязан выдерживать.
+///
+/// Ниже неё он говорит об этом вслух: отставание от собственного такта
+/// означает, что снимки уходят реже обещанного, и у всех разом дёргается всё.
+/// Узнать это иначе нельзя ниоткуда.
+constexpr double kTickShortfall = 0.9;
+
 /// Шаг цикла обслуживания. Он же — срок, отведённый разбору событий: дольше
 /// одного такта сервер не разбирает их ни при какой нагрузке.
 /// Шаг цикла обслуживания при названной частоте.
 ///
 /// Больше не постоянная: частоту такта задаёт хозяин сервера строкой
 /// `tickrate`, и по ней же клиент решает, как часто слать свои снимки.
-[[nodiscard]] std::chrono::milliseconds tickInterval(std::uint16_t tickRate) noexcept {
+///
+/// В микросекундах, а не в миллисекундах, и это не педантизм. Шестьдесят
+/// тактов — это 16.67 миллисекунды; округлённые до шестнадцати, они дают
+/// 62.5 такта в секунду вместо шестидесяти. Хозяин написал одно число, а
+/// получил другое — и это ещё полбеды: клиент считает свой промежуток тем же
+/// делением, и разойдись округления, снимки пошли бы вразнобой с тактами.
+[[nodiscard]] std::chrono::microseconds tickInterval(std::uint16_t tickRate) noexcept {
     const std::uint16_t rate =
         std::clamp(tickRate, shared::kMinTickRate, shared::kMaxTickRate);
 
-    return std::chrono::milliseconds{1000 / rate};
+    return std::chrono::microseconds{1'000'000 / rate};
 }
 
-/// Сколько ждать одного события за раз.
+/// Сколько ждать одного события за раз, самое большее.
 ///
 /// Меньше такта, и намеренно: ожидание длиной в такт означало бы, что срок
 /// разбора истекает ровно тогда, когда сервер только проснулся. Двумя
 /// миллисекундами он просыпается достаточно часто, чтобы уложиться в срок с
 /// точностью, которой хватает и снимкам, и скриптам.
-constexpr auto kPollSlice = std::chrono::milliseconds{2};
+///
+/// Самое большее — потому что последнее ожидание в такте укорачивается до
+/// того, что от такта осталось. Без этого сервер систематически опаздывал:
+/// проснувшись за миллисекунду до срока, он уходил ждать ещё на две и
+/// возвращался с опозданием. На такте в тридцать три миллисекунды это
+/// незаметно, а на шестидесяти тактах в секунду — целых три такта: измерено,
+/// 57.3 вместо 60 на пустом ожидании.
+constexpr auto kMaxPollSlice = std::chrono::milliseconds{2};
 
 std::string_view describe(shared::RejectReason reason) {
     switch (reason) {
@@ -153,6 +173,18 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
 }
 
 void Server::run(const std::atomic<bool>& stopRequested) {
+    // Срок следующего такта отсчитывается от срока прошлого, а не от того
+    // мгновения, когда мы до него дошли. Разница здесь не тонкость, и стоила
+    // она трёх тактов из шестидесяти.
+    //
+    // Работа такта — рассылка, раздача, скрипты — идёт после того, как срок
+    // разбора истёк, и на полусотне игроков занимает полмиллисекунды. Отсчитывай
+    // мы следующий срок от «сейчас», эти полмиллисекунды прибавлялись бы к
+    // каждому такту: шестьдесят обещанных превращались в пятьдесят восемь.
+    // Отсчитанный же от прошлого срока, он их поглощает — окно разбора просто
+    // становится на столько же короче.
+    auto nextTick = std::chrono::steady_clock::now();
+
     while (!stopRequested.load()) {
         // Разбор событий ограничен сроком такта, а не «пока приходят».
         //
@@ -163,7 +195,16 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         // до всего остального — ни пересдачи машин, ни раздачи, ни тика
         // скриптов. Замечено на нагрузке: за семьдесят секунд такт не отработал
         // ни разу.
-        const auto deadline = std::chrono::steady_clock::now() + tickInterval(config_.tickRate);
+        nextTick += tickInterval(config_.tickRate);
+
+        // Не поспели — не копим долг. Сервер, догоняющий прошлое, не догонит
+        // его никогда: такты пошли бы один за другим без единого ожидания, и
+        // разбор событий не получил бы ни миллисекунды.
+        if (const auto now = std::chrono::steady_clock::now(); nextTick < now) {
+            nextTick = now;
+        }
+
+        const auto deadline = nextTick;
 
         // Разбор идёт до срока — и ровно до срока, ни раньше, ни позже.
         //
@@ -172,8 +213,19 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         // Выходить же по первой тишине тоже нельзя: на пустом сервере такт
         // прокручивался бы пятьсот раз в секунду вместо тридцати, а рассылка
         // снимков вместе с ним — то есть неровно.
-        while (std::chrono::steady_clock::now() < deadline) {
-            auto event = host_->poll(kPollSlice);
+        while (true) {
+            const auto left = deadline - std::chrono::steady_clock::now();
+
+            if (left <= std::chrono::steady_clock::duration::zero()) {
+                break;
+            }
+
+            // Ждём не дольше, чем осталось от такта: последнее ожидание в
+            // такте обязано кончиться ровно на сроке, а не за ним.
+            const auto slice = std::min(
+                kMaxPollSlice, std::chrono::duration_cast<std::chrono::milliseconds>(left));
+
+            auto event = host_->poll(slice);
             if (!event) {
                 continue;
             }
@@ -789,6 +841,7 @@ void Server::reportTraffic() {
 
     if (trafficAt_ == std::chrono::steady_clock::time_point{}) {
         trafficAt_ = now;
+        reportedTick_ = tick_;
         (void)host_->takeTraffic();
         return;
     }
@@ -798,7 +851,10 @@ void Server::reportTraffic() {
         return;
     }
 
+    const std::uint64_t ticks = tick_ - reportedTick_;
+
     trafficAt_ = now;
+    reportedTick_ = tick_;
 
     const net::Host::Traffic traffic = host_->takeTraffic();
 
@@ -811,9 +867,26 @@ void Server::reportTraffic() {
     const double seconds =
         std::chrono::duration_cast<std::chrono::duration<double>>(elapsed).count();
 
+    const double achieved = static_cast<double>(ticks) / seconds;
+
     spdlog::debug("отдано транспорту: {:.0f} посылок/с, {:.1f} КБ/с при {} игроках",
                   static_cast<double>(traffic.packets) / seconds,
                   static_cast<double>(traffic.bytes) / seconds / 1024.0, players_.size());
+
+    spdlog::debug("такт: {:.1f} из {} в секунду", achieved, config_.tickRate);
+
+    // Отставание от собственной частоты — не мелочь и не отладочная
+    // подробность: снимки при нём уходят реже обещанного, и у всех разом
+    // дёргается всё. Поэтому уровнем выше и с числами, по которым видно
+    // насколько.
+    //
+    // Девять десятых — та граница, за которой отставание перестаёт быть
+    // округлением: такт длиной в тридцать три миллисекунды, просевший на
+    // десятую, опаздывает на три с лишним.
+    if (achieved < static_cast<double>(config_.tickRate) * kTickShortfall) {
+        spdlog::warn("the server runs at {:.1f} of the {} ticks per second it was told to",
+                     achieved, config_.tickRate);
+    }
 }
 
 void Server::broadcastStates() {

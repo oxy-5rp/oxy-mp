@@ -564,7 +564,7 @@ private:
     /// неизвестна. Начальное значение — тридцать снимков в секунду, столько же,
     /// сколько тактов у сервера по умолчанию; оно доживает ровно до первого
     /// ServerWelcome.
-    std::chrono::milliseconds stateInterval_{1000 / shared::kDefaultTickRate};
+    std::chrono::microseconds stateInterval_{1'000'000 / shared::kDefaultTickRate};
 
     /// Внешности наших машин и те, что уже отправлены.
     ///
