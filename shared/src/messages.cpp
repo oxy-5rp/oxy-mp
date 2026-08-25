@@ -316,6 +316,48 @@ PlayerState PlayerState::read(ByteReader& reader) {
     return message;
 }
 
+namespace {
+
+/// Пороги, за которыми снимок считается изменившимся.
+///
+/// Взяты по тому, что видно. Сантиметр — вдесятеро меньше того, что игра
+/// показывает движением ног; десятая градуса — поворот, неразличимый и вблизи;
+/// пять сантиметров у точки взгляда — она уходит на два десятка метров вперёд,
+/// и там это доли градуса.
+///
+/// Точным сравнением обойтись нельзя: положение и скорость приходят из игры
+/// числами с плавающей точкой и в последних разрядах дрожат даже у стоящего
+/// намертво.
+constexpr float kMovedEnough = 0.01F;
+constexpr float kTurnedEnough = 0.1F;
+constexpr float kAimedEnough = 0.05F;
+constexpr float kSpedEnough = 0.05F;
+
+/// Сдвинулось ли заметно.
+[[nodiscard]] bool moved(const Vec3& from, const Vec3& to, float enough) noexcept {
+    return distanceSquared(from, to) > enough * enough;
+}
+
+} // namespace
+
+bool differs(const PlayerState& sent, const PlayerState& fresh) noexcept {
+    if (sent.flags != fresh.flags || sent.weapon != fresh.weapon || sent.ammo != fresh.ammo ||
+        sent.health != fresh.health || sent.armour != fresh.armour ||
+        sent.vehicleId != fresh.vehicleId || sent.seat != fresh.seat ||
+        sent.action != fresh.action || sent.actionSequence != fresh.actionSequence) {
+        return true;
+    }
+
+    // Поворот сравнивается по кругу: с 359 градусов на 1 человек повернулся на
+    // два, а не на триста пятьдесят восемь.
+    const float apart = std::fmod(std::abs(sent.heading - fresh.heading), 360.0F);
+    const float turned = std::min(apart, 360.0F - apart);
+
+    return turned > kTurnedEnough || moved(sent.position, fresh.position, kMovedEnough) ||
+           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
+           moved(sent.aimAt, fresh.aimAt, kAimedEnough);
+}
+
 void PlayerStates::write(ByteWriter& writer) const {
     // Длина — одним байтом, и она обязана быть написана: связка переменной
     // длины, и без числа получателю не отличить конца списка от продолжения.

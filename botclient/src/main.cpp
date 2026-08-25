@@ -53,7 +53,7 @@ void printUsage() {
     std::cerr << "Использование:\n"
                  "  oxymp-botclient [--address <адрес>] [--port <номер>] [--nickname <имя>]\n"
                  "                  [--seconds <сколько работать>] [--offset <метров>]\n"
-                 "                  [--bots <сколько>] [--spread <метров>]\n\n"
+                 "                  [--bots <сколько>] [--spread <метров>] [--still]\n\n"
                  "  --offset  на сколько метров к востоку отнести круг, по которому ходит\n"
                  "            бот. Нужно, чтобы разводить ботов по карте: сбившиеся в одну\n"
                  "            точку, они не покажут, во что обходится сессия, где люди\n"
@@ -63,7 +63,10 @@ void printUsage() {
                  "            бессмысленно: половина её уйдёт на сами процессы.\n"
                  "  --spread  сторона квадрата, по которому разводятся круги ботов. Ноль\n"
                  "            означает, что все ходят вокруг одной точки: так проверяется\n"
-                 "            худший случай, когда каждый видит каждого.\n";
+                 "            худший случай, когда каждый видит каждого.\n"
+                 "  --still   не ходить, а стоять. Так меряется то, чего иначе не измерить:\n"
+                 "            клиент не шлёт снимок, в котором ничего не изменилось, и\n"
+                 "            стоящая сессия обязана стоить заметно дешевле идущей.\n";
 }
 
 /// Один бот: соединение и круг, по которому он ходит.
@@ -334,6 +337,14 @@ int main(int argc, char** argv) {
     unsigned int bots = 1;
     float spread = 0.0F;
 
+    // Стоять вместо того, чтобы ходить.
+    //
+    // Нужно ради одного замера, но замера важного: клиент не шлёт снимок, в
+    // котором ничего не изменилось, и проверить это можно только сессией, где
+    // никто не движется. Ходящие боты такую бережливость не покажут вовсе —
+    // у них меняется каждый снимок.
+    bool still = false;
+
     const std::vector<std::string> args = arguments(argc, argv);
 
     for (std::size_t i = 1; i < args.size(); ++i) {
@@ -349,6 +360,8 @@ int main(int argc, char** argv) {
             }
         } else if (argument == "--nickname" && hasValue) {
             settings.nickname = args[++i];
+        } else if (argument == "--still") {
+            still = true;
         } else if (argument == "--offset" && hasValue) {
             unsigned int offset = 0;
             if (!parseNumber(args[++i], offset)) {
@@ -484,7 +497,10 @@ int main(int argc, char** argv) {
 
                 // Бот ходит по кругу. Движение нужно настоящее: на неподвижном
                 // игроке ни интерполяция, ни экстраполяция себя не проявят.
-                const float angle = elapsed * kAngularSpeed;
+                //
+                // Стоящий — обратный случай, и он тоже нужен: на нём меряется
+                // то, во что обходится сессия, где никто не движется.
+                const float angle = still ? 0.0F : elapsed * kAngularSpeed;
 
                 oxymp::shared::PlayerState state;
                 state.position =
@@ -492,8 +508,10 @@ int main(int argc, char** argv) {
                                         bot.centre.y + kCircleRadius * std::sin(angle),
                                         bot.centre.z};
                 state.velocity =
-                    oxymp::shared::Vec3{-kCircleRadius * kAngularSpeed * std::sin(angle),
-                                        kCircleRadius * kAngularSpeed * std::cos(angle), 0.0F};
+                    still ? oxymp::shared::Vec3{}
+                          : oxymp::shared::Vec3{
+                                -kCircleRadius * kAngularSpeed * std::sin(angle),
+                                kCircleRadius * kAngularSpeed * std::cos(angle), 0.0F};
                 state.heading = angle * 180.0F / 3.14159265F;
                 state.health = 200;
 

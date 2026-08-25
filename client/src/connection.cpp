@@ -52,22 +52,16 @@ constexpr auto kPingInterval = std::chrono::seconds{2};
 /// отличает молчащего от пропавшего.
 constexpr auto kStateKeepalive = std::chrono::milliseconds{250};
 
-/// Насколько должно измениться поле снимка, чтобы снимок стоило отправлять.
+/// Насколько должна измениться машина, чтобы снимок стоило отправлять.
 ///
-/// Числа взяты по тому, что видно. Сантиметр — вдесятеро меньше того, что игра
-/// показывает движением ног; десятая градуса — поворот, неразличимый и вблизи;
-/// пять сантиметров у точки взгляда — она уходит на два десятка метров вперёд,
-/// и там это доли градуса.
-///
-/// Точным сравнением обойтись нельзя: положение и скорость приходят из игры
-/// числами с плавающей точкой и в последних разрядах дрожат даже у стоящего
-/// намертво.
+/// У игрока такие же пороги живут в общем месте (shared::differs): по ним
+/// считают и клиент, и сервер. У машины сравнивает пока один клиент, и место ей
+/// здесь; понадобится серверу — переедут туда же.
 constexpr float kMovedEnough = 0.01F;
 constexpr float kTurnedEnough = 0.1F;
-constexpr float kAimedEnough = 0.05F;
 constexpr float kSpedEnough = 0.05F;
 
-/// То же для машины: угловая скорость и ход педалей.
+/// То же для угловой скорости и хода педалей.
 ///
 /// Сотая радиана в секунду — это оборот за десять минут; сотая доля хода педали
 /// не видна ни в стоп-сигналах, ни в угле колёс.
@@ -78,35 +72,6 @@ constexpr float kNudgedEnough = 0.01F;
 [[nodiscard]] bool moved(const shared::Vec3& from, const shared::Vec3& to,
                          float enough) noexcept {
     return shared::distanceSquared(from, to) > enough * enough;
-}
-
-/// Есть ли в свежем снимке хоть что-нибудь, чего не было в отправленном.
-///
-/// Всё, что различает игру для получателя, сравнивается точно: признаки,
-/// оружие, патроны, здоровье, место в машине, движение. Всё, что приходит из
-/// игры дробным числом, — с порогом: иначе стоящий намертво человек «менялся»
-/// бы каждый кадр в последнем разряде.
-///
-/// Отметка времени сюда не входит намеренно: она у каждого снимка своя, и
-/// сравнение по ней означало бы, что не изменилось ничего никогда.
-[[nodiscard]] bool worthSending(const shared::PlayerState& sent,
-                                const shared::PlayerState& fresh) noexcept {
-    if (sent.flags != fresh.flags || sent.weapon != fresh.weapon ||
-        sent.ammo != fresh.ammo || sent.health != fresh.health ||
-        sent.armour != fresh.armour || sent.vehicleId != fresh.vehicleId ||
-        sent.seat != fresh.seat || sent.action != fresh.action ||
-        sent.actionSequence != fresh.actionSequence) {
-        return true;
-    }
-
-    // Поворот сравнивается по кругу: с 359 градусов на 1 человек повернулся на
-    // два, а не на триста пятьдесят восемь.
-    const float apart = std::fmod(std::abs(sent.heading - fresh.heading), 360.0F);
-    const float turned = std::min(apart, 360.0F - apart);
-
-    return turned > kTurnedEnough || moved(sent.position, fresh.position, kMovedEnough) ||
-           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
-           moved(sent.aimAt, fresh.aimAt, kAimedEnough);
 }
 
 /// Есть ли в свежем снимке машины хоть что-нибудь, чего не было в отправленном.
@@ -823,21 +788,32 @@ void Connection::handleRemoteState(const shared::PlayerState& state) {
     // Обогнанный снимок больше не выбрасывается: лента ставит его на своё место.
     // Выбрасывается только тот, что пришёл дважды или отстал за её начало, — с
     // ним и правда делать нечего.
-    const shared::Timestamp before = known ? player.timeline.newest().sentAt : state.sentAt;
+    const shared::PlayerState before = known ? player.timeline.newest() : state;
 
     if (!player.timeline.accept(state)) {
         return;
     }
 
+    const bool newest = player.timeline.newest().sentAt == state.sentAt;
+
     // Оценка отставания пополняется только со второго снимка: у первого нет ни
     // промежутка отправки, ни промежутка прихода — сравнивать его не с чем.
     // И только по снимку, который пришёл свежее всех: обогнанный говорит о
     // порядке доставки, а не о частоте отправки.
-    if (known && player.timeline.newest().sentAt == state.sentAt) {
-        player.pace.notice(std::chrono::milliseconds{shared::elapsedSince(before, state.sentAt)},
-                           arrived - player.latestAt);
-        player.latestAt = arrived;
-    } else if (!known) {
+    //
+    // И только по значащему. Снимок, в котором ничего не изменилось, шлётся
+    // лишь потому, что молчать дольше нельзя, — раз в секунду вместо тридцати.
+    // Прими мы его за мерило частоты, отставание у стоящего игрока уползло бы к
+    // потолку, а спадало бы оттуда десяток секунд после того, как он пойдёт.
+    if (known && newest && shared::differs(before, state)) {
+        player.pace.notice(
+            std::chrono::milliseconds{shared::elapsedSince(before.sentAt, state.sentAt)},
+            arrived - player.latestAt);
+    }
+
+    // А вот время прихода обновляется по всякому свежему снимку, значащему или
+    // нет: по нему получатель отличает молчащего от пропавшего.
+    if (!known || newest) {
         player.latestAt = arrived;
     }
 
@@ -1217,7 +1193,7 @@ void Connection::sendStateIfDue() {
     // дольше, чем kStateKeepalive. См. worthSending.
     const bool overdue = Clock::now() - stateSentAt_ >= kStateKeepalive;
 
-    if (overdue || worthSending(sentState_, localState_)) {
+    if (overdue || shared::differs(sentState_, localState_)) {
         localState_.sentAt = sentAt;
 
         const auto packet = shared::encode(localState_);
