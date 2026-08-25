@@ -107,7 +107,7 @@ add_subdirectory(botclient)
 if(WIN32)
     add_subdirectory(webui)
     add_subdirectory(cefui)
-    add_subdirectory(rglpatch)
+    add_subdirectory(launcher-patcher)
     add_subdirectory(launcher)
 endif()
 
@@ -151,7 +151,7 @@ if(WIN32)
                 -DDIST_ROOT=${CMAKE_SOURCE_DIR}/release
                 -DDIST_MENU_PAGE=${OXYMP_MENU_PAGE}
                 -P "${CMAKE_CURRENT_LIST_DIR}/cmake/dist_script.cmake"
-        DEPENDS oxymp_launcher oxymp_client oxymp_rglpatch oxymp_server oxymp_cef_runtime
+        DEPENDS oxymp_launcher oxymp_client oxymp_launcher_patcher oxymp_server oxymp_cef_runtime
                 oxymp_menu
         COMMENT "Раскладка по каталогам client и server"
         VERBATIM

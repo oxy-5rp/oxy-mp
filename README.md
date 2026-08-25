@@ -30,7 +30,7 @@
 | `client` | Внедряемый модуль: соединение, движок, нативы, игровая часть | да |
 | `webui` | Окно подключения лаунчера на движке Edge | да |
 | `cefui` | Chromium: интерфейс внутри кадра игры | да |
-| `rglpatch` | Подмена звена BattlEye внутри Rockstar Games Launcher | да |
+| `launcher-patcher` | Подмена звена BattlEye внутри Rockstar Games Launcher | да |
 | `launcher` | Окно подключения, запуск игры без BattlEye, внедрение модуля | да |
 
 Раскладка каталогов клиента — та, что раздаётся людям:
@@ -38,7 +38,7 @@
 ```
 oxymp.exe            окно подключения: адрес сервера, имя, ход запуска
 oxymp-client.dll     модуль, внедряемый в игру
-oxymp-rglpatch.dll   модуль, внедряемый в Rockstar Games Launcher
+oxymp-launcher-patcher.dll   модуль, внедряемый в Rockstar Games Launcher
 oxymp.toml           настройки: имя игрока, язык меню, язык игры
 cef/
   oxymp-cefsub.exe   подпроцесс Chromium
@@ -839,7 +839,7 @@ ctest --preset debug
 и alt:V.
 
 Что происходило, видно в трёх журналах: лаунчер пишет в консоль, подмена звена
-BattlEye — в `logs/rglpatch.log` рядом с `oxymp.exe`, клиент — в
+BattlEye — в `logs/launcher-patcher.log` рядом с `oxymp.exe`, клиент — в
 `%LOCALAPPDATA%\oxyMP\logs\client.log`.
 
 Игру поднимает та площадка, у которой она куплена, — как это делает alt:V: Rockstar через
@@ -1253,10 +1253,10 @@ client    ─┼─→ net ─→ shared
 server    ─┘
 client    ─┬─→ gamesig ─→ memscan
 sigcheck  ─┘
-rglpatch  ───────────→ shared
+launcher-patcher ────→ shared
 ```
 
-`rglpatch` не знает ни про сеть, ни про игру: он исполняется в чужом процессе, и
+`launcher-patcher` не знает ни про сеть, ни про игру: он исполняется в чужом процессе, и
 общего с остальным проектом у него — только описание уговора в `shared`. Чем
 меньше он делает внутри Rockstar Games Launcher, тем меньше поводов уронить его
 вместе с игрой.

@@ -26,9 +26,9 @@ file(MAKE_DIRECTORY "${server}")
 # в каталоге, который получает человек, им делать нечего. Он не должен гадать,
 # какой из восьми файлов запускать.
 set(client_files
-    oxymp.exe           # лаунчер, его и запускают
-    oxymp-client.dll    # то, что внедряется в игру
-    oxymp-rglpatch.dll  # подмена звена BattlEye в лаунчере Rockstar
+    oxymp.exe                   # лаунчер, его и запускают
+    oxymp-client.dll            # то, что внедряется в игру
+    oxymp-launcher-patcher.dll  # подмена звена BattlEye в лаунчере Rockstar
 )
 
 set(server_files

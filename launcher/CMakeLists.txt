@@ -83,7 +83,7 @@ target_link_libraries(oxymp_launcher PRIVATE ole32 shell32)
 # Лаунчер бесполезен без того, что он внедряет: модуля в игру, подмены звена
 # BattlEye в лаунчер Rockstar и хозяйства Chromium, которым модуль рисует
 # интерфейс изнутри игры.
-add_dependencies(oxymp_launcher oxymp_client oxymp_rglpatch oxymp_cefsub oxymp_cef_runtime)
+add_dependencies(oxymp_launcher oxymp_client oxymp_launcher_patcher oxymp_cefsub oxymp_cef_runtime)
 
 oxymp_version_info(oxymp_launcher "oxyMP — запуск игры и подключение к серверу")
 

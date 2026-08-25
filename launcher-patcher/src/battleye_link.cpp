@@ -15,7 +15,7 @@
 
 #include <windows.h>
 
-namespace oxymp::rglpatch {
+namespace oxymp::patcher {
 namespace {
 
 /// Звено, которое подменяется, и то, чем оно подменяется.
@@ -389,4 +389,4 @@ BattlEyeLink::~BattlEyeLink() {
     g_order = nullptr;
 }
 
-} // namespace oxymp::rglpatch
+} // namespace oxymp::patcher

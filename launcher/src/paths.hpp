@@ -25,7 +25,7 @@ struct Paths {
     /// Лежит рядом с клиентским, а не в отдельном каталоге: это две половины
     /// одного дела — довести игру до запуска так, чтобы в неё можно было войти.
     [[nodiscard]] std::filesystem::path launcherPatch() const {
-        return root / "oxymp-rglpatch.dll";
+        return root / "oxymp-launcher-patcher.dll";
     }
 
     /// Chromium и его хозяйство.

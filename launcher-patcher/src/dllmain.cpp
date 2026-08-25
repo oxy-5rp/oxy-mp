@@ -1,4 +1,4 @@
-// oxymp-rglpatch — модуль, который лаунчер oxyMP внедряет в Rockstar Games
+// oxymp-launcher-patcher — модуль, который лаунчер oxyMP внедряет в Rockstar Games
 // Launcher.
 //
 // Делает ровно одно: подменяет звено BattlEye в цепочке запуска игры и говорит
@@ -26,7 +26,7 @@ namespace {
 
 HANDLE g_mapping = nullptr;
 oxymp::shared::LaunchHandoff* g_handoff = nullptr;
-std::unique_ptr<oxymp::rglpatch::BattlEyeLink> g_link;
+std::unique_ptr<oxymp::patcher::BattlEyeLink> g_link;
 
 /// Открывает общий с лаунчером блок.
 ///
@@ -77,12 +77,12 @@ void setUpLogging() {
 
     try {
         const std::filesystem::path path =
-            std::filesystem::path{g_handoff->logDirectory} / "rglpatch.log";
+            std::filesystem::path{g_handoff->logDirectory} / "launcher-patcher.log";
 
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
 
-        auto logger = spdlog::basic_logger_mt("rglpatch", path.string(), true);
+        auto logger = spdlog::basic_logger_mt("launcher-patcher", path.string(), true);
         logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
         logger->flush_on(spdlog::level::debug);
 
@@ -113,7 +113,7 @@ DWORD WINAPI worker(LPVOID) {
 
     std::string error;
 
-    g_link = oxymp::rglpatch::BattlEyeLink::install(
+    g_link = oxymp::patcher::BattlEyeLink::install(
         [](std::uint32_t processId) {
             if (g_handoff == nullptr) {
                 return;
@@ -123,7 +123,7 @@ DWORD WINAPI worker(LPVOID) {
             publish(oxymp::shared::LaunchState::GameStarted);
         },
         [] {
-            oxymp::rglpatch::BattlEyeLink::Order order;
+            oxymp::patcher::BattlEyeLink::Order order;
             if (g_handoff == nullptr) {
                 return order;
             }

@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace oxymp::rglpatch {
+namespace oxymp::patcher {
 
 /// Подмена одной записи в таблице импорта модуля.
 ///
@@ -46,4 +46,4 @@ private:
     void* original_ = nullptr;
 };
 
-} // namespace oxymp::rglpatch
+} // namespace oxymp::patcher

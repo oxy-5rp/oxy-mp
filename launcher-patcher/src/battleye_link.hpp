@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace oxymp::rglpatch {
+namespace oxymp::patcher {
 
 /// Звено BattlEye в цепочке запуска Rockstar Games Launcher.
 ///
@@ -72,4 +72,4 @@ private:
     BattlEyeLink() = default;
 };
 
-} // namespace oxymp::rglpatch
+} // namespace oxymp::patcher

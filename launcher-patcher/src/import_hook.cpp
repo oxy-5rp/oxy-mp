@@ -4,7 +4,7 @@
 
 #include <windows.h>
 
-namespace oxymp::rglpatch {
+namespace oxymp::patcher {
 namespace {
 
 /// Заголовок PE по базе загруженного модуля. nullptr, если по адресу лежит не он.
@@ -165,4 +165,4 @@ ImportHook::~ImportHook() {
     writeSlot(slot_, original_);
 }
 
-} // namespace oxymp::rglpatch
+} // namespace oxymp::patcher
