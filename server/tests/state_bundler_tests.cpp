@@ -37,7 +37,7 @@ TEST_CASE("an empty bundle is not sent at all") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
     bundler.finish(collector);
 
     CHECK(collector.bundles.empty());
@@ -47,7 +47,7 @@ TEST_CASE("a bundle names how many snapshots it carries") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
 
     for (std::uint8_t mark = 0; mark < 3; ++mark) {
         const auto bytes = snapshot(40, mark);
@@ -67,7 +67,7 @@ TEST_CASE("a bundle never outgrows what the transport carries in one packet") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
 
     // Сотня снимков по семьдесят байт — семь килобайт, то есть заведомо больше
     // одной посылки. Прежде это уезжало одной связкой, и транспорт резал её на
@@ -90,7 +90,7 @@ TEST_CASE("an overgrown bundle loses no snapshot") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
 
     constexpr std::size_t kSnapshots = 100;
 
@@ -118,7 +118,7 @@ TEST_CASE("a bundle carries no more snapshots than its length byte can name") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
 
     // Снимки по два байта: в посылку их влезло бы шестьсот, а объявить можно
     // только двести пятьдесят пять. Предел здесь не от длины, а от того, что
@@ -139,7 +139,7 @@ TEST_CASE("a bundle reset after a full one starts empty") {
     StateBundler bundler;
     Collector collector;
 
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
 
     const auto bytes = snapshot(40, 1);
     bundler.add(shared::ByteView{bytes}, collector);
@@ -147,7 +147,7 @@ TEST_CASE("a bundle reset after a full one starts empty") {
 
     // Следующий получатель начинает с чистого листа: связка предыдущего не
     // должна достаться ему в наследство.
-    bundler.reset();
+    bundler.reset(shared::PlayerStates::kId);
     bundler.finish(collector);
 
     REQUIRE(collector.bundles.size() == 1);

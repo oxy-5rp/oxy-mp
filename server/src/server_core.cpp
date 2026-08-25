@@ -603,6 +603,18 @@ bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo&
     return true;
 }
 
+void ServerCore::explode(const script::ExplosionInfo& explosion) {
+    shared::Explosion message;
+    message.position = explosion.position;
+    message.kind = explosion.kind;
+    message.scale = explosion.scale;
+    message.audible = explosion.audible;
+    message.invisible = explosion.invisible;
+    message.shake = explosion.shake;
+
+    sink_->exploded(message, explosion.dimension);
+}
+
 bool ServerCore::clearTasks(shared::PlayerId id) {
     const Player* const player = players_->findById(id);
     if (player == nullptr) {

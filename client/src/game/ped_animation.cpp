@@ -3,6 +3,8 @@
 #include "native_call.hpp"
 #include "native_hashes.hpp"
 
+#include <oxymp/shared/math/joaat.hpp>
+
 #include <spdlog/spdlog.h>
 
 #include <string>
@@ -49,6 +51,28 @@ constexpr int kLoadPatience = 5000;
 constexpr bool kStealthOn = true;
 constexpr bool kStealthOff = false;
 
+/// Состояния движения игры, названные её же именами.
+///
+/// Хеш считается здесь, а не берётся у GET_HASH_KEY, и это не экономия вызова:
+/// имена состояний — часть самой игры, они не меняются между сборками, а joaat
+/// у нас общий с сервером и сверен с игрой разряд в разряд.
+constexpr std::uint32_t kIdleState = shared::joaat("motionstate_idle");
+constexpr std::uint32_t kSwimmingState = shared::joaat("motionstate_swimming");
+constexpr std::uint32_t kDivingState = shared::joaat("motionstate_diving_swim");
+constexpr std::uint32_t kParachutingState = shared::joaat("motionstate_parachuting");
+
+/// Как далеко кукла стреляет из окна машины, в метрах.
+constexpr float kDriveByRange = 300.0F;
+
+/// Меткость куклы. Ноль — не попадать вовсе.
+///
+/// Попадания считает стрелявший у себя и присылает их отдельным сообщением;
+/// попадающая по-настоящему кукла била бы второй раз по тому, кто уже посчитан.
+constexpr int kNoAccuracy = 0;
+
+/// Способ стрельбы. FIRING_PATTERN_FULL_AUTO — «жать на спуск, пока сказано».
+constexpr std::uint32_t kFiringPatternFullAuto = 0xC6EE6B4CU;
+
 } // namespace
 
 PedAnimation::PedAnimation(const NativeTable& table) noexcept
@@ -57,7 +81,13 @@ PedAnimation::PedAnimation(const NativeTable& table) noexcept
       playAnim_(table.handlerFor(natives::kTaskPlayAnim)),
       stealthMovement_(table.handlerFor(natives::kSetPedStealthMovement)),
       gameTimer_(table.handlerFor(natives::kGetGameTimer)),
-      clearTasks_(table.handlerFor(natives::kClearPedTasks)) {}
+      clearTasks_(table.handlerFor(natives::kClearPedTasks)),
+      taskJump_(table.handlerFor(natives::kTaskJump)),
+      taskClimb_(table.handlerFor(natives::kTaskClimb)),
+      taskReload_(table.handlerFor(natives::kTaskReloadWeapon)),
+      taskCover_(table.handlerFor(natives::kTaskStayInCover)),
+      taskDriveBy_(table.handlerFor(natives::kTaskDriveBy)),
+      motionState_(table.handlerFor(natives::kForcePedMotionState)) {}
 
 PedAnimation::Clip PedAnimation::clipFor(shared::PedAction action) {
     switch (action) {
@@ -108,20 +138,109 @@ bool PedAnimation::ready(std::string_view dictionary) {
 }
 
 void PedAnimation::applyPosture(int ped, std::uint32_t flags, std::uint32_t previous) const {
-    if (ped == 0 || stealthMovement_ == nullptr) {
+    if (ped == 0) {
         return;
     }
 
-    const bool crouching = shared::has(flags, shared::PlayerFlag::Crouching);
+    // Присед — положение тела: длится, пока признак стоит, и задаётся один раз
+    // на переходе.
+    if (stealthMovement_ != nullptr) {
+        const bool crouching = shared::has(flags, shared::PlayerFlag::Crouching);
 
-    if (crouching == shared::has(previous, shared::PlayerFlag::Crouching)) {
+        if (crouching != shared::has(previous, shared::PlayerFlag::Crouching)) {
+            // Последний довод — имя набора движений для крадущейся походки.
+            // Пустая строка означает «взять обычный», и другого нам не нужно:
+            // своей походки мы персонажу не придумываем, а повторяем ту,
+            // которой идёт его хозяин.
+            invokeNative<void>(stealthMovement_, ped, crouching ? kStealthOn : kStealthOff, "");
+        }
+    }
+
+    // Начался ли признак ровно в этом кадре.
+    const auto begun = [flags, previous](shared::PlayerFlag flag) {
+        return shared::has(flags, flag) && !shared::has(previous, flag);
+    };
+
+    // Состояние движения. Навязывается только то, чего игра не выведет сама:
+    // парашют у куклы не раскроется никогда — парашюта у неё нет и не будет, —
+    // а плавание и погружение она выводит из воды, но выводит не сразу, и
+    // названное прямо оно начинается в тот же кадр, что и у хозяина.
+    if (motionState_ != nullptr) {
+        const auto force = [this, ped](std::uint32_t state) {
+            // Три последних довода: не ждать окончания нынешнего движения, не
+            // сбрасывать скорость и не перезапускать состояние, если оно уже то
+            // самое. Так же зовут его и скрипты игры.
+            invokeNative<bool>(motionState_, ped, state, false, false, false);
+        };
+
+        if (begun(shared::PlayerFlag::Parachuting)) {
+            force(kParachutingState);
+        } else if (begun(shared::PlayerFlag::Diving)) {
+            force(kDivingState);
+        } else if (begun(shared::PlayerFlag::Swimming)) {
+            force(kSwimmingState);
+        } else if (shared::has(previous, shared::PlayerFlag::Parachuting) &&
+                   !shared::has(flags, shared::PlayerFlag::Parachuting)) {
+            // Приземлился. Состояние приходится снимать явно: навязанное, оно
+            // само не кончается, и персонаж остался бы висеть в позе парашюта
+            // посреди тротуара.
+            force(kIdleState);
+        }
+    }
+
+    // Короткие движения — задачами и ровно на переходе. Заказанные каждый кадр,
+    // они начинались бы заново до того, как успеют начаться.
+    if (taskJump_ != nullptr && begun(shared::PlayerFlag::Jumping)) {
+        invokeNative<void>(taskJump_, ped, true);
+    }
+
+    // Лазание и перемах — одна задача: игра сама решает, за что тут можно
+    // ухватиться, а различаются они только высотой препятствия.
+    if (taskClimb_ != nullptr &&
+        (begun(shared::PlayerFlag::Climbing) || begun(shared::PlayerFlag::Vaulting))) {
+        invokeNative<void>(taskClimb_, ped, true);
+    }
+
+    if (taskReload_ != nullptr && begun(shared::PlayerFlag::Reloading)) {
+        invokeNative<void>(taskReload_, ped, true);
+    }
+
+    if (taskCover_ != nullptr && begun(shared::PlayerFlag::InCover)) {
+        // Задача сама ищет ближайшее укрытие. Не найдёт — не случится ничего, и
+        // это верное поведение: у нас персонаж стоит там же, где хозяин, а
+        // значит укрытие рядом либо есть у обоих, либо нет ни у кого.
+        invokeNative<void>(taskCover_, ped);
+    }
+}
+
+bool PedAnimation::busy(std::uint32_t flags) noexcept {
+    // Ровно те признаки, которым отвечает задача. Пока она идёт, задача ходьбы
+    // выдаваться не должна: выданная поверх, она отменяет начатое.
+    //
+    // Плавания и погружения здесь нет намеренно: это состояние движения, а не
+    // задача, и плывущего вести к цели по-прежнему нужно — иначе он поплывёт на
+    // месте.
+    return shared::has(flags, shared::PlayerFlag::Jumping) ||
+           shared::has(flags, shared::PlayerFlag::Climbing) ||
+           shared::has(flags, shared::PlayerFlag::Vaulting) ||
+           shared::has(flags, shared::PlayerFlag::InCover) ||
+           shared::has(flags, shared::PlayerFlag::Parachuting) ||
+           shared::has(flags, shared::PlayerFlag::GettingUp);
+}
+
+void PedAnimation::applyDriveBy(int ped, const shared::Vec3& target) const {
+    if (ped == 0 || taskDriveBy_ == nullptr) {
         return;
     }
 
-    // Последний довод — имя набора движений для крадущейся походки. Пустая
-    // строка означает «взять обычный», и другого нам не нужно: своей походки мы
-    // персонажу не придумываем, а повторяем ту, которой идёт его хозяин.
-    invokeNative<void>(stealthMovement_, ped, crouching ? kStealthOn : kStealthOff, "");
+    // Ни цели-персонажа, ни цели-машины: стреляем по точке. Кто там на самом
+    // деле, решает не наша сторона — попадания считает стрелявший у себя.
+    //
+    // Меткость нулевая, и это не оплошность: кукла стреляет ради вида, а урон
+    // приходит отдельным сообщением. Попадающая по-настоящему, она била бы
+    // второй раз по тому, кто уже посчитан.
+    invokeNative<void>(taskDriveBy_, ped, 0, 0, target.x, target.y, target.z, kDriveByRange,
+                       kNoAccuracy, true, kFiringPatternFullAuto);
 }
 
 bool PedAnimation::playNamed(int ped, const shared::PlayerAnimation& animation) {

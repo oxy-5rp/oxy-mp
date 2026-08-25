@@ -15,6 +15,7 @@
 #include <cmath>
 #include <csignal>
 #include <set>
+#include <unordered_map>
 #include <thread>
 #include <iostream>
 #include <memory>
@@ -167,11 +168,64 @@ struct Drawn {
     }
 };
 
+/// Насколько ровно идут чужие.
+///
+/// Заведено по тому же поводу, что и пересказ машин поимённо: в игре видно, что
+/// чужой игрок движется, но не видно, ровно ли. А ровно — это ровно то, чем
+/// занят весь счёт промежуточных состояний, и сломать его можно так, что со
+/// стороны это будет выглядеть просто «немного не так».
+///
+/// Меряется шаг: на сколько сместилось показываемое положение между двумя
+/// оборотами цикла. У ровного движения все шаги почти одинаковы. У движения
+/// ступеньками — а именно так вело себя оно, пока снимков хранилось два, —
+/// шагов почти нет вовсе, зато раз в промежуток случается один большой.
+///
+/// Отношение наибольшего шага к среднему и есть ответ: единица — идеально
+/// ровно, тройка и выше — ступеньки.
+struct Gait {
+    /// Где чужой показывался в прошлый раз.
+    std::unordered_map<oxymp::shared::PlayerId, oxymp::shared::Vec3> seen;
+
+    double steps = 0.0;
+    double total = 0.0;
+    double largest = 0.0;
+
+    void sample(const oxymp::client::Connection& connection,
+                std::chrono::steady_clock::time_point now) {
+        for (const auto& [id, player] : connection.remotePlayers()) {
+            if (!player.visible()) {
+                continue;
+            }
+
+            const oxymp::shared::Vec3 shown = player.at(now).position;
+            const auto known = seen.find(id);
+
+            if (known != seen.end()) {
+                const double step =
+                    std::sqrt(oxymp::shared::distanceSquared(known->second, shown));
+
+                steps += 1.0;
+                total += step;
+                largest = std::max(largest, step);
+            }
+
+            seen.insert_or_assign(id, shown);
+        }
+    }
+
+    void forget() {
+        steps = 0.0;
+        total = 0.0;
+        largest = 0.0;
+    }
+};
+
 struct Bot {
     std::unique_ptr<oxymp::client::Connection> connection;
     oxymp::shared::Vec3 centre;
     bool everConnected = false;
     Drawn drawn;
+    Gait gait;
 };
 
 /// Раскладывает номер бота по клеткам квадрата со стороной side.
@@ -408,6 +462,12 @@ int main(int argc, char** argv) {
 
             bot.drawn.collect(connection);
 
+            // Шаг чужих меряется каждым оборотом, а не раз в отчёт: ровность и
+            // есть то, как выглядит движение между двумя оборотами.
+            if (bots == 1) {
+                bot.gait.sample(connection, std::chrono::steady_clock::now());
+            }
+
             if (connection.state() == oxymp::client::ConnectionState::Connected) {
                 if (!bot.everConnected) {
                     // Клиент говорит серверу, что поднял свою половину ресурсов,
@@ -483,6 +543,22 @@ int main(int argc, char** argv) {
 
                 spdlog::info("  попаданий по нам {}, здоровье {}, броня {}", drawn.hits,
                              drawn.health, drawn.armour);
+
+                Gait& gait = herd.front().gait;
+
+                if (gait.steps > 0.0) {
+                    const double average = gait.total / gait.steps;
+
+                    // Отношение наибольшего шага к среднему: единица — ровно,
+                    // тройка и выше — ступеньки. Среднее в сантиметрах, чтобы
+                    // было видно, что движение вообще идёт.
+                    spdlog::info("  чужие идут: шаг в среднем {:.1f} см, наибольший {:.1f} см, "
+                                 "отношение {:.2f}",
+                                 average * 100.0, gait.largest * 100.0,
+                                 average > 0.0 ? gait.largest / average : 0.0);
+
+                    gait.forget();
+                }
 
                 // Машины пересказываются поимённо, а не числом: главное здесь
                 // не сколько их, а движутся ли они. Стоящая машина снимков не

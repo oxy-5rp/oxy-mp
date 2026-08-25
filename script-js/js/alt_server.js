@@ -1627,6 +1627,21 @@
         setWeather: (weather) => native.setWeather(String(weather)),
         setTime: (hour, minute) => native.setTime(hour, minute),
 
+        /// Взрыв. Доводы — как у натива игры ADD_EXPLOSION и в том же порядке.
+        ///
+        /// Серверного взрыва нет ни у alt:V, ни у RAGE MP: там его заводит
+        /// клиент нативом, у каждого свой. У нас так нельзя — взрыв это урон,
+        /// звук и толчок всему вокруг, и посчитанный каждым у себя он
+        /// разошёлся бы у двоих зрителей. Поэтому он серверный, как погода.
+        ///
+        /// Образца для имени взять неоткуда, и оно взято у самого натива:
+        /// знающий натив напишет вызов верно с первого раза.
+        ///
+        ///     alt.addExplosion(pos, 4);                       // ракета
+        ///     alt.addExplosion(pos, 7, { scale: 2, shake: 1 }) // машина, вдвое
+        addExplosion: (position, kind, options) =>
+            native.addExplosion(position, kind ?? 0, options),
+
         /// Строка в чат всем. У alt:V своего чата нет, у oxyMP есть.
         broadcast: (text) => native.broadcast(String(text)),
 

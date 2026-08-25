@@ -67,6 +67,23 @@ public:
     /// Накладывает внешность целиком.
     void applyAppearance(int vehicle, const shared::VehicleAppearance& appearance) const;
 
+    /// Прицеп, сцепленный с машиной. Ноль — прицепа нет.
+    ///
+    /// Номер в игре, а не в сессии: о номерах сессии этот класс не знает вовсе,
+    /// и переводить один в другой — дело того, кто ведёт список машин.
+    [[nodiscard]] int trailerOf(int vehicle) const;
+
+    /// Сцепляет машину с прицепом или расцепляет её.
+    ///
+    /// trailer — номер прицепа в игре; ноль означает «прицепа нет».
+    ///
+    /// had говорит, был ли прицеп в прошлом наложенном снимке. Расцепляем мы
+    /// только на переходе, и это существенно: игра сцепляет прицеп сама, стоит
+    /// тягачу подать назад, — и расцепляй мы каждый кадр, у зрителя сцепка
+    /// разваливалась бы в тот самый миг, когда у хозяина она только что
+    /// сложилась.
+    void applyTrailer(int vehicle, int trailer, bool had) const;
+
 private:
     /// Насколько машина должна разойтись со снимком, чтобы её переставить рывком.
     [[nodiscard]] static bool tooFar(const shared::Vec3& from, const shared::Vec3& to);
@@ -97,6 +114,19 @@ private:
     NativeHandler setFullBeam_ = nullptr;
     NativeHandler sirenOn_ = nullptr;
     NativeHandler setSiren_ = nullptr;
+    NativeHandler trailerOf_ = nullptr;
+    NativeHandler attachTrailer_ = nullptr;
+    NativeHandler detachTrailer_ = nullptr;
+    NativeHandler trailerAttached_ = nullptr;
+    NativeHandler wrecked_ = nullptr;
+    NativeHandler explode_ = nullptr;
+    NativeHandler invincible_ = nullptr;
+    NativeHandler hornActive_ = nullptr;
+    NativeHandler startHorn_ = nullptr;
+    NativeHandler roofState_ = nullptr;
+    NativeHandler raiseRoof_ = nullptr;
+    NativeHandler lowerRoof_ = nullptr;
+    NativeHandler convertible_ = nullptr;
     NativeHandler setSteerBias_ = nullptr;
     NativeHandler setHandbrake_ = nullptr;
     NativeHandler setBrakeLights_ = nullptr;

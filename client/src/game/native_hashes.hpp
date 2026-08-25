@@ -21,6 +21,72 @@ namespace oxymp::client::game::natives {
 ///
 /// Игра обновилась — значения нужно пересобрать: см. README.
 
+/// GET_VEHICLE_TRAILER_VEHICLE, канонический хеш 0X1CDD6BADC297830D.
+inline constexpr std::uint64_t kGetVehicleTrailerVehicle = 0X20974C28142EB370;
+
+/// ATTACH_VEHICLE_TO_TRAILER, канонический хеш 0X3C7D42D58F770B54.
+inline constexpr std::uint64_t kAttachVehicleToTrailer = 0XF89624E52FCBE454;
+
+/// DETACH_VEHICLE_FROM_TRAILER, канонический хеш 0X90532EDF0D2BDD86.
+inline constexpr std::uint64_t kDetachVehicleFromTrailer = 0X157D966854AABDA6;
+
+/// IS_VEHICLE_ATTACHED_TO_TRAILER, канонический хеш 0XE7CF3C4F9F489F0C.
+inline constexpr std::uint64_t kIsVehicleAttachedToTrailer = 0XA6D8AF5A058A75F0;
+
+/// EXPLODE_VEHICLE, канонический хеш 0XBA71116ADF5B514C.
+inline constexpr std::uint64_t kExplodeVehicle = 0XAE89444B15234CCE;
+
+/// IS_ENTITY_DEAD, канонический хеш 0X5F9532F3B5CC2551.
+inline constexpr std::uint64_t kIsEntityDead = 0X1C2F771CDC87A3A5;
+
+/// SHOOT_SINGLE_BULLET_BETWEEN_COORDS, канонический хеш 0X867654CBC7606F2C.
+inline constexpr std::uint64_t kShootSingleBulletBetweenCoords = 0XA934E5D7EEE03C7E;
+
+/// GET_PED_BONE_COORDS, канонический хеш 0X17C07FC640E86B4E.
+inline constexpr std::uint64_t kGetPedBoneCoords = 0X83FDC027F0BEA202;
+
+/// TASK_JUMP, канонический хеш 0X0AE4086104E067B1.
+inline constexpr std::uint64_t kTaskJump = 0XC3EBEA7530D64F53;
+
+/// TASK_CLIMB, канонический хеш 0X89D9FCC2435112F1.
+inline constexpr std::uint64_t kTaskClimb = 0X345C12E1D643634F;
+
+/// TASK_RELOAD_WEAPON, канонический хеш 0X62D2916F56B9CD2D.
+inline constexpr std::uint64_t kTaskReloadWeapon = 0X550B03C7904C63CD;
+
+/// TASK_STAY_IN_COVER, канонический хеш 0XE5DA8615A6180789.
+inline constexpr std::uint64_t kTaskStayInCover = 0X115CA3B4F950226D;
+
+/// TASK_DRIVE_BY, канонический хеш 0X2F8AF0E82773A171.
+inline constexpr std::uint64_t kTaskDriveBy = 0XD83588CA24829967;
+
+/// FORCE_PED_MOTION_STATE, канонический хеш 0XF28965D04F570DCA.
+inline constexpr std::uint64_t kForcePedMotionState = 0X717804C8C8DA67BF;
+
+/// IS_VEHICLE_SEAT_FREE, канонический хеш 0X22AC59A870E6A669.
+inline constexpr std::uint64_t kIsVehicleSeatFree = 0XC39AE5D390581AD5;
+
+/// IS_HORN_ACTIVE, канонический хеш 0X9D6BFC12B05C6121.
+inline constexpr std::uint64_t kIsHornActive = 0X1A90E9DC88A85C9D;
+
+/// START_VEHICLE_HORN, канонический хеш 0X9C8C6504B5B63D2C.
+inline constexpr std::uint64_t kStartVehicleHorn = 0XAA8884A4BB5B0167;
+
+/// GET_CONVERTIBLE_ROOF_STATE, канонический хеш 0XF8C397922FC03F41.
+inline constexpr std::uint64_t kGetConvertibleRoofState = 0X54DA32C15F7A6ABA;
+
+/// RAISE_CONVERTIBLE_ROOF, канонический хеш 0X8F5FB35D7E88FC70.
+inline constexpr std::uint64_t kRaiseConvertibleRoof = 0XD6B15DF382A594C7;
+
+/// LOWER_CONVERTIBLE_ROOF, канонический хеш 0XDED51F703D0FA83D.
+inline constexpr std::uint64_t kLowerConvertibleRoof = 0X232B023FE4D977E2;
+
+/// IS_VEHICLE_A_CONVERTIBLE, канонический хеш 0X52F357A30698BCCE.
+inline constexpr std::uint64_t kIsVehicleAConvertible = 0X7943BD10E2A03FAC;
+
+/// ADD_EXPLOSION, канонический хеш 0XE3AD2BDBAEE269AC.
+inline constexpr std::uint64_t kAddExplosion = 0XD2FD15A3D9DEE4CC;
+
 /// WAIT, канонический хеш 0X4EDE34FBADD967A6.
 /// REQUEST_IPL — просьба поставить расстановку карты.
 ///

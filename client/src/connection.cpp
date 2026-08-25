@@ -1,6 +1,6 @@
 #include <oxymp/client/connection.hpp>
 
-#include "interpolation.hpp"
+#include <oxymp/client/interpolation.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -14,27 +14,95 @@ namespace {
 /// Как часто отправляется проверка связи.
 constexpr auto kPingInterval = std::chrono::seconds{2};
 
-/// Как часто уходит снимок своего состояния.
+/// Как часто уходит снимок своего состояния, пока сервер не сказал иначе.
 ///
-/// Двадцать раз в секунду: чаще — лишний трафик, реже — интерполяция начинает
-/// заметно отставать от настоящего движения.
-constexpr auto kStateInterval = std::chrono::milliseconds{50};
+/// Своей постоянной здесь больше нет, и это главное. Прежде клиент слал ровно
+/// двадцать снимков в секунду, а сервер рассылал их тридцать раз — то есть
+/// каждый третий такт получателю нечего было сказать, и снимки приходили
+/// неровно: два подряд, потом пропуск. Никакая интерполяция такой поток ровным
+/// не сделает — она честно показывает то, что ей дали.
+///
+/// Частоту называет сервер в приветствии (ServerWelcome::tickRate). Чаще неё
+/// слать бессмысленно — лишние снимки сервер выбросит, не разослав; реже —
+/// значит оставлять его такты пустыми.
+///
+/// Здесь же лежит то, чем клиент пользуется до приветствия и с чем сверяет
+/// сказанное сервером: сервер называет число, и оно приходит по сети, а
+/// поделить на ноль или отвести снимку целую секунду нельзя.
+constexpr std::uint16_t kMinTickRate = 5;
+constexpr std::uint16_t kMaxTickRate = 100;
 
-/// Отстал ли пришедший снимок от уже принятого.
-///
-/// Отметки времени ходят по кругу, поэтому сравниваются не как числа, а как
-/// последовательные номера: берётся беззнаковая разница, и если она больше
-/// половины круга — значит снимок не обогнал предыдущий, а отстал от него.
-/// Обычное «меньше» на переходе счётчика через край решило бы, что весь
-/// дальнейший поток пришёл из прошлого, и движение встало бы намертво.
-///
-/// Одинаковые отметки тоже считаются отставшими: это тот же снимок, пришедший
-/// дважды, а промежуток нулевой длины ничего не описывает.
-[[nodiscard]] bool stale(shared::Timestamp accepted, shared::Timestamp arrived) noexcept {
-    constexpr std::uint32_t kHalfCircle = 0x8000'0000U;
+/// Промежуток между снимками при названной сервером частоте.
+[[nodiscard]] std::chrono::milliseconds stateInterval(std::uint16_t tickRate) noexcept {
+    const std::uint16_t rate = std::clamp(tickRate, kMinTickRate, kMaxTickRate);
 
-    const std::uint32_t ahead = shared::elapsedSince(accepted, arrived);
-    return ahead == 0 || ahead >= kHalfCircle;
+    return std::chrono::milliseconds{1000 / rate};
+}
+
+
+/// Как часто снимок уходит, даже когда в нём ничего не изменилось.
+///
+/// Стоящий на месте человек шлёт одно и то же тридцать раз в секунду, и это
+/// самое частое, что бывает в сессии: очередь у магазина, толпа на площади,
+/// отошедший от клавиатуры. Получателю с этих снимков нет никакой пользы — он и
+/// так держит куклу на месте, — а платят за них все: сервер пересылает их
+/// каждому соседу, то есть числом игроков в квадрате.
+///
+/// Совсем замолчать при этом нельзя, и четверть секунды — цена этого «нельзя».
+/// Сравнение «изменилось ли что-нибудь» живёт в одном месте (worthSending) и
+/// однажды в нём чего-нибудь недосчитается; тогда чужой игрок замрёт — но не
+/// навсегда, а на четверть секунды. Заодно это тот запас, по которому получатель
+/// отличает молчащего от пропавшего.
+constexpr auto kStateKeepalive = std::chrono::milliseconds{250};
+
+/// Насколько должно измениться поле снимка, чтобы снимок стоило отправлять.
+///
+/// Числа взяты по тому, что видно. Сантиметр — вдесятеро меньше того, что игра
+/// показывает движением ног; десятая градуса — поворот, неразличимый и вблизи;
+/// пять сантиметров у точки взгляда — она уходит на два десятка метров вперёд,
+/// и там это доли градуса.
+///
+/// Точным сравнением обойтись нельзя: положение и скорость приходят из игры
+/// числами с плавающей точкой и в последних разрядах дрожат даже у стоящего
+/// намертво.
+constexpr float kMovedEnough = 0.01F;
+constexpr float kTurnedEnough = 0.1F;
+constexpr float kAimedEnough = 0.05F;
+constexpr float kSpedEnough = 0.05F;
+
+/// Сдвинулось ли заметно.
+[[nodiscard]] bool moved(const shared::Vec3& from, const shared::Vec3& to,
+                         float enough) noexcept {
+    return shared::distanceSquared(from, to) > enough * enough;
+}
+
+/// Есть ли в свежем снимке хоть что-нибудь, чего не было в отправленном.
+///
+/// Всё, что различает игру для получателя, сравнивается точно: признаки,
+/// оружие, патроны, здоровье, место в машине, движение. Всё, что приходит из
+/// игры дробным числом, — с порогом: иначе стоящий намертво человек «менялся»
+/// бы каждый кадр в последнем разряде.
+///
+/// Отметка времени сюда не входит намеренно: она у каждого снимка своя, и
+/// сравнение по ней означало бы, что не изменилось ничего никогда.
+[[nodiscard]] bool worthSending(const shared::PlayerState& sent,
+                                const shared::PlayerState& fresh) noexcept {
+    if (sent.flags != fresh.flags || sent.weapon != fresh.weapon ||
+        sent.ammo != fresh.ammo || sent.health != fresh.health ||
+        sent.armour != fresh.armour || sent.vehicleId != fresh.vehicleId ||
+        sent.seat != fresh.seat || sent.action != fresh.action ||
+        sent.actionSequence != fresh.actionSequence) {
+        return true;
+    }
+
+    // Поворот сравнивается по кругу: с 359 градусов на 1 человек повернулся на
+    // два, а не на триста пятьдесят восемь.
+    const float apart = std::fmod(std::abs(sent.heading - fresh.heading), 360.0F);
+    const float turned = std::min(apart, 360.0F - apart);
+
+    return turned > kTurnedEnough || moved(sent.position, fresh.position, kMovedEnough) ||
+           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
+           moved(sent.aimAt, fresh.aimAt, kAimedEnough);
 }
 
 /// Границы задержки между попытками подключения.
@@ -117,66 +185,103 @@ std::string_view describe(ConnectionState state) noexcept {
 }
 
 shared::PlayerState RemotePlayer::at(std::chrono::steady_clock::time_point now) const {
-    if (snapshots == 0) {
+    if (timeline.empty()) {
         return {};
     }
 
-    // Снимок один: отрезка ещё нет, смешивать не с чем. Показываем как есть —
-    // это верно ровно один раз, до прихода второго.
-    if (snapshots < 2) {
-        return latest;
-    }
+    const float aged = std::chrono::duration<float>{now - latestAt}.count();
+    const auto sample = timeline.at(now - latestAt, pace.delay());
 
-    // Всё, кроме плавно меняющегося, берётся из последнего снимка как есть:
-    // достраивать по времени имеет смысл только то, что меняется плавно, а
-    // «целится» и «стреляет» плавно не меняются.
-    shared::PlayerState state = latest;
+    // Всё, кроме плавно меняющегося, берётся из того снимка, в который мы
+    // пришли, а не из самого свежего. Разница есть, и она видна: показываем мы
+    // мгновение позади настоящего, и признаки самого свежего снимка означали бы,
+    // что кукла стреляет там, где её тело окажется только через полсотни
+    // миллисекунд.
+    shared::PlayerState state = *sample.to;
 
-    const auto blend = interpolation::blend(
-        std::chrono::milliseconds{shared::elapsedSince(previous.sentAt, latest.sentAt)},
-        now - latestAt);
-
-    if (blend.ahead > 0.0F) {
-        state.position = interpolation::advance(latest.position, latest.velocity, blend.ahead);
+    if (sample.ahead > 0.0F) {
+        state.position = interpolation::healed(
+            interpolation::advance(sample.to->position, sample.to->velocity, sample.ahead), seam,
+            aged);
         return state;
     }
 
-    state.position = interpolation::mix(previous.position, latest.position, blend.progress);
-    state.heading = interpolation::mixAngle(previous.heading, latest.heading, blend.progress);
-    state.aimAt = interpolation::mix(previous.aimAt, latest.aimAt, blend.progress);
+    if (sample.from == sample.to) {
+        // Снимок один — смешивать не с чем. Так бывает дважды: до прихода
+        // второго снимка и когда лента не достаёт так далеко назад, как мы
+        // показываем.
+        state.position = interpolation::healed(sample.to->position, seam, aged);
+        return state;
+    }
+
+    // По кривой, а не по прямой: скорости на концах отрезка приходят в самом
+    // снимке, и построенная по ним кривая приходит в каждый снимок с той
+    // скоростью, которую назвал хозяин. Прямая ломалась на каждом снимке — то
+    // самое дрожание, которое оставалось после того, как отметки времени
+    // расставили верно.
+    state.position = interpolation::healed(
+        interpolation::curve(sample.from->position, sample.from->velocity, sample.to->position,
+                             sample.to->velocity, sample.span, sample.progress),
+        seam, aged);
+    state.velocity =
+        interpolation::mix(sample.from->velocity, sample.to->velocity, sample.progress);
+    state.heading =
+        interpolation::mixAngle(sample.from->heading, sample.to->heading, sample.progress);
+    state.aimAt = interpolation::mix(sample.from->aimAt, sample.to->aimAt, sample.progress);
 
     return state;
 }
 
 shared::VehicleState SessionVehicle::at(std::chrono::steady_clock::time_point now) const {
+    if (timeline.empty()) {
+        return {};
+    }
+
     // Машину без ведущего считать не по чему и незачем: снимков о ней больше не
     // будет, и достраивать движение — значит уводить стоящую машину в сторону
     // по последней запомненной скорости. То же и пока снимков меньше двух:
     // отрезка нет, показываем объявленное состояние как есть.
     if (snapshots < 2 || owner == shared::kInvalidPlayerId) {
-        return latest;
+        return timeline.newest();
     }
 
-    // Тот же расчёт, что и у игрока, и по той же причине: снимки приходят реже
-    // кадров. Разница в том, что машина проходит между снимками не полметра, а
-    // десяток, — и отставание на ней видно вдесятеро отчётливее.
-    shared::VehicleState state = latest;
+    const float aged = std::chrono::duration<float>{now - latestAt}.count();
+    const auto sample = timeline.at(now - latestAt, pace.delay());
 
-    const auto blend = interpolation::blend(
-        std::chrono::milliseconds{shared::elapsedSince(previous.sentAt, latest.sentAt)},
-        now - latestAt);
+    shared::VehicleState state = *sample.to;
 
-    if (blend.ahead > 0.0F) {
-        state.position = interpolation::advance(latest.position, latest.velocity, blend.ahead);
-        state.rotation =
-            interpolation::advanceAngles(latest.rotation, latest.angularVelocity, blend.ahead);
+    if (sample.ahead > 0.0F) {
+        state.position = interpolation::healed(
+            interpolation::advance(sample.to->position, sample.to->velocity, sample.ahead), seam,
+            aged);
+        state.rotation = interpolation::advanceAngles(sample.to->rotation,
+                                                      sample.to->angularVelocity, sample.ahead);
         return state;
     }
 
-    state.position = interpolation::mix(previous.position, latest.position, blend.progress);
-    state.rotation = interpolation::mixAngles(previous.rotation, latest.rotation, blend.progress);
-    state.velocity = interpolation::mix(previous.velocity, latest.velocity, blend.progress);
-    state.steer = std::lerp(previous.steer, latest.steer, blend.progress);
+    if (sample.from == sample.to) {
+        state.position = interpolation::healed(sample.to->position, seam, aged);
+        return state;
+    }
+
+    // И положение, и поворот — по кривой: у машины видно и то и другое. Прямая
+    // между двумя снимками положения срезает поворот — на скорости за тридцать с
+    // небольшим миллисекунд машина проходит метр с лишним, — а прямая между
+    // двумя снимками поворота проходит мимо заноса, который она отыграла за то
+    // же время.
+    state.position = interpolation::healed(
+        interpolation::curve(sample.from->position, sample.from->velocity, sample.to->position,
+                             sample.to->velocity, sample.span, sample.progress),
+        seam, aged);
+    state.rotation = interpolation::curveAngles(sample.from->rotation,
+                                                sample.from->angularVelocity, sample.to->rotation,
+                                                sample.to->angularVelocity, sample.span,
+                                                sample.progress);
+    state.velocity =
+        interpolation::mix(sample.from->velocity, sample.to->velocity, sample.progress);
+    state.angularVelocity = interpolation::mix(sample.from->angularVelocity,
+                                               sample.to->angularVelocity, sample.progress);
+    state.steer = std::lerp(sample.from->steer, sample.to->steer, sample.progress);
 
     return state;
 }
@@ -370,6 +475,17 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::VehicleStates:
+        if (const auto states = shared::decode<shared::VehicleStates>(packet)) {
+            // Как и связка игроков: разбирается снимок за снимком тем же путём,
+            // что и одиночный. Разница между ними — только в том, как они
+            // доехали.
+            for (const shared::VehicleState& state : states->vehicles) {
+                handleRemoteVehicle(state);
+            }
+        }
+        return;
+
     case shared::MessageId::VehicleAppearance:
         if (const auto appearance = shared::decode<shared::VehicleAppearance>(packet)) {
             vehicleAppearances_.push_back(*appearance);
@@ -471,6 +587,18 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
     case shared::MessageId::BlipRemoved:
         if (const auto removed = shared::decode<shared::BlipRemoved>(packet)) {
             removedBlips_.push_back(removed->id);
+        }
+        return;
+
+    case shared::MessageId::Explosion:
+        if (const auto explosion = shared::decode<shared::Explosion>(packet)) {
+            explosions_.push_back(*explosion);
+        }
+        return;
+
+    case shared::MessageId::WeaponFired:
+        if (const auto fired = shared::decode<shared::WeaponFired>(packet)) {
+            shots_.push_back(*fired);
         }
         return;
 
@@ -580,6 +708,10 @@ void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
     nextPingAt_ = Clock::now();
     nextStateAt_ = Clock::now();
 
+    // Снимки уходят с той частотой, с какой сервер их рассылает: на каждый его
+    // такт — ровно один наш снимок.
+    stateInterval_ = stateInterval(welcome.tickRate);
+
     serverName_ = welcome.name;
 
     spdlog::info("Connected to \"{2}\" as id {0} ({1} ticks/s)",
@@ -622,17 +754,41 @@ void Connection::handleRemoteState(const shared::PlayerState& state) {
     RemotePlayer& player = remotePlayers_[state.playerId];
     player.id = state.playerId;
 
-    // Снимок, отставший от уже принятого, отбрасывается. Канал ненадёжный и
-    // порядка не обещает, а принятый задом наперёд снимок отматывал бы игрока
-    // назад — и следующий тут же дёргал бы его обратно вперёд.
-    if (player.snapshots > 0 && stale(player.latest.sentAt, state.sentAt)) {
+    const auto arrived = Clock::now();
+    const bool known = !player.timeline.empty();
+
+    // Где игрок показывался в это самое мгновение — до того, как лента
+    // изменилась. Спрашивается до правки, потому что после неё этого уже не
+    // узнать: расчёт пойдёт по другой паре снимков.
+    const shared::Vec3 shown = known ? player.at(arrived).position : state.position;
+
+    // Обогнанный снимок больше не выбрасывается: лента ставит его на своё место.
+    // Выбрасывается только тот, что пришёл дважды или отстал за её начало, — с
+    // ним и правда делать нечего.
+    const shared::Timestamp before = known ? player.timeline.newest().sentAt : state.sentAt;
+
+    if (!player.timeline.accept(state)) {
         return;
     }
 
-    player.previous = player.snapshots > 0 ? player.latest : state;
-    player.latest = state;
-    player.latestAt = Clock::now();
+    // Оценка отставания пополняется только со второго снимка: у первого нет ни
+    // промежутка отправки, ни промежутка прихода — сравнивать его не с чем.
+    // И только по снимку, который пришёл свежее всех: обогнанный говорит о
+    // порядке доставки, а не о частоте отправки.
+    if (known && player.timeline.newest().sentAt == state.sentAt) {
+        player.pace.notice(std::chrono::milliseconds{shared::elapsedSince(before, state.sentAt)},
+                           arrived - player.latestAt);
+        player.latestAt = arrived;
+    } else if (!known) {
+        player.latestAt = arrived;
+    }
+
     ++player.snapshots;
+
+    // Шов считается по чистому расчёту, поэтому прежний остаток сначала
+    // снимается: иначе он вошёл бы в новый шов дважды.
+    player.seam = shared::Vec3{};
+    player.seam = interpolation::seamBetween(shown, player.at(arrived).position);
 }
 
 void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
@@ -643,7 +799,7 @@ void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
     //
     // Случай не выдуманный: снимок идёт по ненадёжному каналу и обгоняет
     // объявление, идущее по надёжному. Потеря такого снимка ничего не стоит —
-    // следующий придёт через полсотни миллисекунд, уже после объявления.
+    // следующий придёт в ближайшем такте, уже после объявления.
     const auto known = vehicles_.find(state.id);
     if (known == vehicles_.end()) {
         return;
@@ -651,14 +807,34 @@ void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
 
     SessionVehicle& vehicle = known->second;
 
-    if (vehicle.snapshots > 0 && stale(vehicle.latest.sentAt, state.sentAt)) {
+    const auto arrived = Clock::now();
+    const shared::Vec3 shown = vehicle.at(arrived).position;
+
+    const bool counted = vehicle.snapshots > 0;
+    const shared::Timestamp before =
+        vehicle.timeline.empty() ? state.sentAt : vehicle.timeline.newest().sentAt;
+
+    // Объявленное сервером состояние лежит на ленте первым, но снимком не
+    // считается: часы его — не часы ведущего, и промежуток между ними ничего не
+    // описывает. Поэтому лента заводится с него заново.
+    if (!counted) {
+        vehicle.timeline.restart(state);
+    } else if (!vehicle.timeline.accept(state)) {
         return;
     }
 
-    vehicle.previous = vehicle.snapshots > 0 ? vehicle.latest : state;
-    vehicle.latest = state;
-    vehicle.latestAt = Clock::now();
+    if (counted && vehicle.timeline.newest().sentAt == state.sentAt) {
+        vehicle.pace.notice(std::chrono::milliseconds{shared::elapsedSince(before, state.sentAt)},
+                            arrived - vehicle.latestAt);
+        vehicle.latestAt = arrived;
+    } else if (!counted) {
+        vehicle.latestAt = arrived;
+    }
+
     ++vehicle.snapshots;
+
+    vehicle.seam = shared::Vec3{};
+    vehicle.seam = interpolation::seamBetween(shown, vehicle.at(arrived).position);
 }
 
 void Connection::handleVehicleAdded(const shared::VehicleAdded& added) {
@@ -673,14 +849,18 @@ void Connection::handleVehicleAdded(const shared::VehicleAdded& added) {
     // снимок. Оставь мы их пустыми — машина на мгновение оказалась бы в начале
     // координат.
     SessionVehicle& vehicle = vehicles_[added.state.id];
-    vehicle.previous = added.state;
-    vehicle.latest = added.state;
+    vehicle.timeline.restart(added.state);
     vehicle.latestAt = now;
     vehicle.owner = added.owner;
 
     // Настоящих снимков ещё не было: то, что пришло, — объявление, а не снимок.
     // Счёт нужен, чтобы не считать движение между двумя одинаковыми точками.
     vehicle.snapshots = 0;
+
+    // Объявленная машина стоит там, где сказано, и ни от чего не отстаёт:
+    // сглаживать нечего, а оставшийся от прошлой её жизни шов сдвинул бы её
+    // мимо объявленного места.
+    vehicle.seam = shared::Vec3{};
 
     spdlog::debug("в сессии появилась машина {}, ведёт её {}", added.state.id,
                   added.owner == shared::kInvalidPlayerId ? -1 : static_cast<int>(added.owner));
@@ -698,6 +878,18 @@ void Connection::handleVehicleAuthority(const shared::VehicleAuthority& authorit
         // снимком другого, промежуток вышел бы любой длины, вплоть до
         // сорока девяти суток.
         known->second.snapshots = 0;
+
+        // Вместе с отсчётом забывается и оценка отставания: она описывала сеть
+        // прежнего ведущего, а у нового своя. Оставленная, она заставила бы
+        // машину показываться позади с чужой поправкой — и тем сильнее, чем
+        // больше эти двое отличались.
+        known->second.pace.forget();
+        known->second.seam = shared::Vec3{};
+
+        // От ленты остаётся один последний снимок: отметки нового ведущего с
+        // отметками прежнего несравнимы — часы у них свои, — а показывать машину
+        // до первого снимка нового ведущего иначе было бы нечем.
+        known->second.timeline.keepNewest();
     }
 
     known->second.owner = authority.owner;
@@ -799,6 +991,22 @@ void Connection::reportDamage(shared::PlayerId victim, std::uint16_t amount,
     outgoingDamage_.push_back(report);
 }
 
+void Connection::reportShot(std::uint32_t weapon, const shared::Vec3& target) {
+    if (weapon == 0) {
+        return;
+    }
+
+    shared::WeaponFired fired;
+    fired.weapon = weapon;
+    fired.target = target;
+
+    outgoingShots_.push_back(fired);
+}
+
+std::vector<shared::WeaponFired> Connection::takeShots() {
+    return std::exchange(shots_, {});
+}
+
 std::vector<shared::ChatLine> Connection::takeChatLines() {
     return std::exchange(chatLines_, {});
 }
@@ -829,6 +1037,10 @@ std::vector<shared::BlipId> Connection::takeRemovedBlips() {
 
 std::vector<shared::PlayerAnimation> Connection::takeAnimations() {
     return std::exchange(animations_, {});
+}
+
+std::vector<shared::Explosion> Connection::takeExplosions() {
+    return std::exchange(explosions_, {});
 }
 
 std::vector<shared::PedState> Connection::takePeds() {
@@ -902,9 +1114,9 @@ void Connection::sendStateIfDue() {
     }
 
     // Отметка ставится здесь, при отправке, а не при снятии снимка в игровом
-    // потоке. Разница есть: снимки снимаются каждый кадр, а уходит раз в
-    // пятьдесят миллисекунд последний из них, и отметка должна описывать то, что
-    // ушло. Одна на всё, что уходит в этот раз, — они и описывают одно мгновение.
+    // потоке. Разница есть: снимки снимаются каждый кадр, а уходит раз в такт
+    // последний из них, и отметка должна описывать то, что ушло. Одна на всё,
+    // что уходит в этот раз, — они и описывают одно мгновение.
     const auto sentAt = static_cast<shared::Timestamp>(nowMilliseconds());
 
     // Машины уходят раньше своего водителя, и это не мелочь: получатель сажает
@@ -916,12 +1128,21 @@ void Connection::sendStateIfDue() {
         host_->send(serverPeer_, shared::Channel::State, shared::ByteView{vehiclePacket});
     }
 
-    localState_.sentAt = sentAt;
+    // Снимок, в котором ничего не изменилось, не отправляется вовсе — но не
+    // дольше, чем kStateKeepalive. См. worthSending.
+    const bool overdue = Clock::now() - stateSentAt_ >= kStateKeepalive;
 
-    const auto packet = shared::encode(localState_);
-    host_->send(serverPeer_, shared::Channel::State, shared::ByteView{packet});
+    if (overdue || worthSending(sentState_, localState_)) {
+        localState_.sentAt = sentAt;
 
-    nextStateAt_ = Clock::now() + kStateInterval;
+        const auto packet = shared::encode(localState_);
+        host_->send(serverPeer_, shared::Channel::State, shared::ByteView{packet});
+
+        sentState_ = localState_;
+        stateSentAt_ = Clock::now();
+    }
+
+    nextStateAt_ = Clock::now() + stateInterval_;
 
     sendAppearancesIfChanged();
 }
@@ -935,7 +1156,7 @@ void Connection::sendAppearancesIfChanged() {
 
         // По надёжному каналу, в отличие от снимков рядом. Разница не в
         // важности, а в том, что происходит с потерянным сообщением: потерянный
-        // снимок заменит следующий через полсотни миллисекунд, а потерянный цвет
+        // снимок заменит следующий в ближайшем такте, а потерянный цвет
         // не заменит ничто — он больше не изменится.
         const auto packet = shared::encode(appearance);
         host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
@@ -967,6 +1188,13 @@ void Connection::sendQueued() {
         host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
     }
     outgoingDamage_.clear();
+
+    // Тем же каналом и по той же причине: потерянный выстрел не повторится.
+    for (const shared::WeaponFired& fired : outgoingShots_) {
+        const auto packet = shared::encode(fired);
+        host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
+    }
+    outgoingShots_.clear();
 
     // Тем же надёжным каналом: потерянное нажатие не повторится, а игрок
     // увидит, что оно пропало впустую.
@@ -1012,6 +1240,15 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     blips_.clear();
     removedBlips_.clear();
     animations_.clear();
+    explosions_.clear();
+    shots_.clear();
+    outgoingShots_.clear();
+
+    // Последний отправленный снимок забывается вместе с соединением: по нему
+    // решается, изменилось ли что-нибудь, и оставленный от прошлой сессии он
+    // заставил бы промолчать в самой первой отправке новой.
+    sentState_ = shared::PlayerState{};
+    stateSentAt_ = Clock::time_point{};
     attachments_.clear();
     peds_.clear();
     removedPeds_.clear();

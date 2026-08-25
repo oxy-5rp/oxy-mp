@@ -262,6 +262,42 @@ shared::PlayerState Player::snapshot(int player, int ped, bool dead) {
     return state;
 }
 
+std::optional<shared::WeaponFired> Player::shot(const shared::PlayerState& state) {
+    const std::uint32_t weapon = firedWeapon_;
+    const std::uint16_t ammo = firedAmmo_;
+
+    // Запоминается всегда, даже когда выстрела не было: иначе следующий кадр
+    // сравнивал бы нынешние патроны с позапрошлыми.
+    firedWeapon_ = state.weapon;
+    firedAmmo_ = state.ammo;
+
+    if (state.weapon == 0 || state.weapon != weapon) {
+        // Оружие сменилось: разница в патронах сейчас означает не выстрел, а
+        // другой магазин.
+        return std::nullopt;
+    }
+
+    if (state.ammo >= ammo) {
+        return std::nullopt;
+    }
+
+    if (!shared::has(state.flags, shared::PlayerFlag::Shooting)) {
+        // Патроны убыли, а на спуск не жали: их отобрал сервер либо игрок
+        // выбросил оружие.
+        return std::nullopt;
+    }
+
+    shared::WeaponFired fired;
+    fired.weapon = state.weapon;
+
+    // Куда ушёл выстрел — та же точка, куда игрок целится: она уже посчитана
+    // для снимка, и считать её второй раз значило бы завести второй источник
+    // правды об одном и том же.
+    fired.target = state.aimAt;
+
+    return fired;
+}
+
 shared::PedAction Player::holdStrike(shared::PedAction started) {
     const auto now = gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0;
 

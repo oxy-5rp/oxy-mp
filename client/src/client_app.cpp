@@ -1938,6 +1938,10 @@ void run() {
         for (std::string& text : mail.takeOutgoingChat()) {
             connection->say(std::move(text));
         }
+        for (const shared::WeaponFired& fired : mail.takeOutgoingShots()) {
+            connection->reportShot(fired.weapon, fired.target);
+        }
+
         for (const shared::DamageReport& report : mail.takeOutgoingDamage()) {
             connection->reportDamage(report.victim, report.amount, report.weapon);
         }
@@ -1961,6 +1965,8 @@ void run() {
         mail.deliverBlips(connection->takeBlips());
         mail.deliverRemovedBlips(connection->takeRemovedBlips());
         mail.deliverAnimations(connection->takeAnimations());
+        mail.deliverExplosions(connection->takeExplosions());
+        mail.deliverShots(connection->takeShots());
         mail.deliverPeds(connection->takePeds(), connection->takeRemovedPeds());
         mail.deliverAttachments(connection->takeAttachments());
         mail.deliverMarkers(connection->takeMarkers());

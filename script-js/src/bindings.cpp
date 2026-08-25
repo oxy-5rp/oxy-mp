@@ -1839,6 +1839,52 @@ void createObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(wrapObject(resource, context, id));
 }
 
+/// Устраивает взрыв.
+///
+/// Доводы названы так же, как у натива игры `ADD_EXPLOSION`, и в том же
+/// порядке: тот, кто знает натив, напишет вызов верно с первого раза, а иного
+/// образца взять неоткуда — серверного взрыва нет ни у alt:V, ни у RAGE MP.
+///
+/// Всё, кроме точки и рода, необязательно: чаще всего взрыв заводят двумя
+/// доводами.
+void addExplosion(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<shared::Vec3> where =
+        info.Length() >= 1 ? vec3FromJs(context, info[0]) : std::nullopt;
+
+    if (!where) {
+        fail(isolate, "addExplosion ждёт точку и род взрыва");
+        return;
+    }
+
+    script::ExplosionInfo explosion;
+    explosion.position = *where;
+
+    if (info.Length() >= 2) {
+        if (const std::optional<std::int64_t> kind = intFromJs(context, info[1])) {
+            explosion.kind = static_cast<std::int32_t>(*kind);
+        }
+    }
+
+    // Дальше — необязательное, объектом. Объектом, а не шестью доводами подряд,
+    // потому что подряд их никто не помнит: у натива их восемь, и путают в нём
+    // как раз последние.
+    if (info.Length() >= 3) {
+        if (const std::optional<Fields> fields = fieldsOf(context, info[2])) {
+            explosion.scale = static_cast<float>(fields->number("scale", 1.0));
+            explosion.shake = static_cast<float>(fields->number("shake", 0.0));
+            explosion.dimension = static_cast<std::int32_t>(
+                fields->number("dimension", static_cast<double>(script::kDefaultDimension)));
+            explosion.audible = fields->flagOr("audible", true);
+            explosion.invisible = fields->flag("invisible");
+        }
+    }
+
+    resourceOf(isolate).core().explode(explosion);
+}
+
 void vehicles(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -2131,6 +2177,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createVehicle", createVehicle);
     addFunction(context, oxymp, "objects", objects);
     addFunction(context, oxymp, "createObject", createObject);
+    addFunction(context, oxymp, "addExplosion", addExplosion);
     addFunction(context, oxymp, "playAnimation", playAnimation);
     addFunction(context, oxymp, "clearTasks", clearTasks);
     addFunction(context, oxymp, "peds", peds);

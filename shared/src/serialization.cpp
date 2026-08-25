@@ -171,6 +171,33 @@ constexpr float kFullCircle = 360.0F;
 constexpr float kVelocityScale = 64.0F;
 constexpr float kVelocityLimit = 32767.0F;
 
+/// Во сколько раз угловая скорость увеличивается перед округлением до целого.
+///
+/// Тысяча делений на радиан в секунду: шаг в тысячную радиана при пределе в
+/// тридцать два радиана в секунду — впятеро больше того, что игра отдаёт даже у
+/// машины, кувыркающейся под откос.
+constexpr float kSpinScale = 1000.0F;
+
+/// Во сколько раз ввод водителя увеличивается перед округлением до целого.
+///
+/// Сто двадцать семь делений на единицу: столько влезает в знаковый байт.
+constexpr float kControlScale = 127.0F;
+
+/// Округляет к ближайшему целому, обрезая по пределу.
+///
+/// Обрезка обязательна и здесь, и ниже: выход за предел при приведении к целому
+/// — это не «очень много», а неопределённое поведение.
+[[nodiscard]] float rounded(float scaled, float limit) noexcept {
+    if (scaled >= limit) {
+        return limit;
+    }
+    if (scaled <= -limit) {
+        return -limit;
+    }
+
+    return scaled >= 0.0F ? scaled + 0.5F : scaled - 0.5F;
+}
+
 [[nodiscard]] std::int16_t quantise(float value) noexcept {
     const float scaled = value * kVelocityScale;
 
@@ -202,6 +229,40 @@ void ByteWriter::writeAngle(float degrees) {
 
 float ByteReader::readAngle() noexcept {
     return static_cast<float>(readU16()) / kAngleSteps * kFullCircle;
+}
+
+void ByteWriter::writeAngularVelocity(const Vec3& value) {
+    const auto axis = [this](float radiansPerSecond) {
+        writeU16(static_cast<std::uint16_t>(
+            static_cast<std::int16_t>(rounded(radiansPerSecond * kSpinScale, kVelocityLimit))));
+    };
+
+    axis(value.x);
+    axis(value.y);
+    axis(value.z);
+}
+
+Vec3 ByteReader::readAngularVelocity() noexcept {
+    const auto axis = [this] {
+        return static_cast<float>(static_cast<std::int16_t>(readU16())) / kSpinScale;
+    };
+
+    // Порядок вычисления доводов не задан, поэтому оси читаются по одной: иначе
+    // они разъехались бы местами на другом компиляторе.
+    const float x = axis();
+    const float y = axis();
+    const float z = axis();
+
+    return Vec3{x, y, z};
+}
+
+void ByteWriter::writeControl(float value) {
+    writeU8(static_cast<std::uint8_t>(
+        static_cast<std::int8_t>(rounded(value * kControlScale, kControlScale))));
+}
+
+float ByteReader::readControl() noexcept {
+    return static_cast<float>(static_cast<std::int8_t>(readU8())) / kControlScale;
 }
 
 void ByteWriter::writeVelocity(const Vec3& value) {

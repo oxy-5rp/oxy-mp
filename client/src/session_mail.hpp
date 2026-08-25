@@ -61,6 +61,21 @@ public:
         return std::exchange(outgoingDamage_, {});
     }
 
+    /// Свой выстрел: замечает его игровой поток, отправляет сетевой.
+    void postShot(std::uint32_t weapon, const shared::Vec3& target) {
+        shared::WeaponFired fired;
+        fired.weapon = weapon;
+        fired.target = target;
+
+        const std::lock_guard guard{mutex_};
+        outgoingShots_.push_back(fired);
+    }
+
+    [[nodiscard]] std::vector<shared::WeaponFired> takeOutgoingShots() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(outgoingShots_, {});
+    }
+
     /// Клавиша, нажатая или отпущенная игроком.
     ///
     /// Кладёт её перехват ввода — он живёт в потоке слоя интерфейса, — а
@@ -262,6 +277,43 @@ public:
     [[nodiscard]] std::vector<shared::PlayerAnimation> takeAnimations() {
         const std::lock_guard guard{mutex_};
         return std::exchange(animations_, {});
+    }
+
+    /// Взрывы, которые устроил сервер.
+    ///
+    /// Событиями, как и движения, и по той же причине: взрыв случается один раз,
+    /// и потерянный не повторится. Устраивает их поток игры — миром
+    /// распоряжается только она.
+    void deliverExplosions(std::vector<shared::Explosion> explosions) {
+        if (explosions.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        explosions_.insert(explosions_.end(), explosions.begin(), explosions.end());
+    }
+
+    [[nodiscard]] std::vector<shared::Explosion> takeExplosions() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(explosions_, {});
+    }
+
+    /// Чужие выстрелы, о которых сообщил сервер.
+    ///
+    /// Событиями, как и взрывы: выстрел случается один раз, и потерянный не
+    /// повторится. Показывает их поток игры — пулю заводит только она.
+    void deliverShots(std::vector<shared::WeaponFired> shots) {
+        if (shots.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        shots_.insert(shots_.end(), shots.begin(), shots.end());
+    }
+
+    [[nodiscard]] std::vector<shared::WeaponFired> takeShots() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(shots_, {});
     }
 
     /// Маркеры и контрольные точки, назначенные сервером.
@@ -638,6 +690,9 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::Explosion> explosions_;
+    std::vector<shared::WeaponFired> shots_;
+    std::vector<shared::WeaponFired> outgoingShots_;
     std::vector<shared::PedState> peds_;
     std::vector<shared::PedId> removedPeds_;
     std::vector<shared::EntityAttachment> attachments_;

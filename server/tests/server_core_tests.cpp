@@ -123,6 +123,12 @@ public:
                                    animation.name));
     }
 
+    void exploded(const shared::Explosion& explosion, std::int32_t dimension) override {
+        sent.push_back(std::format("boom {} at {} {} {} in {}", explosion.kind,
+                                   explosion.position.x, explosion.position.y,
+                                   explosion.position.z, dimension));
+    }
+
     void dimensionChanged(const Player& player, std::int32_t previous) override {
         sent.push_back(std::format("dimension {} {}->{}", player.id, previous, player.dimension));
     }
@@ -219,6 +225,35 @@ TEST_CASE("the core shows a player as the registries know them", "[server][scrip
     // список — он разошёлся бы с настоящим в первый же день, и разошёлся молча.
     CHECK(shown->vehicle == car);
     CHECK(shown->seat == shared::kDriverSeat);
+}
+
+TEST_CASE("an explosion reaches the wire with its own dimension", "[server][script]") {
+    // Взрыв — единственное распоряжение ядра, у которого нет ни игрока, ни
+    // сущности: его заводит ресурс, а не тот, у кого рвануло. Слой мира поэтому
+    // приходит доводом, а не берётся из игрока, — и до рассылки он обязан
+    // доехать в целости, иначе взрыв прогремит не в том слое.
+    Session session;
+
+    script::ExplosionInfo explosion;
+    explosion.position = shared::Vec3{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+    explosion.kind = static_cast<std::int32_t>(shared::ExplosionKind::Rocket);
+    explosion.dimension = 7;
+
+    session.core.explode(explosion);
+
+    REQUIRE(session.sink.sent.size() == 1);
+    CHECK(session.sink.sent.front() == "boom 4 at 1 2 3 in 7");
+}
+
+TEST_CASE("an explosion does not need anyone to be online", "[server][script]") {
+    // Пустая площадь — не отказ: взрыв заводит ресурс, и не показать его
+    // некому значит ровно «рядом никого нет». Ответа у распоряжения поэтому
+    // нет вовсе.
+    Session session;
+
+    session.core.explode(script::ExplosionInfo{});
+
+    CHECK(session.sink.sent.size() == 1);
 }
 
 TEST_CASE("a player who left cannot be reached", "[server][script]") {

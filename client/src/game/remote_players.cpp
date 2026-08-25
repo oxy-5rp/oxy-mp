@@ -3,7 +3,7 @@
 #include "native_call.hpp"
 #include "native_hashes.hpp"
 
-#include "../interpolation.hpp"
+#include <oxymp/client/interpolation.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -64,7 +64,23 @@ constexpr float kAimAhead = 30.0F;
 
 /// Насколько должно развернуться направление движения, чтобы выдать задачу
 /// заново, в метрах расхождения цели.
-constexpr float kRetaskDistance = 5.0F;
+///
+/// Полтора метра на тридцати метрах впереди — это около трёх градусов. Прежде
+/// стояло пять метров, то есть почти десять градусов, и поворот у чужого игрока
+/// шёл ступенями по десять градусов: он бежал по ломаной там, где хозяин шёл по
+/// дуге. Это и было главной оставшейся «рваностью» на своих двоих.
+constexpr float kRetaskDistance = 1.5F;
+
+/// Чаще этого задача заново не выдаётся, в миллисекундах.
+///
+/// Порог по углу без порога по времени опасен: на резком развороте три градуса
+/// набегают за один кадр, и задача выдавалась бы каждый кадр — а выданная
+/// каждый кадр, она не даёт себе начаться, и походка распадается на топтание.
+///
+/// Пятьдесят миллисекунд — двадцать выдач в секунду. Столько же случалось и
+/// прежде на резком развороте при пятиметровом пороге, так что хуже уже
+/// проверенного не будет.
+constexpr int kRetaskInterval = 50;
 
 /// Через сколько задача выдаётся заново, даже если направление не менялось.
 constexpr int kTaskRefresh = 2000;
@@ -105,12 +121,6 @@ constexpr int kRagdollDuration = 4000;
 
 /// Вид рэгдолла. Ноль — обычный, тело падает под собственным весом.
 constexpr int kRagdollKind = 0;
-
-/// Сколько патронов выдаётся вместе с оружием.
-///
-/// Стрелять по-настоящему персонаж не будет — попадания считает хозяин, — но
-/// без патронов он не отыграет ни выстрела, а щёлкать пустым магазином будет.
-constexpr int kFullAmmo = 250;
 
 /// Сколько живёт задача прицела или выстрела, в миллисекундах.
 ///
@@ -201,6 +211,29 @@ constexpr int kLookTaskDuration = 600;
 constexpr int kLookFlags = 1;
 constexpr int kLookPriority = 2;
 
+/// Кость правой кисти в нумерации игры. Из неё торчит ствол.
+constexpr int kRightHandBone = 28422;
+
+/// На сколько точка вылета отодвигается вперёд по ходу выстрела, в метрах.
+///
+/// Кисть руки лежит вплотную к телу, а пуля, начавшаяся внутри собственной
+/// коробки, гаснет о неё в тот же миг.
+constexpr float kMuzzleAhead = 0.5F;
+
+/// Урон от показанной пули. Ноль: попадания считает стрелявший у себя.
+constexpr int kNoBulletDamage = 0;
+
+/// Сколько кукла ждёт присланного выстрела, прежде чем начать стрелять сама.
+///
+/// Полсекунды — заметно больше промежутка между выстрелами любого автомата и
+/// заметно меньше того, что человек примет за молчание. Меньше — и в очереди
+/// нашлась бы щель, в которую кукла успела бы дать своих; больше — и стрельба
+/// старого клиента, который выстрелов не шлёт вовсе, начиналась бы с задержкой.
+constexpr std::int32_t kShotFallback = 500;
+
+/// Скорость пули. Минус единица означает «как у этого оружия».
+constexpr float kDefaultBulletSpeed = -1.0F;
+
 bool aiming(const shared::PlayerState& state) {
     return shared::has(state.flags, shared::PlayerFlag::Aiming) ||
            shared::has(state.flags, shared::PlayerFlag::Shooting);
@@ -250,7 +283,10 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       setIntoVehicle_(table.handlerFor(natives::kSetPedIntoVehicle)),
       enterVehicle_(table.handlerFor(natives::kTaskEnterVehicle)),
       leaveVehicle_(table.handlerFor(natives::kTaskLeaveVehicle)),
-      isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)) {}
+      isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)),
+      shootBullet_(table.handlerFor(natives::kShootSingleBulletBetweenCoords)),
+      shotTimer_(table.handlerFor(natives::kGetGameTimer)),
+      boneCoords_(table.handlerFor(natives::kGetPedBoneCoords)) {}
 
 RemotePlayers::~RemotePlayers() {
     // Персонажей здесь уже не убрать: разрушение приходится на выгрузку модуля,
@@ -339,6 +375,75 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
 
     spdlog::debug("игрок {} ({}) показан персонажем {}", player.id, player.nickname, ped);
     return ped;
+}
+
+void RemotePlayers::fire(shared::PlayerId player, std::uint32_t weapon,
+                         const shared::Vec3& target) {
+    if (shootBullet_ == nullptr || weapon == 0) {
+        return;
+    }
+
+    const auto puppet = puppets_.find(player);
+    if (puppet == puppets_.end() || puppet->second.ped == 0) {
+        // Куклы нет: игрок ещё не показан либо уже ушёл. Стрелять неоткуда, и
+        // это обычное дело — выстрел идёт надёжным каналом и вполне может
+        // обогнать первый снимок.
+        return;
+    }
+
+    const int ped = puppet->second.ped;
+
+    // Откуда вылетает пуля — от руки той самой куклы, которая стоит у нас, а не
+    // от точки, присланной хозяином. Хозяин прислал бы место, где его ствол был
+    // шестьдесят миллисекунд назад, а показываем мы куклу с тем же отставанием:
+    // пуля вылетала бы из воздуха рядом с ней.
+    shared::Vec3 muzzle;
+
+    if (boneCoords_ != nullptr) {
+        NativeContext bone;
+        bone.push(ped);
+        bone.push(kRightHandBone);
+        bone.push(0.0F);
+        bone.push(0.0F);
+        bone.push(0.0F);
+        boneCoords_(bone.address());
+
+        muzzle = shared::Vec3{bone.result<float>(0), bone.result<float>(1), bone.result<float>(2)};
+    } else {
+        NativeContext coords;
+        coords.push(ped);
+        coords.push(true);
+        getCoords_(coords.address());
+
+        muzzle = shared::Vec3{coords.result<float>(0), coords.result<float>(1),
+                              coords.result<float>(2) + shared::kLookHeight};
+    }
+
+    // Точка вылета отодвигается вперёд по ходу выстрела. Кисть руки лежит
+    // вплотную к телу, а пуля, начавшаяся внутри собственной коробки, гаснет о
+    // неё в тот же миг: снаружи это выглядит как стреляющий без единого следа
+    // на стенах.
+    const float dx = target.x - muzzle.x;
+    const float dy = target.y - muzzle.y;
+    const float dz = target.z - muzzle.z;
+    const float reach = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (reach > kMuzzleAhead) {
+        const float share = kMuzzleAhead / reach;
+
+        muzzle.x += dx * share;
+        muzzle.y += dy * share;
+        muzzle.z += dz * share;
+    }
+
+    invokeNative<void>(shootBullet_, muzzle.x, muzzle.y, muzzle.z, target.x, target.y, target.z,
+                       kNoBulletDamage, true, weapon, ped, true, false, kDefaultBulletSpeed);
+
+    // Отмечаем, что за эту куклу выстрелили мы. Пока такие выстрелы идут, сама
+    // она стрелять не будет — см. Puppet::firedAt.
+    if (shotTimer_ != nullptr) {
+        puppet->second.firedAt = invokeNative<std::int32_t>(shotTimer_);
+    }
 }
 
 void RemotePlayers::dress(shared::PlayerId player, const shared::PlayerAppearance& appearance) {
@@ -433,15 +538,34 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
             const bool entering =
                 shared::has(player.state.flags, shared::PlayerFlag::EnteringVehicle);
 
+            // Поза задаётся раньше движения, и порядок здесь важен. Прыжок,
+            // лазание и уход в укрытие — это задачи, а задача ходьбы, выданная
+            // следом, их отменяет. Поэтому сперва поза, а потом — движение, и
+            // только если поза его не отменила сама.
+            animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
+
             // Залезающим распоряжается задача входа: она ведёт его к двери сама,
             // и вести его при этом ещё и снимками значит тянуть в две стороны.
             if (!riding && !entering) {
-                walk(puppet, player, seconds, now);
-                aim(puppet, player);
-                look(puppet, player, now);
+                // Занятый своим движением ведётся им, а не нами: задача ходьбы,
+                // выданная поверх прыжка, отменяет прыжок — то есть ровно то,
+                // ради чего он и заказан. Положение при этом всё равно
+                // подводится: тело обязано оказаться там, где хозяин.
+                const bool busy = game::PedAnimation::busy(player.state.flags);
+
+                walk(puppet, player, seconds, now, busy);
+
+                if (!busy) {
+                    aim(puppet, player);
+                    look(puppet, player, now);
+                }
+            } else if (riding && aiming(player.state)) {
+                // Сидящий в машине показывает единственное, что может показать:
+                // куда он целится из окна. Ни походки, ни направления движения
+                // у него нет — его ведёт машина.
+                animation_.applyDriveBy(puppet.ped, player.state.aimAt);
             }
 
-            animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
             act(puppet, player);
         }
 
@@ -634,6 +758,13 @@ void RemotePlayers::steer(Puppet& puppet, const RemotePlayerView& player, float 
         return;
     }
 
+    // Смена задачи с обычной на целящуюся и обратно — не повод медлить: пока
+    // задача не сменилась, персонаж идёт не тем боком. Всё остальное ждёт
+    // своего срока: выданная каждый кадр, задача не даёт себе начаться.
+    if (tasked && !switched && now - puppet.taskedAt < kRetaskInterval) {
+        return;
+    }
+
     puppet.aim = target;
     puppet.taskedAt = now;
     puppet.taskedAiming = aims;
@@ -659,7 +790,7 @@ void RemotePlayers::steer(Puppet& puppet, const RemotePlayerView& player, float 
 }
 
 void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float seconds,
-                         std::int32_t now) const {
+                         std::int32_t now, bool busy) const {
     NativeContext coords;
     coords.push(puppet.ped);
     coords.push(true);
@@ -705,6 +836,15 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float s
 
     const float speed = length(player.state.velocity);
     const bool moving = speed >= kStandingSpeed;
+
+    if (busy) {
+        // Персонаж занят своим движением: прыгает, лезет, сидит в укрытии. Ни
+        // поворачивать его, ни задавать ему походку в это время нельзя —
+        // движение ведёт его само, и всякое наше распоряжение его прервёт.
+        // Положение выше подведено, и этого довольно.
+        puppet.taskedAt = 0;
+        return;
+    }
 
     turn(puppet, player, moving);
 
@@ -766,10 +906,17 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
 
     const bool shooting = shared::has(player.state.flags, shared::PlayerFlag::Shooting);
 
+    // Своя стрельба — только пока не идут присланные выстрелы. Иначе очередь
+    // выходит двойной, и половина её летит не туда, куда целился хозяин, а
+    // куда попадёт кукла со своей меткостью.
+    const bool ownFire =
+        shotTimer_ == nullptr ||
+        invokeNative<std::int32_t>(shotTimer_) - puppet.firedAt >= kShotFallback;
+
     // Задача выдаётся коротким сроком и каждый кадр: и прицел, и стрельба — это
     // состояния, которые кончаются в тот же миг, что и у хозяина, а не длятся
     // сами по себе.
-    if (shooting && taskShoot_ != nullptr) {
+    if (shooting && ownFire && taskShoot_ != nullptr) {
         invokeNative<void>(taskShoot_, puppet.ped, player.state.aimAt.x, player.state.aimAt.y,
                            player.state.aimAt.z, kAimTaskDuration, kFiringPatternFullAuto);
         return;

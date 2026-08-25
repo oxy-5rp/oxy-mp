@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <vector>
 
 using namespace oxymp::shared;
@@ -22,6 +23,18 @@ template<typename Message>
 std::optional<Message> roundTrip(const Message& message) {
     const std::vector<std::uint8_t> packet = encode(message);
     return decode<Message>(ByteView{packet});
+}
+
+/// Один ли это угол с точностью до полного оборота.
+///
+/// Запись угла двумя байтами приводит его к промежутку от нуля до полного
+/// оборота: минус два градуса возвращаются тремястами пятьюдесятью восемью, и
+/// это тот же самый угол. Сравнивать их как числа значило бы объявить поломкой
+/// приведение к кругу.
+[[nodiscard]] bool sameAngle(float received, float sent) {
+    const float difference = std::fmod(received - sent + 540.0F, 360.0F) - 180.0F;
+
+    return std::abs(difference) < 0.01F;
 }
 
 } // namespace
@@ -176,6 +189,218 @@ TEST_CASE("an empty bundle of player states survives a round trip", "[messages]"
 
     REQUIRE(received.has_value());
     CHECK(received->players.empty());
+}
+
+TEST_CASE("a bundle of vehicle states survives a round trip", "[messages]") {
+    VehicleStates sent;
+
+    for (std::uint32_t i = 1; i <= 3; ++i) {
+        VehicleState state;
+        state.id = i;
+        state.sentAt = 2000 + i;
+        state.model = 0xDEADBEEFU;
+        state.position = Vec3{static_cast<float>(i), 20.0F, 30.0F};
+        state.bodyHealth = static_cast<std::uint16_t>(900 + i);
+        sent.vehicles.push_back(state);
+    }
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    REQUIRE(received->vehicles.size() == 3);
+
+    for (std::uint32_t i = 1; i <= 3; ++i) {
+        const VehicleState& state = received->vehicles[i - 1];
+
+        CHECK(state.id == i);
+        CHECK(state.sentAt == 2000 + i);
+        CHECK(state.model == 0xDEADBEEFU);
+        CHECK(state.position.x == static_cast<float>(i));
+        CHECK(state.bodyHealth == 900 + i);
+    }
+}
+
+TEST_CASE("an empty bundle of vehicle states survives a round trip", "[messages]") {
+    // Пустая связка не отправляется, но разобраться обязана — как и у игроков.
+    const auto received = roundTrip(VehicleStates{});
+
+    REQUIRE(received.has_value());
+    CHECK(received->vehicles.empty());
+}
+
+TEST_CASE("a bundle of vehicle states keeps its own number", "[messages]") {
+    // Номер, однажды присвоенный сообщению, закрепляется за ним навсегда:
+    // клиент прежней сборки, столкнувшись с новым сервером, иначе разобрал бы
+    // чужое сообщение как своё.
+    CHECK(static_cast<std::uint8_t>(MessageId::VehicleStates) == 50);
+
+    const auto packet = encode(VehicleStates{});
+    CHECK(peekMessageId(ByteView{packet}) == MessageId::VehicleStates);
+}
+
+TEST_CASE("vehicle flags keep their bits", "[messages]") {
+    // Признаки едут одним числом, и разряд, однажды отданный признаку,
+    // закрепляется за ним: клиент прежней сборки, встретив новый сервер, иначе
+    // принял бы гудок за сирену — и ошибки при этом не случилось бы нигде.
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::EngineOn) == 1U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::Handbrake) == 2U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::LightsOn) == 4U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::HighBeams) == 8U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::SirenOn) == 16U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::HornOn) == 32U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::RoofOpen) == 64U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::Destroyed) == 128U);
+}
+
+TEST_CASE("a trailer travels with the truck that pulls it", "[messages]") {
+    // Сцепка едет в снимке, а не отдельным надёжным сообщением: она
+    // исправляется сама следующим же снимком через тридцать миллисекунд, и
+    // платить за неё надёжным каналом не за что.
+    VehicleState sent;
+    sent.id = 4;
+    sent.trailer = 17;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->trailer == 17);
+}
+
+TEST_CASE("a vehicle without a trailer says so", "[messages]") {
+    // Ноль здесь означает «нет прицепа», и это то же значение, что и «машины
+    // нет»: счётчик машин у сервера начинается с единицы.
+    const auto received = roundTrip(VehicleState{});
+
+    REQUIRE(received.has_value());
+    CHECK(received->trailer == kInvalidVehicleId);
+}
+
+TEST_CASE("a wrecked vehicle says so out loud", "[messages]") {
+    // Признаком, а не выводом из прочностей, и проверяется он отдельно именно
+    // поэтому. Чужая машина у получателя неуязвима — иначе она взорвалась бы у
+    // него от одного выстрела и осталась бы целой у того, кто в ней едет, — а
+    // неуязвимая не взрывается и от нулевой прочности.
+    VehicleState sent;
+    sent.id = 9;
+    sent.flags = static_cast<std::uint16_t>(VehicleFlag::Destroyed);
+    sent.bodyHealth = 0;
+    sent.engineHealth = 0;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, VehicleFlag::Destroyed));
+    CHECK(received->bodyHealth == 0);
+}
+
+TEST_CASE("the horn and the roof survive a round trip", "[messages]") {
+    // Оба признака завелись позже прочих, и проверка нужна именно за тем, что
+    // они лежат в том же числе: разъехавшись, они гудели бы вместо того, чтобы
+    // открывать крышу.
+    VehicleState sent;
+    sent.id = 3;
+    sent.flags = VehicleFlag::HornOn | VehicleFlag::RoofOpen;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, VehicleFlag::HornOn));
+    CHECK(has(received->flags, VehicleFlag::RoofOpen));
+    CHECK_FALSE(has(received->flags, VehicleFlag::SirenOn));
+}
+
+TEST_CASE("WeaponFired survives a round trip", "[messages]") {
+    WeaponFired sent;
+    sent.playerId = 12;
+    sent.weapon = 0xB1CA77B1U; // WEAPON_RPG
+    sent.target = Vec3{250.5F, -1100.25F, 30.0F};
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 12);
+    CHECK(received->weapon == 0xB1CA77B1U);
+    CHECK(received->target == sent.target);
+}
+
+TEST_CASE("a shot keeps its own number", "[messages]") {
+    // Номер, однажды присвоенный сообщению, закрепляется за ним навсегда.
+    CHECK(static_cast<std::uint8_t>(MessageId::WeaponFired) == 52);
+
+    const auto packet = encode(WeaponFired{});
+    CHECK(peekMessageId(ByteView{packet}) == MessageId::WeaponFired);
+}
+
+TEST_CASE("a shot from nobody survives a round trip", "[messages]") {
+    // Так выглядит выстрел, идущий от клиента: игрока в нём нет, его проставит
+    // сервер. Разбираться такое сообщение обязано наравне с полным — иначе
+    // сервер не смог бы прочитать то, что ему прислали.
+    WeaponFired sent;
+    sent.weapon = 0x1B06D571U;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == kInvalidPlayerId);
+    CHECK(received->weapon == 0x1B06D571U);
+}
+
+TEST_CASE("Explosion survives a round trip", "[messages]") {
+    Explosion sent;
+    sent.position = Vec3{-125.5F, 1200.25F, 62.0F};
+    sent.kind = static_cast<std::int32_t>(ExplosionKind::Rocket);
+    sent.scale = 2.5F;
+    sent.shake = 1.5F;
+    sent.audible = false;
+    sent.invisible = true;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->position == sent.position);
+    CHECK(received->kind == 4);
+    CHECK(received->scale == 2.5F);
+    CHECK(received->shake == 1.5F);
+    CHECK_FALSE(received->audible);
+    CHECK(received->invisible);
+}
+
+TEST_CASE("an explosion is heard and seen unless told otherwise", "[messages]") {
+    // Два признака едут одним байтом, и перепутать их местами — значит устроить
+    // беззвучный взрыв там, где просили невидимый. Проверяется поэтому каждый
+    // порознь, а не оба разом.
+    Explosion audible;
+    audible.audible = true;
+    audible.invisible = false;
+
+    const auto heard = roundTrip(audible);
+
+    REQUIRE(heard.has_value());
+    CHECK(heard->audible);
+    CHECK_FALSE(heard->invisible);
+}
+
+TEST_CASE("explosion kinds keep the numbers the game gave them", "[messages]") {
+    // Числа — игры, а не наши: она ходит по ним в свою таблицу описаний.
+    // Переставленные местами, они устроили бы взрыв машины там, где просили
+    // гранату, и никакой ошибки при этом не случилось бы.
+    CHECK(static_cast<std::int32_t>(ExplosionKind::Grenade) == 0);
+    CHECK(static_cast<std::int32_t>(ExplosionKind::StickyBomb) == 2);
+    CHECK(static_cast<std::int32_t>(ExplosionKind::Rocket) == 4);
+    CHECK(static_cast<std::int32_t>(ExplosionKind::Car) == 7);
+    CHECK(static_cast<std::int32_t>(ExplosionKind::Train) == 26);
+    CHECK(static_cast<std::int32_t>(ExplosionKind::BirdCrap) == 35);
+
+    // И последний из них — тот, по которому получатель отбрасывает выдуманные:
+    // натив принимает род не глядя и промахивается мимо своей таблицы.
+    CHECK(kMaxExplosionKind == 35);
+}
+
+TEST_CASE("an explosion keeps its own number", "[messages]") {
+    CHECK(static_cast<std::uint8_t>(MessageId::Explosion) == 51);
+
+    const auto packet = encode(Explosion{});
+    CHECK(peekMessageId(ByteView{packet}) == MessageId::Explosion);
 }
 
 TEST_CASE("ServerReject survives a round trip", "[messages]") {
@@ -565,13 +790,35 @@ TEST_CASE("VehicleState survives a round trip", "[messages]") {
     REQUIRE(received.has_value());
     CHECK(received->id == 25);
     CHECK(received->model == 0x9B909C94);
+    // Положение — точь-в-точь: мир GTA шестнадцать километров в поперечнике, и
+    // делить его на шестьдесят пять тысяч частей значило бы дать шаг в четверть
+    // метра.
     CHECK(received->position == sent.position);
-    CHECK(received->rotation == sent.rotation);
-    CHECK(received->velocity == sent.velocity);
-    CHECK(received->angularVelocity == sent.angularVelocity);
-    CHECK(received->steer == -0.5F);
-    CHECK(received->throttle == 1.0F);
-    CHECK(received->brake == 0.25F);
+
+    // Всё остальное — квантованным, и потому с допуском. Допуск здесь не
+    // послабление, а само правило: он равен шагу деления, и проверяет он ровно
+    // то, что снимок теряет не больше обещанного.
+    //
+    // Углы при этом сравниваются по кругу, а не как числа: запись угла приводит
+    // его к промежутку от нуля до полного оборота, и минус два градуса
+    // возвращаются тремястами пятьюдесятью восемью. Это тот же самый угол —
+    // получатель приводит его к кратчайшей дуге сам, прежде чем что-либо с ним
+    // делать.
+    CHECK(sameAngle(received->rotation.x, sent.rotation.x));
+    CHECK(sameAngle(received->rotation.y, sent.rotation.y));
+    CHECK(sameAngle(received->rotation.z, sent.rotation.z));
+
+    CHECK(received->velocity.x == Approx(sent.velocity.x).margin(0.02F));
+    CHECK(received->velocity.y == Approx(sent.velocity.y).margin(0.02F));
+    CHECK(received->velocity.z == Approx(sent.velocity.z).margin(0.02F));
+
+    CHECK(received->angularVelocity.x == Approx(sent.angularVelocity.x).margin(0.001F));
+    CHECK(received->angularVelocity.y == Approx(sent.angularVelocity.y).margin(0.001F));
+    CHECK(received->angularVelocity.z == Approx(sent.angularVelocity.z).margin(0.001F));
+
+    CHECK(received->steer == Approx(-0.5F).margin(0.01F));
+    CHECK(received->throttle == Approx(1.0F).margin(0.01F));
+    CHECK(received->brake == Approx(0.25F).margin(0.01F));
     CHECK(received->bodyHealth == 640);
     CHECK(received->engineHealth == 300);
     CHECK(received->tankHealth == 950);

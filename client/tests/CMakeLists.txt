@@ -15,6 +15,11 @@ add_executable(oxymp_client_tests
     ../src/interpolation.cpp
 )
 
+# Заголовок счёта лежит там же, где и остальные заголовки клиентского ядра:
+# им пользуется не только этот набор, но и connection.hpp — оценка отставания
+# хранится у каждого чужого игрока и у каждой машины.
+target_include_directories(oxymp_client_tests PRIVATE ../include)
+
 target_link_libraries(oxymp_client_tests PRIVATE
     oxymp::shared
     oxymp::options

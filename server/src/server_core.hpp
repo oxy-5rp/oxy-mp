@@ -136,6 +136,12 @@ public:
     virtual void animationPlayed(const Player& player,
                                  const shared::PlayerAnimation& animation) = 0;
 
+    /// В мире рвануло — рассказать всем, кто до этого места достаёт.
+    ///
+    /// Слой мира приходит доводом, а не берётся из игрока: у взрыва игрока нет
+    /// вовсе — его заводит ресурс, а не тот, у кого рвануло.
+    virtual void exploded(const shared::Explosion& explosion, std::int32_t dimension) = 0;
+
     /// Игрок перешёл в другой слой мира; было — previous.
     ///
     /// Всё, что отбирается расстоянием, разберётся само собой на ближайшей
@@ -202,6 +208,7 @@ public:
                  std::int8_t texture) override;
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
     bool clearTasks(shared::PlayerId id) override;
+    void explode(const script::ExplosionInfo& explosion) override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;

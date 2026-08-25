@@ -243,7 +243,7 @@ void Vehicles::remove(int vehicle) const {
     deleteVehicle_(context.address());
 }
 
-void Vehicles::answerTo(Entry& entry, shared::PlayerId owner, bool ours) const {
+void Vehicles::answerTo(Entry& entry, shared::PlayerId owner, bool ours, bool towed) const {
     const bool ownerChanged = !entry.answered || entry.owner != owner || entry.ours != ours;
 
     entry.owner = owner;
@@ -253,7 +253,11 @@ void Vehicles::answerTo(Entry& entry, shared::PlayerId owner, bool ours) const {
     // Ничья машина замирает там, где её оставили. Считать её физику некому, а
     // отпущенная без присмотра она сползёт по уклону или провалится сквозь
     // землю, когда игра подгрузит мир под ней заново.
-    const bool shouldFreeze = owner == shared::kInvalidPlayerId;
+    //
+    // Прицепленная — исключение, и без него сцепка не работает вовсе: в прицепе
+    // никто не сидит, ведущего у него нет, и замерший на месте он остался бы
+    // стоять посреди дороги, пока тягач уезжает.
+    const bool shouldFreeze = owner == shared::kInvalidPlayerId && !towed;
 
     if (freezePosition_ != nullptr && entry.frozen != shouldFreeze) {
         // На колёса — перед тем как замереть, и только тогда. Машину, которую
@@ -465,6 +469,18 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
         entry.doomed = true;
     }
 
+    // Кто сейчас чей прицеп — отдельным проходом, до всего остального.
+    // Прицепленную машину ведёт тягач, а не снимки: ей нельзя ни задавать
+    // положение, ни замирать на месте. А узнать об этом можно только из снимка
+    // тягача, который в списке может стоять и после неё.
+    towed_.clear();
+
+    for (const View& view : vehicles) {
+        if (view.state.trailer != shared::kInvalidVehicleId) {
+            towed_.insert(view.state.trailer);
+        }
+    }
+
     for (const View& view : vehicles) {
         const shared::VehicleState& state = view.state;
 
@@ -492,7 +508,7 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
             known = vehicles_.emplace(state.id, Entry{.vehicle = vehicle, .model = state.model})
                         .first;
 
-            answerTo(known->second, view.owner, ours);
+            answerTo(known->second, view.owner, ours, towed_.contains(state.id));
             dress(state.id, known->second);
             continue;
         }
@@ -507,19 +523,36 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
             continue;
         }
 
-        answerTo(entry, view.owner, ours);
+        const bool towed = towed_.contains(state.id);
+
+        answerTo(entry, view.owner, ours, towed);
         dress(state.id, entry);
 
         // Свою машину не трогаем. Её ведёт игра, а мы лишь снимаем с неё снимки:
         // наложить на неё пришедшее состояние значило бы бороться с собственной
         // физикой — и проиграть ей, потому что физика считается каждый кадр, а
-        // снимки приходят двадцать раз в секунду.
+        // снимки приходят каждый такт сервера.
         if (ours) {
             entry.applied = state;
             continue;
         }
 
-        snapshot_.applyMotion(entry.vehicle, state, seconds);
+        // Прицепленную машину ведёт тягач. Задавать ей положение снимками
+        // значило бы тянуть её в две стороны: игра держит её на сцепке, а мы
+        // ставили бы её туда, где её видел хозяин, — и прицеп бился бы о тягач
+        // тридцать раз в секунду.
+        if (!towed) {
+            snapshot_.applyMotion(entry.vehicle, state, seconds);
+        }
+
+        // Сцепка — по снимку тягача, и только по нему: прицеп о ней не знает.
+        // Номер прицепа в игре ищется по номеру сессии; не нашёлся — прицепа у
+        // нас ещё нет, и сцепим в следующем кадре.
+        snapshot_.applyTrailer(
+            entry.vehicle,
+            state.trailer == shared::kInvalidVehicleId ? 0 : handleFor(state.trailer),
+            entry.applied.trailer != shared::kInvalidVehicleId);
+
         snapshot_.applyControls(entry.vehicle, state, entry.applied);
         snapshot_.applyDamage(entry.vehicle, state, entry.applied);
 
@@ -548,6 +581,13 @@ std::vector<shared::VehicleState> Vehicles::describeOwned(int localPed) const {
         shared::VehicleState state = snapshot_.read(entry.vehicle, entry.vehicle == driven);
         state.id = id;
         state.model = entry.model;
+
+        // Прицеп называется номером сессии, а не номером в игре: у получателя
+        // номера игры свои, и по нашему он не найдёт ничего. Прицеп, о котором
+        // сессия не знает, не называется вовсе — сказать о нём нечего.
+        if (const int towed = snapshot_.trailerOf(entry.vehicle); towed != 0) {
+            state.trailer = idOf(towed);
+        }
 
         snapshots.push_back(state);
     }

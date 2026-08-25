@@ -353,12 +353,22 @@ void VehicleState::write(ByteWriter& writer) const {
     writer.writeU32(sentAt);
     writer.writeU32(model);
     writer.writeVec3(position);
-    writer.writeVec3(rotation);
-    writer.writeVec3(velocity);
-    writer.writeVec3(angularVelocity);
-    writer.writeFloat(steer);
-    writer.writeFloat(throttle);
-    writer.writeFloat(brake);
+
+    // Всё, кроме положения, — квантованным. Снимок машины вдвое тяжелее снимка
+    // игрока, а ходит с той же частотой; двадцать семь байт с него снимается
+    // без единой различимой глазом потери.
+    //
+    // Положение оставлено полным нарочно: мир GTA — шестнадцать километров в
+    // поперечнике, и деление его на шестьдесят пять тысяч частей дало бы шаг в
+    // четверть метра. Машина дрожала бы на месте.
+    writer.writeAngle(rotation.x);
+    writer.writeAngle(rotation.y);
+    writer.writeAngle(rotation.z);
+    writer.writeVelocity(velocity);
+    writer.writeAngularVelocity(angularVelocity);
+    writer.writeControl(steer);
+    writer.writeControl(throttle);
+    writer.writeControl(brake);
     writer.writeU16(bodyHealth);
     writer.writeU16(engineHealth);
     writer.writeU16(tankHealth);
@@ -367,6 +377,7 @@ void VehicleState::write(ByteWriter& writer) const {
     writer.writeU8(doorsBroken);
     writer.writeU8(windowsBroken);
     writer.writeU8(tyresBurst);
+    writer.writeU32(trailer);
 }
 
 VehicleState VehicleState::read(ByteReader& reader) {
@@ -375,12 +386,20 @@ VehicleState VehicleState::read(ByteReader& reader) {
     message.sentAt = reader.readU32();
     message.model = reader.readU32();
     message.position = reader.readVec3();
-    message.rotation = reader.readVec3();
-    message.velocity = reader.readVec3();
-    message.angularVelocity = reader.readVec3();
-    message.steer = reader.readFloat();
-    message.throttle = reader.readFloat();
-    message.brake = reader.readFloat();
+
+    // Углы поворота читаются по одному: порядок вычисления доводов не задан, и
+    // собранные в одном выражении оси разъехались бы местами на другом
+    // компиляторе.
+    const float pitch = reader.readAngle();
+    const float roll = reader.readAngle();
+    const float yaw = reader.readAngle();
+    message.rotation = Vec3{pitch, roll, yaw};
+
+    message.velocity = reader.readVelocity();
+    message.angularVelocity = reader.readAngularVelocity();
+    message.steer = reader.readControl();
+    message.throttle = reader.readControl();
+    message.brake = reader.readControl();
     message.bodyHealth = reader.readU16();
     message.engineHealth = reader.readU16();
     message.tankHealth = reader.readU16();
@@ -389,6 +408,39 @@ VehicleState VehicleState::read(ByteReader& reader) {
     message.doorsBroken = reader.readU8();
     message.windowsBroken = reader.readU8();
     message.tyresBurst = reader.readU8();
+    message.trailer = reader.readU32();
+    return message;
+}
+
+void VehicleStates::write(ByteWriter& writer) const {
+    // Слово в слово как у PlayerStates, и намеренно: правило у обеих связок
+    // одно, и разойтись им нельзя.
+    const auto count =
+        static_cast<std::uint8_t>(std::min(vehicles.size(), kMaxStatesInBundle));
+
+    writer.writeU8(count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        vehicles[i].write(writer);
+    }
+}
+
+VehicleStates VehicleStates::read(ByteReader& reader) {
+    VehicleStates message;
+
+    const std::uint8_t count = reader.readU8();
+    message.vehicles.reserve(count);
+
+    for (std::uint8_t i = 0; i < count; ++i) {
+        // Чтение прекращается на первой же нехватке байт: испорченная связка не
+        // должна превратиться в сотню снимков из мусора.
+        if (!reader.ok()) {
+            break;
+        }
+
+        message.vehicles.push_back(VehicleState::read(reader));
+    }
+
     return message;
 }
 
@@ -1093,6 +1145,49 @@ PlayerIntoVehicle PlayerIntoVehicle::read(ByteReader& reader) {
     return message;
 }
 
+void Explosion::write(ByteWriter& writer) const {
+    writer.writeVec3(position);
+    writer.writeU32(static_cast<std::uint32_t>(kind));
+    writer.writeFloat(scale);
+    writer.writeFloat(shake);
+
+    // Оба признака — одним байтом: каждый по своему байту стоил бы вдвое
+    // дороже, а взрыв идёт по надёжному каналу, где байты не бесплатны.
+    std::uint8_t traits = 0;
+    traits |= audible ? 1U << 0U : 0U;
+    traits |= invisible ? 1U << 1U : 0U;
+
+    writer.writeU8(traits);
+}
+
+Explosion Explosion::read(ByteReader& reader) {
+    Explosion message;
+    message.position = reader.readVec3();
+    message.kind = static_cast<std::int32_t>(reader.readU32());
+    message.scale = reader.readFloat();
+    message.shake = reader.readFloat();
+
+    const std::uint8_t traits = reader.readU8();
+    message.audible = (traits & (1U << 0U)) != 0;
+    message.invisible = (traits & (1U << 1U)) != 0;
+
+    return message;
+}
+
+void WeaponFired::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeU32(weapon);
+    writer.writeVec3(target);
+}
+
+WeaponFired WeaponFired::read(ByteReader& reader) {
+    WeaponFired message;
+    message.playerId = reader.readU32();
+    message.weapon = reader.readU32();
+    message.target = reader.readVec3();
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -1141,6 +1236,9 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::EntityAttachment:
     case MessageId::PedState:
     case MessageId::PedRemoved:
+    case MessageId::VehicleStates:
+    case MessageId::Explosion:
+    case MessageId::WeaponFired:
         return static_cast<MessageId>(packet.front());
     }
 

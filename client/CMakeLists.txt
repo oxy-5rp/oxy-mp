@@ -47,6 +47,8 @@ if(WIN32)
         src/game/custom_text.cpp
         src/game/discord_block.cpp
         src/game/engine_addresses.cpp
+        src/game/explosions.cpp
+        src/game/vehicle_entry.cpp
         src/game/environment.cpp
         src/game/data_files.cpp
         src/game/file_device.cpp

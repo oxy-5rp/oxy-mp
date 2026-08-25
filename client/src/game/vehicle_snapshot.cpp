@@ -3,7 +3,7 @@
 #include "native_call.hpp"
 #include "native_hashes.hpp"
 
-#include "../interpolation.hpp"
+#include <oxymp/client/interpolation.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +11,22 @@
 
 namespace oxymp::client::game {
 namespace {
+
+/// Состояния крыши кабриолета в нумерации игры: поднята, опускается, опущена,
+/// поднимается.
+constexpr int kRoofLowering = 1;
+constexpr int kRoofDown = 2;
+
+/// На сколько заводится гудок за один раз.
+///
+/// Заводится он заново каждый кадр, пока признак стоит, — своего «перестань» у
+/// игры нет. Сто миллисекунд: меньше — и гудок рвался бы между кадрами на
+/// просевшей частоте, больше — и он тянулся бы заметно дольше чужого пальца на
+/// клавише.
+constexpr int kHornBurst = 100;
+
+/// Лад гудка. Ноль — тот, что у машины свой; так его зовут и скрипты игры.
+constexpr int kDefaultHornMode = 0;
 
 /// Порядок углов поворота. Двойка — тот же, что и у камеры, и тот, в котором
 /// игра отдаёт и принимает поворот машины без пересчёта.
@@ -31,6 +47,12 @@ constexpr int kInputHandbrake = 76;
 /// туннель машина оказывается за сотню метров, и доводить её туда плавно — это
 /// показать, как она едет сквозь дома.
 constexpr float kSnapDistance = 15.0F;
+
+/// На каком расстоянии игра соглашается сцепить прицеп с тягачом, в метрах.
+///
+/// С запасом: у хозяина они уже сцеплены, а у нас обе машины стоят там, куда их
+/// привели снимки, и между ними бывает метр расхождения.
+constexpr float kTrailerReach = 15.0F;
 
 /// Во сколько раз сокращать расхождение за секунду, когда оно невелико.
 ///
@@ -125,6 +147,19 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       setFullBeam_(table.handlerFor(natives::kSetVehicleFullbeam)),
       sirenOn_(table.handlerFor(natives::kIsVehicleSirenOn)),
       setSiren_(table.handlerFor(natives::kSetVehicleSiren)),
+      trailerOf_(table.handlerFor(natives::kGetVehicleTrailerVehicle)),
+      attachTrailer_(table.handlerFor(natives::kAttachVehicleToTrailer)),
+      detachTrailer_(table.handlerFor(natives::kDetachVehicleFromTrailer)),
+      trailerAttached_(table.handlerFor(natives::kIsVehicleAttachedToTrailer)),
+      wrecked_(table.handlerFor(natives::kIsEntityDead)),
+      explode_(table.handlerFor(natives::kExplodeVehicle)),
+      invincible_(table.handlerFor(natives::kSetEntityInvincible)),
+      hornActive_(table.handlerFor(natives::kIsHornActive)),
+      startHorn_(table.handlerFor(natives::kStartVehicleHorn)),
+      roofState_(table.handlerFor(natives::kGetConvertibleRoofState)),
+      raiseRoof_(table.handlerFor(natives::kRaiseConvertibleRoof)),
+      lowerRoof_(table.handlerFor(natives::kLowerConvertibleRoof)),
+      convertible_(table.handlerFor(natives::kIsVehicleAConvertible)),
       setSteerBias_(table.handlerFor(natives::kSetVehicleSteerBias)),
       setHandbrake_(table.handlerFor(natives::kSetVehicleHandbrake)),
       setBrakeLights_(table.handlerFor(natives::kSetVehicleBrakeLights)),
@@ -252,6 +287,23 @@ shared::VehicleState VehicleSnapshot::read(int vehicle, bool driving) const {
     if (driving && controlPressed_ != nullptr) {
         set(shared::VehicleFlag::Handbrake,
             invokeNative<bool>(controlPressed_, kPlayerControls, kInputHandbrake));
+    }
+
+    if (wrecked_ != nullptr) {
+        set(shared::VehicleFlag::Destroyed, invokeNative<bool>(wrecked_, vehicle));
+    }
+
+    if (hornActive_ != nullptr) {
+        set(shared::VehicleFlag::HornOn, invokeNative<bool>(hornActive_, vehicle));
+    }
+
+    if (roofState_ != nullptr) {
+        // Игра держит четыре состояния, а по сети едет одно: куда крыша едет.
+        // Опущенная и опускающаяся — обе «открыта», поднятая и поднимающаяся —
+        // обе «закрыта». Саму дорогу получатель отыграет тем же движением.
+        const int roof = invokeNative<int>(roofState_, vehicle);
+
+        set(shared::VehicleFlag::RoofOpen, roof == kRoofLowering || roof == kRoofDown);
     }
 
     if (lightsState_ != nullptr) {
@@ -444,6 +496,64 @@ shared::VehicleAppearance VehicleSnapshot::readAppearance(int vehicle) const {
     return appearance;
 }
 
+int VehicleSnapshot::trailerOf(int vehicle) const {
+    if (vehicle == 0 || trailerOf_ == nullptr) {
+        return 0;
+    }
+
+    // Ответ приходит ссылкой: натив возвращает не прицеп, а признак «есть ли
+    // он», а сам прицеп кладёт в отданное ему место.
+    int trailer = 0;
+
+    NativeContext context;
+    context.push(vehicle);
+    context.push(&trailer);
+    trailerOf_(context.address());
+
+    // Признак «есть ли прицеп» и сам прицеп — разные вещи: натив вернул бы
+    // прошлое содержимое отданного ему места, не найдя ничего.
+    return context.result<int>() != 0 ? trailer : 0;
+}
+
+void VehicleSnapshot::applyTrailer(int vehicle, int trailer, bool had) const {
+    if (vehicle == 0) {
+        return;
+    }
+
+    if (trailer == 0) {
+        // Расцепляем только на переходе: игра сцепляет прицеп сама, стоит
+        // тягачу подать назад, и расцепляй мы каждый кадр — у зрителя сцепка
+        // разваливалась бы в тот самый миг, когда у хозяина она сложилась.
+        if (had && detachTrailer_ != nullptr) {
+            invokeNative<void>(detachTrailer_, vehicle);
+        }
+        return;
+    }
+
+    // А сцепляем, наоборот, пока не выйдет: прицеп мог ещё не появиться у нас,
+    // а машины — не сойтись достаточно близко. Проверка каждый кадр стоит
+    // одного натива и избавляет от памяти о том, удалась ли попытка.
+    const bool attached =
+        trailerAttached_ != nullptr && invokeNative<bool>(trailerAttached_, vehicle);
+
+    if (attached || attachTrailer_ == nullptr) {
+        // Уже сцеплен. Сцеплять заново каждый кадр нельзя: игра при этом
+        // подтягивает прицеп к тягачу рывком, и на ходу это выглядит как
+        // дёргающийся на сцепке прицеп.
+        //
+        // Что сцеплен именно с тем, с кем сказано, здесь не проверяется, и
+        // проверить это нечем: натив отвечает только «сцеплен или нет». Случай
+        // же, когда тягач подцепил чужой прицеп, разрешается сам: у хозяина
+        // сцепка одна, и следующий его снимок скажет о ней.
+        return;
+    }
+
+    // Радиус — то расстояние, на котором игра считает сцепку возможной. С
+    // запасом: у хозяина прицеп уже сцеплен, а у нас обе машины стоят там, куда
+    // их привели снимки, и между ними бывает метр расхождения.
+    invokeNative<void>(attachTrailer_, vehicle, trailer, kTrailerReach);
+}
+
 bool VehicleSnapshot::tooFar(const shared::Vec3& from, const shared::Vec3& to) {
     return length(shared::Vec3{to.x - from.x, to.y - from.y, to.z - from.z}) > kSnapDistance;
 }
@@ -542,6 +652,44 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
     if (flagsChanged && setSiren_ != nullptr) {
         invokeNative<void>(setSiren_, vehicle,
                            shared::has(state.flags, shared::VehicleFlag::SirenOn));
+    }
+
+    // Разрушение — один раз, на переходе, и до всего остального: взорванной
+    // машине ни свет, ни сирена, ни прочности уже не нужны.
+    //
+    // Неуязвимость перед этим снимается. Чужая машина неуязвима намеренно —
+    // иначе она взорвалась бы здесь от одного выстрела и осталась бы целой у
+    // того, кто в ней едет, — но неуязвимая не взрывается и по распоряжению.
+    // Возвращать её обратно незачем: машина уже разбита.
+    if (shared::has(state.flags, shared::VehicleFlag::Destroyed) &&
+        !shared::has(previous.flags, shared::VehicleFlag::Destroyed) && explode_ != nullptr) {
+        if (invincible_ != nullptr) {
+            invokeNative<void>(invincible_, vehicle, false);
+        }
+
+        // Со звуком и на виду: взрыв, случившийся у хозяина, обязан выглядеть
+        // так же и здесь.
+        invokeNative<void>(explode_, vehicle, true, false);
+        return;
+    }
+
+    // Гудок — не на изменение, а пока признак стоит, и это не оплошность.
+    // «Перестань гудеть» у игры нет вовсе: есть только «гуди столько-то». Гудок
+    // поэтому заводится заново коротким сроком, и снятый признак глушит его сам
+    // собой — через этот самый срок.
+    if (shared::has(state.flags, shared::VehicleFlag::HornOn) && startHorn_ != nullptr) {
+        invokeNative<void>(startHorn_, vehicle, kHornBurst, kDefaultHornMode, false);
+    }
+
+    // А крыша — наоборот, только на изменение: движение крыши длится секунды, и
+    // заказанное повторно оно начиналось бы с начала каждый кадр.
+    if (flagsChanged && raiseRoof_ != nullptr && lowerRoof_ != nullptr &&
+        (convertible_ == nullptr || invokeNative<bool>(convertible_, vehicle, false))) {
+        const bool open = shared::has(state.flags, shared::VehicleFlag::RoofOpen);
+
+        // Не мгновенно: у хозяина крыша едет своим ходом, и мгновенная у
+        // зрителя оказалась бы на месте за секунду до его.
+        invokeNative<void>(open ? lowerRoof_ : raiseRoof_, vehicle, false);
     }
 
     if (state.bodyHealth != previous.bodyHealth && setBodyHealth_ != nullptr) {

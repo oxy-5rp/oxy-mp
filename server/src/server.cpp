@@ -171,6 +171,7 @@ void Server::run(const std::atomic<bool>& stopRequested) {
 
         dropSilentPeers();
         broadcastStates();
+        broadcastVehicleStates();
         reassignVehicles();
         streamVehicles();
         streamObjects();
@@ -320,6 +321,12 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::WeaponFired:
+        if (const auto fired = shared::decode<shared::WeaponFired>(packet)) {
+            handleWeaponFired(peer, *fired);
+        }
+        return;
+
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -341,6 +348,8 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::ObjectAdded:
     case shared::MessageId::ObjectRemoved:
     case shared::MessageId::ServerEvent:
+    case shared::MessageId::VehicleStates:
+    case shared::MessageId::Explosion:
         spdlog::warn("connection {} sent a server-only message", peer);
         return;
     }
@@ -799,7 +808,7 @@ void Server::broadcastStates() {
             host_->send(listener.peer, shared::Channel::State, bundle);
         };
 
-        bundler_.reset();
+        bundler_.reset(shared::PlayerStates::kId);
 
         for (const StateSlot& other : slots_) {
             if (other.peer == listener.peer || other.length == 0) {
@@ -850,6 +859,92 @@ void Server::broadcastStates() {
     }
 }
 
+void Server::broadcastVehicleStates() {
+    const auto now = std::chrono::steady_clock::now();
+
+    // Первый проход: снимки машин, о которых с прошлого такта что-то пришло.
+    //
+    // Каждый пишется в байты ровно один раз. Прежде снимок пересылался
+    // немедленно и отдельным пакетом каждому, кто машину видит: в пробке из
+    // двадцати машин это четыреста пакетов в секунду на человека, и заголовки
+    // весили больше половины всего этого.
+    vehicleSlots_.clear();
+    vehicleBlob_.clear();
+
+    for (const auto& [id, vehicle] : vehicles_.all()) {
+        if (vehicle.stateAt <= vehiclesSweptAt_) {
+            continue;
+        }
+
+        VehicleSlot slot;
+        slot.id = id;
+        slot.position = vehicle.state.position;
+        slot.owner = vehicle.owner;
+
+        const std::size_t before = vehicleBlob_.bytes().size();
+        vehicle.state.write(vehicleBlob_);
+
+        slot.offset = static_cast<std::uint32_t>(before);
+        slot.length = static_cast<std::uint32_t>(vehicleBlob_.bytes().size() - before);
+
+        vehicleSlots_.push_back(slot);
+    }
+
+    vehiclesSweptAt_ = now;
+
+    if (vehicleSlots_.empty()) {
+        return;
+    }
+
+    const std::vector<std::uint8_t>& blob = vehicleBlob_.bytes();
+
+    // Второй проход: каждому получателю — его связка.
+    for (const auto& [peer, player] : players_) {
+        const auto send = [this, listener = peer](shared::ByteView bundle) {
+            host_->send(listener, shared::Channel::State, bundle);
+        };
+
+        bundler_.reset(shared::VehicleStates::kId);
+
+        for (const VehicleSlot& slot : vehicleSlots_) {
+            // Ведущему его же снимок не нужен: он его и прислал, и у него
+            // машина живая, а не показанная.
+            if (slot.owner == player.id) {
+                continue;
+            }
+
+            // Только те машины, о которых получателю уже рассказано. Раздача
+            // ведёт этот список сама, с расстоянием и слоем мира внутри, — а
+            // снимок машины, о которой не объявляли, получатель всё равно
+            // отбросит.
+            if (!player.streamed.contains(slot.id)) {
+                continue;
+            }
+
+            // Круги по расстоянию — те же, что у игроков, и по той же причине.
+            // Машина в двух шагах должна ехать плавно, машина за триста метров
+            // — просто быть там, где она есть. Прежняя пересылка «немедленно и
+            // всем, кто видит» проредить снимки не давала вовсе.
+            const float distance = shared::distanceSquared(player.position, slot.position);
+
+            const unsigned int every = distance > kFarRing    ? kFarEvery
+                                       : distance > kNearRing ? kMidEvery
+                                                              : 1U;
+
+            // Вразнобой, как и у игроков: добавка номера машины разводит
+            // дальних по разным тактам. Без неё все они пришли бы одним, и сеть
+            // шла бы рывками.
+            if (every > 1 && (tick_ + slot.id) % every != 0) {
+                continue;
+            }
+
+            bundler_.add(shared::ByteView{blob.data() + slot.offset, slot.length}, send);
+        }
+
+        bundler_.finish(send);
+    }
+}
+
 void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
     const Player* player = players_.findByPeer(peer);
     if (player == nullptr) {
@@ -863,14 +958,34 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
         return;
     }
 
-    // От машины, а не от её ведущего: вести машину можно и не сидя в ней, и
-    // считать видимость по тому, кто её ведёт, значило бы рассылать снимки не
-    // тем, кто её видит. Слой мира — тоже её собственный, по той же причине.
-    const VehicleDirectory::Vehicle* const moved = vehicles_.find(state.id);
-    const std::int32_t dimension =
-        moved == nullptr ? script::kDefaultDimension : moved->dimension;
+    // Разослан снимок будет в ближайшем такте, связкой вместе с остальными
+    // машинами (broadcastVehicleStates), а не отсюда и не немедленно.
+    //
+    // Прежде он уходил ровно здесь — отдельным пакетом каждому, кто машину
+    // видит. Это стоило сорока с лишним байт заголовков UDP и ENet на каждую
+    // пару «машина — зритель» двадцать раз в секунду и не давало ни отложить
+    // снимок, ни проредить его по расстоянию: пересылка знала только про ту
+    // машину, что пришла, и ничего — про такт.
+}
 
-    broadcastNear(state.position, shared::Channel::State, state, dimension, peer);
+void Server::handleWeaponFired(net::PeerId peer, shared::WeaponFired fired) {
+    const Player* const player = players_.findByPeer(peer);
+    if (player == nullptr) {
+        return;
+    }
+
+    // Кто выстрелил, решает сервер, а не пришедший пакет. Поверив клиенту, мы
+    // позволили бы ему стрелять от чужого имени.
+    fired.playerId = player->id;
+
+    // Всем, кто рядом и в том же слое мира, кроме самого стрелявшего: у него
+    // выстрел уже случился по-настоящему, и повторять его — значит выстрелить
+    // дважды.
+    //
+    // Надёжным каналом, в отличие от снимков: потерянный снимок заменит
+    // следующий, а потерянный выстрел не повторится — у одного зрителя будет
+    // воронка от ракеты, у другого целая машина.
+    broadcastNear(player->position, shared::Channel::Control, fired, player->dimension, peer);
 }
 
 void Server::handlePlayerAppearance(net::PeerId peer, shared::PlayerAppearance appearance) {
@@ -1595,6 +1710,17 @@ void Server::redrawKindFor(const Directory& directory, const Player& player,
         removed.id = id;
         sendTo(player.peer, removed);
     }
+}
+
+void Server::exploded(const shared::Explosion& explosion, std::int32_t dimension) {
+    // Надёжным каналом, в отличие от снимков. Потерянный снимок заменит
+    // следующий; потерянный взрыв не повторится никогда, и один из зрителей
+    // остался бы с целой машиной там, где у остальных воронка.
+    //
+    // Всем, кто до этого места достаёт, включая того, у кого рвануло: взрыв
+    // заводит ресурс, а не игрок, и «отправителя», которого стоило бы
+    // пропустить, здесь нет.
+    broadcastNear(explosion.position, shared::Channel::Control, explosion, dimension);
 }
 
 void Server::animationPlayed(const Player& player, const shared::PlayerAnimation& animation) {

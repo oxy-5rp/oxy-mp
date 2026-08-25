@@ -8,6 +8,8 @@
 #include "game/controls.hpp"
 #include "game/data_files.hpp"
 #include "game/engine_addresses.hpp"
+#include "game/explosions.hpp"
+#include "game/vehicle_entry.hpp"
 #include "game/file_device.hpp"
 #include "game/file_system.hpp"
 #include "game/frontend.hpp"
@@ -379,6 +381,13 @@ private:
     /// ресурса — и играет их в том числе на нашем собственном персонаже,
     /// которого RemotePlayers не касается вовсе.
     game::PedAnimation pedAnimation_;
+
+    /// Взрывы, которые устроил сервер. Своего номера у них нет: взрыв
+    /// случается и кончается, помнить о нём нечего.
+    game::Explosions explosions_;
+
+    /// Посадка местного игрока: занятое место не выдёргивается, а обходится.
+    game::VehicleEntry vehicleEntry_;
 
     game::Blips blips_;
 

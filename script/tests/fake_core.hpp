@@ -112,6 +112,11 @@ public:
         return true;
     }
 
+    void explode(const ExplosionInfo& explosion) override {
+        said.push_back(std::format("boom {} at {} {} {}", explosion.kind, explosion.position.x,
+                                   explosion.position.y, explosion.position.z));
+    }
+
     bool clearTasks(shared::PlayerId id) override {
         if (!player(id)) {
             return false;

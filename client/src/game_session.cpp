@@ -131,6 +131,8 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       world_(table),
       frontend_(table),
       pedAnimation_(table),
+      explosions_(table),
+      vehicleEntry_(table),
       blips_(table),
       markers_(table),
       checkpoints_(table),
@@ -734,6 +736,11 @@ void GameSession::advance() {
             }
         }
 
+        // Посадка разбирается до всего прочего в кадре: задача входа выдаётся
+        // игрой в тот же кадр, когда игрок нажал клавишу, и перехватить её
+        // нужно раньше, чем она успеет начать выдёргивать чужого водителя.
+        vehicleEntry_.sync(ped);
+
         applyServerEvents(ped);
         runScripts();
         applyIncomingDamage(ped);
@@ -955,6 +962,19 @@ void GameSession::applyAttachments(int ped) {
 void GameSession::applyServerEvents(int ped) {
     forgetSessionOnLeaving();
     applyAnimations(ped);
+
+    // Взрывы — сразу и без откладывания, в отличие от движений: у движения есть
+    // цель, которой может ещё не быть в игре, а взрыв случается на пустом месте.
+    for (const shared::Explosion& explosion : mail_.takeExplosions()) {
+        explosions_.play(explosion);
+    }
+
+    // Чужие выстрелы — тем же порядком. Куклы, из которой стрелять, может ещё
+    // не быть: выстрел идёт надёжным каналом и обгоняет снимки. Тогда он просто
+    // пропадёт, и это верно — показывать его негде.
+    for (const shared::WeaponFired& fired : mail_.takeShots()) {
+        remotePlayers_.fire(fired.playerId, fired.weapon, fired.target);
+    }
 
     // Перенос — единственное распоряжение сервера, которое исполняет игра:
     // персонаж живёт здесь, и переставить его больше некому.
@@ -1587,6 +1607,14 @@ void GameSession::publishLocalState(int player, int ped, bool dead) {
     // назначив нас ведущим. Раньше правило считалось на месте: «рассылает тот,
     // кто занял в машине младшее место». Оно было верным ровно до тех пор, пока
     // в машине кто-то сидел, а брошенную машину не вёл никто.
+    // Свой выстрел замечается по этому же снимку и уходит отдельным сообщением:
+    // признак «стреляет» говорит лишь «жмёт на спуск», а сколько раз он
+    // выстрелил и куда, из снимков не вывести — между двумя снимками помещается
+    // три выстрела из автомата.
+    if (const auto fired = player_.shot(state)) {
+        mail_.postShot(fired->weapon, fired->target);
+    }
+
     localState_.set(state, vehicles_.describeOwned(ped),
                     vehicles_.describeOwnedAppearances(ped, appearanceDue()));
 }

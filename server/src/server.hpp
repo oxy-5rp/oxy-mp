@@ -73,12 +73,29 @@ private:
     /// Рассылает накопленные снимки: по одной посылке на игрока за такт.
     void broadcastStates();
 
+    /// То же для машин: снимки всех, кого игрок видит, одной посылкой за такт.
+    ///
+    /// Отдельным проходом, а не вместе с игроками, и это не разделение ради
+    /// разделения. У машин другой круг получателей: снимок машины нужен тому,
+    /// кто её видит, а видит он не тех же, кого видит его сосед. Список видимых
+    /// машин у сервера уже есть — его ведёт раздача (streamVehicles), — и
+    /// перебирать по нему дешевле, чем считать расстояния до всех машин сессии
+    /// на каждого игрока.
+    void broadcastVehicleStates();
+
     /// Пишет в отладочный журнал, во что обходится сессия.
     void reportTraffic();
     void handlePing(net::PeerId peer, const shared::Ping& ping);
     void handlePlayerState(net::PeerId peer, shared::PlayerState state);
     void handleVehicleState(net::PeerId peer, shared::VehicleState state);
     void handleVehicleAppearance(net::PeerId peer, shared::VehicleAppearance appearance);
+
+    /// Игрок выстрелил: пересказать всем, кто это должен увидеть.
+    ///
+    /// Сервер выстрел не толкует и урона по нему не считает — урон приходит
+    /// отдельным сообщением от того, кто попал. Здесь только пересылка: пуля
+    /// это, ракета или граната, знает игра получателя по хешу оружия.
+    void handleWeaponFired(net::PeerId peer, shared::WeaponFired fired);
     /// Именованное событие от клиента.
     ///
     /// Единственное, чем клиент теперь просит сервер что-либо сделать. Раньше
@@ -162,6 +179,7 @@ private:
 
     void animationPlayed(const Player& player,
                          const shared::PlayerAnimation& animation) override;
+    void exploded(const shared::Explosion& explosion, std::int32_t dimension) override;
 
     void dimensionChanged(const Player& player, std::int32_t previous) override;
 
@@ -429,6 +447,40 @@ private:
     };
 
     std::vector<StateSlot> slots_;
+
+    /// Одна машина в рабочем списке рассылки.
+    ///
+    /// Того же устройства и по той же причине, что и StateSlot: снимок машины
+    /// пишется в байты один раз за такт, а получателям достаётся копией байт.
+    /// Прежде он собирался заново на каждого, кто машину видит.
+    struct VehicleSlot {
+        shared::VehicleId id = shared::kInvalidVehicleId;
+        shared::Vec3 position;
+
+        /// Кто её ведёт. Ему самому снимок не отправляется: он же его и прислал.
+        shared::PlayerId owner = shared::kInvalidPlayerId;
+
+        std::uint32_t offset = 0;
+        std::uint32_t length = 0;
+    };
+
+    std::vector<VehicleSlot> vehicleSlots_;
+
+    /// Снимки машин, разосланных в этот такт, записанные подряд.
+    shared::ByteWriter vehicleBlob_;
+
+    /// Когда рассылка машин смотрела на них в прошлый раз.
+    ///
+    /// По ней и решается, что рассылать: машина, о которой с тех пор пришёл
+    /// снимок, уезжает получателям, а та, о которой не приходило ничего,
+    /// молчит. Отдельного признака «свежий» для этого не нужно — время прихода
+    /// снимка реестр машин помнит и так.
+    ///
+    /// Молчащую машину досылать незачем, в отличие от молчащего игрока: о
+    /// машине, попавшей в поле зрения, получателю рассказывают полностью
+    /// (VehicleAdded), а брошенная у обочины машина снимков не шлёт вовсе — её
+    /// некому слать.
+    std::chrono::steady_clock::time_point vehiclesSweptAt_{};
 
     /// Снимки всех, кто рассылается в этот такт, записанные подряд.
     ///
