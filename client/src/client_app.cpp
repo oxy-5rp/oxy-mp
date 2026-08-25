@@ -903,7 +903,21 @@ struct MenuProgress {
 
     /// Назвали ли странице имя сервера. Оно приходит однажды, с приветствием.
     bool named = false;
+
+    /// Когда начали подключаться и сказали ли уже, что не достучались.
+    ///
+    /// Нужно затем, что молчание здесь читается как «всё идёт»: пока соединения
+    /// нет, странице раньше не говорили ничего вовсе, и игрок смотрел на
+    /// «подключаемся» столько, сколько хватало терпения.
+    std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+    bool unreachableTold = false;
 };
+
+/// Через сколько молчания сервер считается недостижимым.
+///
+/// Пятнадцать секунд. Больше того, за что успевает пройти обычное подключение, и
+/// меньше того, после чего человек решает, что мод сломан.
+constexpr auto kUnreachableAfter = std::chrono::seconds{15};
 
 void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed,
               MenuProgress& progress) {
@@ -932,8 +946,30 @@ void tellMenu(Menu* menu, const Connection& connection, const UiFeed& feed,
     }
 
     if (connection.state() != ConnectionState::Connected) {
+        // До сервера не достучаться — и об этом надо сказать, а не молчать.
+        //
+        // Причина почти всегда одна и та же, и назвать её здесь дешевле, чем
+        // разбираться потом по переписке: игра ходит по UDP, а проверяльщики
+        // портов и наша же раздача ресурсов — по TCP. Открытый TCP 7790 ничего
+        // не говорит об UDP 7790, и человек, у которого «порт открыт», ищет
+        // поломку у нас.
+        if (!progress.unreachableTold && progress.stage != MenuStage::Failed &&
+            std::chrono::steady_clock::now() - progress.since >= kUnreachableAfter) {
+            progress.unreachableTold = true;
+
+            menu->failed("Cannot reach the server.\n"
+                         "\nThe game talks over UDP, not TCP. A port checker only "
+                         "tests TCP, so \"port is open\" does not mean the game can get "
+                         "through.\nForward UDP as well, on the same port.");
+        }
+
         return;
     }
+
+    // Достучались — счёт молчания начинается заново: следующий обрыв должен
+    // мериться от него, а не от запуска клиента.
+    progress.since = std::chrono::steady_clock::now();
+    progress.unreachableTold = false;
 
     // Имя сервера — то, что он назвал сам. До приветствия в заголовке стоит
     // адрес: другого имени у нас в этот миг нет.
