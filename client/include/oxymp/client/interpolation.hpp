@@ -90,6 +90,15 @@ public:
 
     [[nodiscard]] std::chrono::milliseconds delay() const noexcept;
 
+    /// Из чего это отставание сложилось: оценка промежутка между отправками и
+    /// оценка дрожания.
+    ///
+    /// Нужны не работе, а замеру. Отставание — одно число, и по нему не видно,
+    /// чем оно вызвано: редкими снимками или неровной доставкой. А лечится это
+    /// разным, и лечить вслепую нельзя.
+    [[nodiscard]] std::chrono::milliseconds interval() const noexcept;
+    [[nodiscard]] std::chrono::milliseconds jitter() const noexcept;
+
 private:
     /// Оценка промежутка между отправками и оценка дрожания, в секундах.
     float interval_ = 0.0F;

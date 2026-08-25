@@ -217,6 +217,16 @@ void DelayEstimator::forget() noexcept {
     started_ = false;
 }
 
+std::chrono::milliseconds DelayEstimator::interval() const noexcept {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::duration<float>{interval_});
+}
+
+std::chrono::milliseconds DelayEstimator::jitter() const noexcept {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::duration<float>{jitter_});
+}
+
 std::chrono::milliseconds DelayEstimator::delay() const noexcept {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::duration<float>{delay_});

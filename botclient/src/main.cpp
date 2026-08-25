@@ -13,6 +13,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <format>
 #include <csignal>
 #include <set>
 #include <unordered_map>
@@ -178,20 +179,30 @@ struct Drawn {
 /// занят весь счёт промежуточных состояний, и сломать его можно так, что со
 /// стороны это будет выглядеть просто «немного не так».
 ///
-/// Меряется шаг: на сколько сместилось показываемое положение между двумя
-/// оборотами цикла. У ровного движения все шаги почти одинаковы. У движения
-/// ступеньками — а именно так вело себя оно, пока снимков хранилось два, —
-/// шагов почти нет вовсе, зато раз в промежуток случается один большой.
+/// Меряется не шаг, а скорость: путь, поделённый на время между замерами. Шаг
+/// сам по себе ничего не говорит — он тем больше, чем реже мы смотрим, а
+/// смотрим мы неровно: цикл соединения просыпается то на пришедшем пакете, то
+/// по сроку своей отправки. Скорость же у ровно идущего постоянна, сколько на
+/// него ни смотри.
 ///
-/// Отношение наибольшего шага к среднему и есть ответ: единица — идеально
-/// ровно, тройка и выше — ступеньки.
+/// Отношение наибольшей скорости к средней и есть ответ: единица — идеально
+/// ровно, двойка и выше — рывки.
 struct Gait {
-    /// Где чужой показывался в прошлый раз.
-    std::unordered_map<oxymp::shared::PlayerId, oxymp::shared::Vec3> seen;
+    /// Где чужой показывался в прошлый раз и когда это было.
+    struct Seen {
+        oxymp::shared::Vec3 position;
+        std::chrono::steady_clock::time_point at;
+    };
 
-    double steps = 0.0;
+    std::unordered_map<oxymp::shared::PlayerId, Seen> seen;
+
+    double samples = 0.0;
     double total = 0.0;
-    double largest = 0.0;
+    double fastest = 0.0;
+
+    /// Реже этого не мерим: на слишком коротком промежутке частное пути на
+    /// время — это уже не скорость, а разрядность часов.
+    static constexpr auto kGap = std::chrono::milliseconds{8};
 
     void sample(const oxymp::client::Connection& connection,
                 std::chrono::steady_clock::time_point now) {
@@ -203,25 +214,71 @@ struct Gait {
             const oxymp::shared::Vec3 shown = player.at(now).position;
             const auto known = seen.find(id);
 
-            if (known != seen.end()) {
-                const double step =
-                    std::sqrt(oxymp::shared::distanceSquared(known->second, shown));
-
-                steps += 1.0;
-                total += step;
-                largest = std::max(largest, step);
+            if (known == seen.end()) {
+                seen.emplace(id, Seen{.position = shown, .at = now});
+                continue;
             }
 
-            seen.insert_or_assign(id, shown);
+            const auto elapsed = now - known->second.at;
+            if (elapsed < kGap) {
+                continue;
+            }
+
+            const double seconds = std::chrono::duration<double>{elapsed}.count();
+            const double speed =
+                std::sqrt(oxymp::shared::distanceSquared(known->second.position, shown)) / seconds;
+
+            samples += 1.0;
+            total += speed;
+            fastest = std::max(fastest, speed);
+
+            known->second = Seen{.position = shown, .at = now};
         }
     }
 
     void forget() {
-        steps = 0.0;
+        samples = 0.0;
         total = 0.0;
-        largest = 0.0;
+        fastest = 0.0;
     }
 };
+
+/// На сколько чужие показываются позади настоящего времени.
+///
+/// Оценку эту клиент считает по самой сети: по промежутку между отправками и по
+/// тому, насколько промежуток прихода с ним расходится. Она и есть мерило того,
+/// насколько ровно к нам приходят снимки: сеть, доставляющая ровно, просит
+/// только промежуток, а дёрганая — тем больше, чем сильнее её мотает.
+///
+/// В игре этого не увидеть никак: отставание нигде не показывается, а на глаз
+/// шестьдесят миллисекунд от ста двадцати не отличить. Здесь же по нему сразу
+/// видно, ровно ли шлёт другая сторона.
+[[nodiscard]] std::string averageDelay(const oxymp::client::Connection& connection) {
+    std::chrono::milliseconds delay{0};
+    std::chrono::milliseconds interval{0};
+    std::chrono::milliseconds jitter{0};
+    std::size_t counted = 0;
+
+    for (const auto& [id, player] : connection.remotePlayers()) {
+        if (!player.visible()) {
+            continue;
+        }
+
+        delay += player.pace.delay();
+        interval += player.pace.interval();
+        jitter += player.pace.jitter();
+        ++counted;
+    }
+
+    if (counted == 0) {
+        return "нет чужих";
+    }
+
+    const auto share = static_cast<std::chrono::milliseconds::rep>(counted);
+
+    return std::format("{} мс (промежуток {}, дрожание {})", (delay / share).count(),
+                       (interval / share).count(), (jitter / share).count());
+}
 
 struct Bot {
     std::unique_ptr<oxymp::client::Connection> connection;
@@ -531,11 +588,19 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Стая ждёт один раз за оборот, а не в каждом соединении. Двадцать
-        // миллисекунд — тот же такт, с которым снимки уходят у настоящего
-        // клиента.
+        // Стая ждёт один раз за оборот, а не в каждом соединении: ожидание
+        // внутри каждого означало бы двадцать миллисекунд, умноженные на число
+        // ботов.
+        //
+        // Пять миллисекунд, а не двадцать, и это не мелочь для замеров.
+        // Соединение шлёт свой снимок по расписанию, а слать его может только
+        // тогда, когда его обслуживают: ожидание в двадцать миллисекунд
+        // разложило бы отправки по своей сетке, и снимки уходили бы вразнобой с
+        // тактом сервера. Получатель платит за такое дрожание отставанием, и
+        // замер стаей показывал бы не то, что делает настоящий клиент, а то,
+        // что делает бот.
         if (bots > 1) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -564,16 +629,18 @@ int main(int argc, char** argv) {
 
                 Gait& gait = herd.front().gait;
 
-                if (gait.steps > 0.0) {
-                    const double average = gait.total / gait.steps;
+                spdlog::info("  отставание показа: {} мс в среднем", averageDelay(connection));
 
-                    // Отношение наибольшего шага к среднему: единица — ровно,
-                    // тройка и выше — ступеньки. Среднее в сантиметрах, чтобы
-                    // было видно, что движение вообще идёт.
-                    spdlog::info("  чужие идут: шаг в среднем {:.1f} см, наибольший {:.1f} см, "
+                if (gait.samples > 0.0) {
+                    const double average = gait.total / gait.samples;
+
+                    // Отношение наибольшей скорости к средней: единица — ровно,
+                    // двойка и выше — рывки. Сама скорость нужна, чтобы видеть,
+                    // что движение вообще идёт.
+                    spdlog::info("  чужие идут: {:.2f} м/с в среднем, {:.2f} наибольшая, "
                                  "отношение {:.2f}",
-                                 average * 100.0, gait.largest * 100.0,
-                                 average > 0.0 ? gait.largest / average : 0.0);
+                                 average, gait.fastest,
+                                 average > 0.0 ? gait.fastest / average : 0.0);
 
                     gait.forget();
                 }

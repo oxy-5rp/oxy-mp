@@ -254,6 +254,21 @@ void Connection::update(std::chrono::milliseconds budget) {
         return;
     }
 
+    // Ждать событий дольше, чем осталось до собственной отправки, нельзя.
+    //
+    // Ожидание кончается на первом же пришедшем пакете, и оттого казалось, что
+    // всё в порядке: снимки приходят с частотой такта, значит и просыпаемся мы с
+    // ней же. Но просыпаемся мы тогда, когда пришло, а слать обязаны тогда,
+    // когда пора, — и эти два мгновения не совпадают. Свои снимки уходили
+    // вразнобой: то на десять миллисекунд раньше срока, то на двадцать позже.
+    //
+    // Цена этому — чужое отставание. Получатель считает его по дрожанию: сеть,
+    // доставляющая ровно, просит только промежуток, а дёрганая — тем больше, чем
+    // сильнее её мотает. Замерено ботом: пятнадцать миллисекунд дрожания на
+    // петле обратной связи, где сети нет вовсе, и сто миллисекунд отставания
+    // вместо шестидесяти. Половину этого дрожания создавали мы сами.
+    budget = std::min(budget, untilDue());
+
     while (auto event = host_->poll(budget)) {
         handleEvent(*event);
 
@@ -270,6 +285,25 @@ void Connection::update(std::chrono::milliseconds budget) {
     sendQueued();
 
     noticeSilence();
+}
+
+std::chrono::milliseconds Connection::untilDue() const {
+    if (state_ != ConnectionState::Connected) {
+        // Пока сессии нет, слать нечего: расписания тоже нет, и ограничивать
+        // ожидание незачем.
+        return std::chrono::milliseconds::max();
+    }
+
+    const auto due = std::min(nextStateAt_, nextPingAt_);
+    const auto left = due - Clock::now();
+
+    if (left <= Clock::duration::zero()) {
+        return std::chrono::milliseconds{0};
+    }
+
+    // Вверх, а не вниз: округлив вниз, мы просыпались бы за долю миллисекунды до
+    // срока и уходили ждать заново.
+    return std::chrono::ceil<std::chrono::milliseconds>(left);
 }
 
 void Connection::noticeSilence() {
