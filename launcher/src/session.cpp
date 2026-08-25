@@ -1,5 +1,6 @@
 #include "session.hpp"
 
+#include "game_conflicts.hpp"
 #include "game_locator.hpp"
 #include "game_mirror.hpp"
 #include "game_platform.hpp"
@@ -235,6 +236,38 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
     }
 
     spdlog::info("Game: {} ({})", installed->directory.string(), storeName(installed->store));
+
+    // Что в каталоге игры мешает запуску — до всего остального, и это не
+    // придирчивость. Чужой мод и пиратская копия проявляются не отказом, а
+    // мигнувшим окном: игра закрывается, не дойдя до загрузки, и причины нет
+    // нигде. Каждая строка в этом списке однажды стоила кому-то вечера.
+    {
+        const std::vector<GameConflicts::Found> conflicts =
+            GameConflicts::inspect(installed->directory);
+
+        for (const GameConflicts::Found& each : conflicts) {
+            spdlog::log(each.weight == GameConflicts::Weight::Blocking ? spdlog::level::err
+                                                                      : spdlog::level::warn,
+                        "{} in the game folder ({}): {}", each.name, each.file.filename().string(),
+                        each.advice);
+        }
+
+        if (GameConflicts::blocked(conflicts)) {
+            std::string what;
+
+            for (const GameConflicts::Found& each : conflicts) {
+                if (each.weight != GameConflicts::Weight::Blocking) {
+                    continue;
+                }
+
+                what += std::format("\n- {}: {}", each.name, each.advice);
+            }
+
+            report(Progress::Failed,
+                   std::format("The game folder has something oxyMP cannot start with:{}", what));
+            return nullptr;
+        }
+    }
 
     // Версия сверяется здесь, до всего остального, и это не придирка.
     //

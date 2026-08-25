@@ -2,6 +2,7 @@ include(embed_text)
 
 add_executable(oxymp_launcher
     src/game_choice.cpp
+    src/game_conflicts.cpp
     src/game_locator.cpp
     src/game_mirror.cpp
     src/game_platform.cpp
