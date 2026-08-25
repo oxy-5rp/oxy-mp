@@ -67,22 +67,29 @@ public:
     /// Накладывает внешность целиком.
     void applyAppearance(int vehicle, const shared::VehicleAppearance& appearance) const;
 
-    /// Прицеп, сцепленный с машиной. Ноль — прицепа нет.
-    ///
-    /// Номер в игре, а не в сессии: о номерах сессии этот класс не знает вовсе,
-    /// и переводить один в другой — дело того, кто ведёт список машин.
-    [[nodiscard]] int trailerOf(int vehicle) const;
+    /// Что сцеплено с машиной: прицеп либо машина на крюке эвакуатора.
+    struct Hitched {
+        /// Номер в игре, а не в сессии: о номерах сессии этот класс не знает
+        /// вовсе, и переводить один в другой — дело того, кто ведёт список
+        /// машин. Ноль — не сцеплено ничего.
+        int vehicle = 0;
 
-    /// Сцепляет машину с прицепом или расцепляет её.
+        /// Висит на крюке, а не на сцепке.
+        bool onHook = false;
+    };
+
+    [[nodiscard]] Hitched hitchedTo(int vehicle) const;
+
+    /// Сцепляет машину с прицепом или машиной на крюке — или расцепляет её.
     ///
-    /// trailer — номер прицепа в игре; ноль означает «прицепа нет».
+    /// hitched.vehicle равный нулю означает «не сцеплено ничего».
     ///
-    /// had говорит, был ли прицеп в прошлом наложенном снимке. Расцепляем мы
-    /// только на переходе, и это существенно: игра сцепляет прицеп сама, стоит
-    /// тягачу подать назад, — и расцепляй мы каждый кадр, у зрителя сцепка
-    /// разваливалась бы в тот самый миг, когда у хозяина она только что
-    /// сложилась.
-    void applyTrailer(int vehicle, int trailer, bool had) const;
+    /// had говорит, было ли что-то сцеплено в прошлом наложенном снимке.
+    /// Расцепляем мы только на переходе, и это существенно: игра сцепляет
+    /// прицеп сама, стоит тягачу подать назад, — и расцепляй мы каждый кадр, у
+    /// зрителя сцепка разваливалась бы в тот самый миг, когда у хозяина она
+    /// только что сложилась.
+    void applyHitch(int vehicle, const Hitched& hitched, bool had) const;
 
 private:
     /// Насколько машина должна разойтись со снимком, чтобы её переставить рывком.
@@ -115,6 +122,10 @@ private:
     NativeHandler sirenOn_ = nullptr;
     NativeHandler setSiren_ = nullptr;
     NativeHandler trailerOf_ = nullptr;
+    NativeHandler hookedOf_ = nullptr;
+    NativeHandler attachHook_ = nullptr;
+    NativeHandler detachHook_ = nullptr;
+    NativeHandler hookAttached_ = nullptr;
     NativeHandler attachTrailer_ = nullptr;
     NativeHandler detachTrailer_ = nullptr;
     NativeHandler trailerAttached_ = nullptr;

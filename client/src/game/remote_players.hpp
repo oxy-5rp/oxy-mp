@@ -324,6 +324,8 @@ private:
     NativeHandler giveComponent_ = nullptr;
     NativeHandler setWeaponTint_ = nullptr;
     NativeHandler shootBullet_ = nullptr;
+    NativeHandler throwProjectile_ = nullptr;
+    NativeHandler weaponGroup_ = nullptr;
     NativeHandler shotTimer_ = nullptr;
     NativeHandler boneCoords_ = nullptr;
 

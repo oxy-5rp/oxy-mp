@@ -4,6 +4,7 @@
 #include "native_hashes.hpp"
 
 #include <oxymp/client/interpolation.hpp>
+#include <oxymp/shared/math/joaat.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -223,6 +224,13 @@ constexpr float kMuzzleAhead = 0.5F;
 /// Урон от показанной пули. Ноль: попадания считает стрелявший у себя.
 constexpr int kNoBulletDamage = 0;
 
+/// Род оружия, которое бросают рукой: гранаты, коктейли, липучки, дымовые.
+///
+/// Хеш считается здесь, а не спрашивается у игры: имена родов — часть её же
+/// описаний оружия, они не меняются между сборками, а joaat у нас общий с
+/// сервером и сверен с игрой разряд в разряд.
+constexpr std::uint32_t kThrownGroup = shared::joaat("group_thrown");
+
 /// Сколько кукла ждёт присланного выстрела, прежде чем начать стрелять сама.
 ///
 /// Полсекунды — заметно больше промежутка между выстрелами любого автомата и
@@ -287,6 +295,8 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
       setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
       shootBullet_(table.handlerFor(natives::kShootSingleBulletBetweenCoords)),
+      throwProjectile_(table.handlerFor(natives::kTaskThrowProjectile)),
+      weaponGroup_(table.handlerFor(natives::kGetWeapontypeGroup)),
       shotTimer_(table.handlerFor(natives::kGetGameTimer)),
       boneCoords_(table.handlerFor(natives::kGetPedBoneCoords)) {}
 
@@ -381,7 +391,7 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
 
 void RemotePlayers::fire(shared::PlayerId player, std::uint32_t weapon,
                          const shared::Vec3& target) {
-    if (shootBullet_ == nullptr || weapon == 0) {
+    if (weapon == 0) {
         return;
     }
 
@@ -394,6 +404,35 @@ void RemotePlayers::fire(shared::PlayerId player, std::uint32_t weapon,
     }
 
     const int ped = puppet->second.ped;
+
+    // Брошенное рукой летит не пулей, а по дуге, и заводится оно другим путём.
+    // Пулей граната не полетит вовсе: у пули нет ни веса, ни времени полёта, а
+    // у гранаты только они и есть.
+    //
+    // Бросает кукла сама, задачей: своего «создай снаряд вот здесь и с вот
+    // такой скоростью» у игры нет — точнее, есть, но не в открытой базе имён, а
+    // подставлять хеш по памяти значит уронить игру в мгновение вызова.
+    //
+    // Цена этого пути — задержка: кукла отыгрывает замах, и её граната
+    // отправится в полёт позже хозяйской. Зато полетит правильно и взорвётся
+    // там, где ей положено.
+    const std::uint32_t group =
+        weaponGroup_ != nullptr ? invokeNative<std::uint32_t>(weaponGroup_, weapon) : 0;
+
+    if (group == kThrownGroup) {
+        if (throwProjectile_ != nullptr) {
+            invokeNative<void>(throwProjectile_, ped, target.x, target.y, target.z);
+
+            if (shotTimer_ != nullptr) {
+                puppet->second.firedAt = invokeNative<std::int32_t>(shotTimer_);
+            }
+        }
+        return;
+    }
+
+    if (shootBullet_ == nullptr) {
+        return;
+    }
 
     // Откуда вылетает пуля — от руки той самой куклы, которая стоит у нас, а не
     // от точки, присланной хозяином. Хозяин прислал бы место, где его ствол был

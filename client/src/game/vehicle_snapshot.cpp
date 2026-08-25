@@ -54,6 +54,9 @@ constexpr float kSnapDistance = 15.0F;
 /// привели снимки, и между ними бывает метр расхождения.
 constexpr float kTrailerReach = 15.0F;
 
+/// Смещение крюка эвакуатора. Ноль: машина вешается туда, куда её вешает игра.
+constexpr float kNoHookOffset = 0.0F;
+
 /// Во сколько раз сокращать расхождение за секунду, когда оно невелико.
 ///
 /// За секунду, а не за кадр, и это не придирка: доля за кадр съедает расхождение
@@ -148,6 +151,10 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       sirenOn_(table.handlerFor(natives::kIsVehicleSirenOn)),
       setSiren_(table.handlerFor(natives::kSetVehicleSiren)),
       trailerOf_(table.handlerFor(natives::kGetVehicleTrailerVehicle)),
+      hookedOf_(table.handlerFor(natives::kGetEntityAttachedToTowTruck)),
+      attachHook_(table.handlerFor(natives::kAttachVehicleToTowTruck)),
+      detachHook_(table.handlerFor(natives::kDetachVehicleFromTowTruck)),
+      hookAttached_(table.handlerFor(natives::kIsVehicleAttachedToTowTruck)),
       attachTrailer_(table.handlerFor(natives::kAttachVehicleToTrailer)),
       detachTrailer_(table.handlerFor(natives::kDetachVehicleFromTrailer)),
       trailerAttached_(table.handlerFor(natives::kIsVehicleAttachedToTrailer)),
@@ -496,43 +503,94 @@ shared::VehicleAppearance VehicleSnapshot::readAppearance(int vehicle) const {
     return appearance;
 }
 
-int VehicleSnapshot::trailerOf(int vehicle) const {
-    if (vehicle == 0 || trailerOf_ == nullptr) {
-        return 0;
+VehicleSnapshot::Hitched VehicleSnapshot::hitchedTo(int vehicle) const {
+    if (vehicle == 0) {
+        return {};
     }
 
-    // Ответ приходит ссылкой: натив возвращает не прицеп, а признак «есть ли
-    // он», а сам прицеп кладёт в отданное ему место.
-    int trailer = 0;
+    // Сперва сцепка: она у тягачей обычнее крюка, и спрашивается дешевле.
+    if (trailerOf_ != nullptr) {
+        // Ответ приходит ссылкой: натив возвращает не прицеп, а признак «есть ли
+        // он», а сам прицеп кладёт в отданное ему место.
+        int trailer = 0;
 
-    NativeContext context;
-    context.push(vehicle);
-    context.push(&trailer);
-    trailerOf_(context.address());
+        NativeContext context;
+        context.push(vehicle);
+        context.push(&trailer);
+        trailerOf_(context.address());
 
-    // Признак «есть ли прицеп» и сам прицеп — разные вещи: натив вернул бы
-    // прошлое содержимое отданного ему места, не найдя ничего.
-    return context.result<int>() != 0 ? trailer : 0;
+        // Признак «есть ли прицеп» и сам прицеп — разные вещи: натив вернул бы
+        // прошлое содержимое отданного ему места, не найдя ничего.
+        if (context.result<int>() != 0 && trailer != 0) {
+            return Hitched{.vehicle = trailer, .onHook = false};
+        }
+    }
+
+    // Затем крюк. Спрашивается он у всякой машины, а не только у эвакуатора:
+    // отличить эвакуатор от прочих можно лишь по модели, а список моделей — это
+    // список, который придётся вести вечно. Не эвакуатору натив отвечает нулём,
+    // и этого довольно.
+    if (hookedOf_ != nullptr) {
+        if (const int hooked = invokeNative<int>(hookedOf_, vehicle); hooked != 0) {
+            return Hitched{.vehicle = hooked, .onHook = true};
+        }
+    }
+
+    return {};
 }
 
-void VehicleSnapshot::applyTrailer(int vehicle, int trailer, bool had) const {
+void VehicleSnapshot::applyHitch(int vehicle, const Hitched& hitched, bool had) const {
     if (vehicle == 0) {
         return;
     }
 
-    if (trailer == 0) {
+    if (hitched.vehicle == 0) {
         // Расцепляем только на переходе: игра сцепляет прицеп сама, стоит
         // тягачу подать назад, и расцепляй мы каждый кадр — у зрителя сцепка
         // разваливалась бы в тот самый миг, когда у хозяина она сложилась.
-        if (had && detachTrailer_ != nullptr) {
+        //
+        // Снимаем и со сцепки, и с крюка: чем машина была занята, мы уже не
+        // знаем — снимок сказал лишь, что теперь ничем.
+        if (!had) {
+            return;
+        }
+
+        if (detachTrailer_ != nullptr) {
             invokeNative<void>(detachTrailer_, vehicle);
         }
+
+        if (detachHook_ != nullptr && hookAttached_ != nullptr &&
+            invokeNative<bool>(hookAttached_, vehicle)) {
+            // Натив снятия с крюка требует обе машины, а какая на нём висела,
+            // спрашивается у самой игры: снимок этого больше не помнит.
+            if (hookedOf_ != nullptr) {
+                if (const int hooked = invokeNative<int>(hookedOf_, vehicle); hooked != 0) {
+                    invokeNative<void>(detachHook_, vehicle, hooked);
+                }
+            }
+        }
+
         return;
     }
 
     // А сцепляем, наоборот, пока не выйдет: прицеп мог ещё не появиться у нас,
     // а машины — не сойтись достаточно близко. Проверка каждый кадр стоит
     // одного натива и избавляет от памяти о том, удалась ли попытка.
+    if (hitched.onHook) {
+        const bool hung =
+            hookAttached_ != nullptr && invokeNative<bool>(hookAttached_, vehicle);
+
+        if (hung || attachHook_ == nullptr) {
+            return;
+        }
+
+        // Сзади и без смещения крюка: смещение задают лишь те, кто вешает
+        // машину нарочно криво, а у нас она уже висит у хозяина так, как висит.
+        invokeNative<void>(attachHook_, vehicle, hitched.vehicle, true, kNoHookOffset,
+                           kNoHookOffset, kNoHookOffset);
+        return;
+    }
+
     const bool attached =
         trailerAttached_ != nullptr && invokeNative<bool>(trailerAttached_, vehicle);
 
@@ -551,7 +609,7 @@ void VehicleSnapshot::applyTrailer(int vehicle, int trailer, bool had) const {
     // Радиус — то расстояние, на котором игра считает сцепку возможной. С
     // запасом: у хозяина прицеп уже сцеплен, а у нас обе машины стоят там, куда
     // их привели снимки, и между ними бывает метр расхождения.
-    invokeNative<void>(attachTrailer_, vehicle, trailer, kTrailerReach);
+    invokeNative<void>(attachTrailer_, vehicle, hitched.vehicle, kTrailerReach);
 }
 
 bool VehicleSnapshot::tooFar(const shared::Vec3& from, const shared::Vec3& to) {

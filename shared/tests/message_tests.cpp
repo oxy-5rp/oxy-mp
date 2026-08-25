@@ -157,6 +157,110 @@ TEST_CASE("an untouched PlayerAppearance means nothing is worn", "[messages]") {
     }
 }
 
+TEST_CASE("an unchanged snapshot is not worth sending", "[messages]") {
+    // Самый частый случай в сессии: человек стоит на месте, и снимок у него из
+    // кадра в кадр один и тот же. Отправлять его незачем, а пересылать — тем
+    // более: сервер платит за это числом игроков в квадрате.
+    PlayerState standing;
+    standing.position = Vec3{10.0F, 20.0F, 30.0F};
+    standing.heading = 45.0F;
+    standing.health = 200;
+
+    PlayerState same = standing;
+
+    // Отметка времени у каждого снимка своя, и в сравнение она не входит:
+    // иначе не совпало бы ничего никогда.
+    same.sentAt = standing.sentAt + 1000;
+
+    CHECK_FALSE(differs(standing, same));
+}
+
+TEST_CASE("a snapshot that only trembles is not worth sending", "[messages]") {
+    // Положение и скорость приходят из игры числами с плавающей точкой и в
+    // последних разрядах дрожат даже у стоящего намертво. Точным сравнением
+    // обойтись поэтому нельзя — оно объявило бы изменившимся каждый кадр.
+    PlayerState standing;
+    standing.position = Vec3{10.0F, 20.0F, 30.0F};
+    standing.heading = 45.0F;
+
+    PlayerState trembling = standing;
+    trembling.position.x += 0.001F;
+    trembling.heading += 0.01F;
+    trembling.velocity.z = 0.004F;
+
+    CHECK_FALSE(differs(standing, trembling));
+}
+
+TEST_CASE("a step is worth sending", "[messages]") {
+    // Порог не должен съедать движение: сантиметр вдесятеро меньше того, что
+    // игра показывает движением ног.
+    PlayerState standing;
+    standing.position = Vec3{10.0F, 20.0F, 30.0F};
+
+    PlayerState stepped = standing;
+    stepped.position.x += 0.05F;
+
+    CHECK(differs(standing, stepped));
+}
+
+TEST_CASE("a turn through zero is measured the short way", "[messages]") {
+    // С 359 градусов на 1 человек повернулся на два, а не на триста пятьдесят
+    // восемь. Сравни мы углы как числа — и всякий поворот через ноль объявлялся
+    // бы огромным, а всякий огромный проходил бы незамеченным.
+    PlayerState before;
+    before.heading = 359.95F;
+
+    PlayerState barely = before;
+    barely.heading = 0.0F;
+
+    CHECK_FALSE(differs(before, barely));
+
+    PlayerState turned = before;
+    turned.heading = 10.0F;
+
+    CHECK(differs(before, turned));
+}
+
+TEST_CASE("everything that reads as an action is worth sending", "[messages]") {
+    // Признаки, оружие, патроны, здоровье, место в машине и короткое движение
+    // сравниваются точно: каждое из них меняет то, что зритель видит, и
+    // потерянное не восполнится ничем.
+    const PlayerState quiet;
+
+    const auto changed = [&quiet](auto&& tweak) {
+        PlayerState fresh = quiet;
+        tweak(fresh);
+        return differs(quiet, fresh);
+    };
+
+    CHECK(changed([](PlayerState& s) { s.flags = static_cast<std::uint32_t>(PlayerFlag::Aiming); }));
+    CHECK(changed([](PlayerState& s) { s.weapon = 0x1B06D571U; }));
+    CHECK(changed([](PlayerState& s) { s.ammo = 7; }));
+    CHECK(changed([](PlayerState& s) { s.health = 100; }));
+    CHECK(changed([](PlayerState& s) { s.armour = 50; }));
+    CHECK(changed([](PlayerState& s) { s.vehicleId = 3; }));
+    CHECK(changed([](PlayerState& s) { s.seat = kDriverSeat; }));
+    CHECK(changed([](PlayerState& s) { s.action = PedAction::HeavyPunch; }));
+    CHECK(changed([](PlayerState& s) { s.actionSequence = 2; }));
+}
+
+TEST_CASE("a moved gaze is worth sending", "[messages]") {
+    // Точка взгляда уходит на два десятка метров вперёд: пять сантиметров там
+    // это доли градуса, а полметра — уже заметный поворот головы.
+    PlayerState looking;
+    looking.aimAt = Vec3{100.0F, 0.0F, 0.0F};
+
+    PlayerState twitched = looking;
+    twitched.aimAt.y = 0.02F;
+
+    CHECK_FALSE(differs(looking, twitched));
+
+    PlayerState turned = looking;
+    turned.aimAt.y = 0.5F;
+
+    CHECK(differs(looking, turned));
+}
+
 TEST_CASE("a bundle of player states survives a round trip", "[messages]") {
     PlayerStates sent;
 
@@ -250,6 +354,35 @@ TEST_CASE("vehicle flags keep their bits", "[messages]") {
     CHECK(static_cast<std::uint16_t>(VehicleFlag::HornOn) == 32U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::RoofOpen) == 64U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::Destroyed) == 128U);
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::TowHook) == 256U);
+}
+
+TEST_CASE("a hook is told apart from a coupling", "[messages]") {
+    // Одно поле на прицеп и на машину в крюке, а разница — признаком: сцеплена
+    // машина в каждый миг чем-то одним, и второй номер был бы всегда пустым.
+    // Получателю же разница нужна: крюк и сцепка вешаются разными нативами, и
+    // перепутанные они не сделают ничего — молча.
+    VehicleState hooked;
+    hooked.id = 2;
+    hooked.trailer = 8;
+    hooked.flags = static_cast<std::uint16_t>(VehicleFlag::TowHook);
+
+    const auto received = roundTrip(hooked);
+
+    REQUIRE(received.has_value());
+    CHECK(received->trailer == 8);
+    CHECK(has(received->flags, VehicleFlag::TowHook));
+
+    // А обычная сцепка признака не несёт, и по нему её ни с чем не спутать.
+    VehicleState coupled;
+    coupled.id = 3;
+    coupled.trailer = 9;
+
+    const auto towed = roundTrip(coupled);
+
+    REQUIRE(towed.has_value());
+    CHECK(towed->trailer == 9);
+    CHECK_FALSE(has(towed->flags, VehicleFlag::TowHook));
 }
 
 TEST_CASE("a trailer travels with the truck that pulls it", "[messages]") {

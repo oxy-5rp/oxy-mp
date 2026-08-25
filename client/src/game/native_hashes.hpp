@@ -21,6 +21,24 @@ namespace oxymp::client::game::natives {
 ///
 /// Игра обновилась — значения нужно пересобрать: см. README.
 
+/// ATTACH_VEHICLE_TO_TOW_TRUCK, канонический хеш 0X29A16F8D621C4508.
+inline constexpr std::uint64_t kAttachVehicleToTowTruck = 0XA86C8A254D6B6F40;
+
+/// DETACH_VEHICLE_FROM_TOW_TRUCK, канонический хеш 0XC2DB6B6708350ED8.
+inline constexpr std::uint64_t kDetachVehicleFromTowTruck = 0XD4BC322888F79B7E;
+
+/// GET_ENTITY_ATTACHED_TO_TOW_TRUCK, канонический хеш 0XEFEA18DCF10F8F75.
+inline constexpr std::uint64_t kGetEntityAttachedToTowTruck = 0X314C37CF34534BCB;
+
+/// IS_VEHICLE_ATTACHED_TO_TOW_TRUCK, канонический хеш 0X146DF9EC4C4B9FD4.
+inline constexpr std::uint64_t kIsVehicleAttachedToTowTruck = 0X4A64AADF9B40D2AF;
+
+/// TASK_THROW_PROJECTILE, канонический хеш 0X7285951DBF6B5A51.
+inline constexpr std::uint64_t kTaskThrowProjectile = 0X1BFCFCC8F6D798A6;
+
+/// GET_WEAPONTYPE_GROUP, канонический хеш 0XC3287EE3050FB74C.
+inline constexpr std::uint64_t kGetWeapontypeGroup = 0X6CC7A2E68E8A565A;
+
 /// GET_VEHICLE_TRAILER_VEHICLE, канонический хеш 0X1CDD6BADC297830D.
 inline constexpr std::uint64_t kGetVehicleTrailerVehicle = 0X20974C28142EB370;
 

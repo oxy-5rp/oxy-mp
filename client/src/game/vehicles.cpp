@@ -546,11 +546,14 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
         }
 
         // Сцепка — по снимку тягача, и только по нему: прицеп о ней не знает.
-        // Номер прицепа в игре ищется по номеру сессии; не нашёлся — прицепа у
+        // Номер сцепленного в игре ищется по номеру сессии; не нашёлся — его у
         // нас ещё нет, и сцепим в следующем кадре.
-        snapshot_.applyTrailer(
+        snapshot_.applyHitch(
             entry.vehicle,
-            state.trailer == shared::kInvalidVehicleId ? 0 : handleFor(state.trailer),
+            game::VehicleSnapshot::Hitched{
+                .vehicle =
+                    state.trailer == shared::kInvalidVehicleId ? 0 : handleFor(state.trailer),
+                .onHook = shared::has(state.flags, shared::VehicleFlag::TowHook)},
             entry.applied.trailer != shared::kInvalidVehicleId);
 
         snapshot_.applyControls(entry.vehicle, state, entry.applied);
@@ -582,11 +585,15 @@ std::vector<shared::VehicleState> Vehicles::describeOwned(int localPed) const {
         state.id = id;
         state.model = entry.model;
 
-        // Прицеп называется номером сессии, а не номером в игре: у получателя
-        // номера игры свои, и по нашему он не найдёт ничего. Прицеп, о котором
-        // сессия не знает, не называется вовсе — сказать о нём нечего.
-        if (const int towed = snapshot_.trailerOf(entry.vehicle); towed != 0) {
-            state.trailer = idOf(towed);
+        // Сцепленное называется номером сессии, а не номером в игре: у
+        // получателя номера игры свои, и по нашему он не найдёт ничего. То, о
+        // чём сессия не знает, не называется вовсе — сказать о нём нечего.
+        if (const auto hitched = snapshot_.hitchedTo(entry.vehicle); hitched.vehicle != 0) {
+            state.trailer = idOf(hitched.vehicle);
+
+            if (hitched.onHook) {
+                state.flags |= static_cast<std::uint16_t>(shared::VehicleFlag::TowHook);
+            }
         }
 
         snapshots.push_back(state);
