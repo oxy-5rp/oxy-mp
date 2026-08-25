@@ -721,9 +721,12 @@ void Connection::handleWelcome(const shared::ServerWelcome& welcome) {
 void Connection::handleReject(const shared::ServerReject& reject) {
     rejectReason_ = reject.reason;
 
-    // Занятое имя проходит само: почти всегда это наше же прошлое соединение,
-    // которое сервер ещё не успел похоронить. Прекращать попытки здесь значило
-    // бы не вернуться в игру после единственного разрыва связи.
+    // Занятое имя проходит само: отказ этот временный, и прекращать попытки
+    // здесь значило бы не вернуться в игру после единственного разрыва связи.
+    //
+    // Наш сервер эту причину больше не присылает — двое с одним именем в сессии
+    // ему не мешают, — но разбор её остаётся: клиент ходит и на серверы прежних
+    // сборок, а там имя всё ещё требуется своим.
     if (reject.reason == shared::RejectReason::NicknameTaken) {
         spdlog::warn("Connection refused: {}", describe(reject.reason));
         fallBackToWaiting("that nickname is still taken");

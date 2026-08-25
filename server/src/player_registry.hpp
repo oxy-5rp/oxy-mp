@@ -199,8 +199,6 @@ public:
     /// перебором на месте, и перебор этот успел размножиться по обработчикам.
     [[nodiscard]] Player* findById(shared::PlayerId id);
 
-    [[nodiscard]] bool nicknameTaken(std::string_view nickname) const;
-
     [[nodiscard]] std::size_t size() const noexcept { return players_.size(); }
 
     [[nodiscard]] Storage::const_iterator begin() const noexcept { return players_.begin(); }

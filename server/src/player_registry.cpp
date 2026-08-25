@@ -68,10 +68,4 @@ Player* PlayerRegistry::findById(shared::PlayerId id) {
     return it == players_.end() ? nullptr : &it->second;
 }
 
-bool PlayerRegistry::nicknameTaken(std::string_view nickname) const {
-    return std::ranges::any_of(players_, [nickname](const auto& entry) {
-        return entry.second.nickname == nickname;
-    });
-}
-
 } // namespace oxymp::server

@@ -256,6 +256,35 @@ TEST_CASE("an explosion does not need anyone to be online", "[server][script]") 
     CHECK(session.sink.sent.size() == 1);
 }
 
+TEST_CASE("two players may share a nickname", "[server][script]") {
+    // Имя в сессии ничего не решает: игрок называется номером, и по номеру его
+    // находит и режим, и чат, и всякая рассылка. Требование разных имён было
+    // при этом самым частым отказом на входе — имя приходит из oxymp.toml, и по
+    // умолчанию оно у всех одно и то же.
+    Session session;
+
+    Player& first = session.join(1, "oxy");
+    Player& second = session.join(2, "oxy");
+
+    CHECK(first.id != second.id);
+
+    const auto shownFirst = session.core.player(first.id);
+    const auto shownSecond = session.core.player(second.id);
+
+    REQUIRE(shownFirst);
+    REQUIRE(shownSecond);
+    CHECK(shownFirst->nickname == "oxy");
+    CHECK(shownSecond->nickname == "oxy");
+
+    // И распоряжение доходит до того, кому назначено, а не до однофамильца.
+    REQUIRE(session.core.setHealth(second.id, 60, 0));
+
+    const auto healed = session.core.player(second.id);
+    REQUIRE(healed);
+    CHECK(healed->health == 60);
+    CHECK(session.core.player(first.id)->health != 60);
+}
+
 TEST_CASE("a player who left cannot be reached", "[server][script]") {
     Session session;
     session.join(1, "ушедший");
