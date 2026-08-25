@@ -295,6 +295,87 @@ TEST_CASE("an empty bundle of player states survives a round trip", "[messages]"
     CHECK(received->players.empty());
 }
 
+TEST_CASE("a parked vehicle is not worth sending", "[messages]") {
+    // Стоит машина в сессии куда чаще, чем едет: у обочины с работающим
+    // мотором, у светофора, у входа в заведение. Снимок у неё при этом из кадра
+    // в кадр один и тот же, а платит за его пересылку каждый, кто её видит.
+    VehicleState parked;
+    parked.id = 7;
+    parked.position = Vec3{10.0F, 20.0F, 30.0F};
+    parked.rotation = Vec3{0.0F, 0.0F, 90.0F};
+    parked.flags = static_cast<std::uint16_t>(VehicleFlag::EngineOn);
+
+    VehicleState same = parked;
+    same.sentAt = parked.sentAt + 1000;
+
+    CHECK_FALSE(differs(parked, same));
+
+    // И дрожание подвески на месте — тоже не новость.
+    VehicleState trembling = parked;
+    trembling.position.z += 0.002F;
+    trembling.rotation.x += 0.01F;
+    trembling.velocity.y = 0.003F;
+    trembling.steer += 0.001F;
+
+    CHECK_FALSE(differs(parked, trembling));
+}
+
+TEST_CASE("a vehicle that moved is worth sending", "[messages]") {
+    VehicleState parked;
+    parked.id = 7;
+    parked.position = Vec3{10.0F, 20.0F, 30.0F};
+
+    const auto changed = [&parked](auto&& tweak) {
+        VehicleState fresh = parked;
+        tweak(fresh);
+        return differs(parked, fresh);
+    };
+
+    CHECK(changed([](VehicleState& s) { s.position.x += 0.05F; }));
+    CHECK(changed([](VehicleState& s) { s.velocity.x = 1.0F; }));
+    CHECK(changed([](VehicleState& s) { s.rotation.z = 5.0F; }));
+    CHECK(changed([](VehicleState& s) { s.angularVelocity.z = 0.5F; }));
+    CHECK(changed([](VehicleState& s) { s.steer = 0.5F; }));
+    CHECK(changed([](VehicleState& s) { s.throttle = 0.5F; }));
+    CHECK(changed([](VehicleState& s) { s.brake = 0.5F; }));
+}
+
+TEST_CASE("everything that happens to a vehicle is worth sending", "[messages]") {
+    // Двери, стёкла, колёса, прочности, признаки и сцепка сравниваются точно:
+    // каждое из них меняет то, что зритель видит, и потерянное не восполнится.
+    const VehicleState whole;
+
+    const auto changed = [&whole](auto&& tweak) {
+        VehicleState fresh = whole;
+        tweak(fresh);
+        return differs(whole, fresh);
+    };
+
+    CHECK(changed([](VehicleState& s) { s.doorsOpen = 1; }));
+    CHECK(changed([](VehicleState& s) { s.doorsBroken = 2; }));
+    CHECK(changed([](VehicleState& s) { s.windowsBroken = 4; }));
+    CHECK(changed([](VehicleState& s) { s.tyresBurst = 8; }));
+    CHECK(changed([](VehicleState& s) { s.bodyHealth = 500; }));
+    CHECK(changed([](VehicleState& s) { s.engineHealth = 500; }));
+    CHECK(changed([](VehicleState& s) { s.tankHealth = 500; }));
+    CHECK(changed([](VehicleState& s) {
+        s.flags = static_cast<std::uint16_t>(VehicleFlag::SirenOn);
+    }));
+    CHECK(changed([](VehicleState& s) { s.trailer = 5; }));
+}
+
+TEST_CASE("a vehicle turning through zero is measured the short way", "[messages]") {
+    // Тот же круг, что и у поворота игрока: с 359 градусов на 1 машина
+    // повернулась на два, а не на триста пятьдесят восемь.
+    VehicleState before;
+    before.rotation.z = 359.95F;
+
+    VehicleState barely = before;
+    barely.rotation.z = 0.0F;
+
+    CHECK_FALSE(differs(before, barely));
+}
+
 TEST_CASE("a bundle of vehicle states survives a round trip", "[messages]") {
     VehicleStates sent;
 

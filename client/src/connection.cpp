@@ -52,73 +52,6 @@ constexpr auto kPingInterval = std::chrono::seconds{2};
 /// отличает молчащего от пропавшего.
 constexpr auto kStateKeepalive = std::chrono::milliseconds{250};
 
-/// Насколько должна измениться машина, чтобы снимок стоило отправлять.
-///
-/// У игрока такие же пороги живут в общем месте (shared::differs): по ним
-/// считают и клиент, и сервер. У машины сравнивает пока один клиент, и место ей
-/// здесь; понадобится серверу — переедут туда же.
-constexpr float kMovedEnough = 0.01F;
-constexpr float kTurnedEnough = 0.1F;
-constexpr float kSpedEnough = 0.05F;
-
-/// То же для угловой скорости и хода педалей.
-///
-/// Сотая радиана в секунду — это оборот за десять минут; сотая доля хода педали
-/// не видна ни в стоп-сигналах, ни в угле колёс.
-constexpr float kSpunEnough = 0.01F;
-constexpr float kNudgedEnough = 0.01F;
-
-/// Сдвинулось ли заметно.
-[[nodiscard]] bool moved(const shared::Vec3& from, const shared::Vec3& to,
-                         float enough) noexcept {
-    return shared::distanceSquared(from, to) > enough * enough;
-}
-
-/// Есть ли в свежем снимке машины хоть что-нибудь, чего не было в отправленном.
-///
-/// Та же бережливость, что и у игрока, и повод тот же. Машина шлёт снимок
-/// каждый такт независимо от того, едет она или стоит, — а стоит она в сессии
-/// куда чаще, чем едет: у обочины с работающим мотором, у светофора, у входа в
-/// заведение, пока хозяин отошёл. Снимок этот сервер пересылает каждому, кто
-/// машину видит, и в пробке из двадцати машин каждая платит за каждую.
-///
-/// Пороги — по тому, что видно. Сантиметр положения: вдесятеро меньше того, что
-/// заметно на глаз. Десятая градуса поворота: столько машина отыгрывает на
-/// подвеске, стоя на месте. Сотая доля хода педали: разглядеть её нельзя ни в
-/// стоп-сигналах, ни в угле колёс.
-[[nodiscard]] bool worthSending(const shared::VehicleState& sent,
-                                const shared::VehicleState& fresh) noexcept {
-    if (sent.id != fresh.id || sent.model != fresh.model || sent.flags != fresh.flags ||
-        sent.doorsOpen != fresh.doorsOpen || sent.doorsBroken != fresh.doorsBroken ||
-        sent.windowsBroken != fresh.windowsBroken || sent.tyresBurst != fresh.tyresBurst ||
-        sent.bodyHealth != fresh.bodyHealth || sent.engineHealth != fresh.engineHealth ||
-        sent.tankHealth != fresh.tankHealth || sent.trailer != fresh.trailer) {
-        return true;
-    }
-
-    if (std::abs(sent.steer - fresh.steer) > kNudgedEnough ||
-        std::abs(sent.throttle - fresh.throttle) > kNudgedEnough ||
-        std::abs(sent.brake - fresh.brake) > kNudgedEnough) {
-        return true;
-    }
-
-    // Поворот сравнивается по кругу, как и у игрока: с 359 градусов на 1 машина
-    // повернулась на два, а не на триста пятьдесят восемь.
-    const auto turned = [](float from, float to) {
-        const float apart = std::fmod(std::abs(from - to), 360.0F);
-        return std::min(apart, 360.0F - apart) > kTurnedEnough;
-    };
-
-    if (turned(sent.rotation.x, fresh.rotation.x) || turned(sent.rotation.y, fresh.rotation.y) ||
-        turned(sent.rotation.z, fresh.rotation.z)) {
-        return true;
-    }
-
-    return moved(sent.position, fresh.position, kMovedEnough) ||
-           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
-           moved(sent.angularVelocity, fresh.angularVelocity, kSpunEnough);
-}
-
 /// Границы задержки между попытками подключения.
 constexpr auto kMinRetryDelay = std::chrono::milliseconds{500};
 constexpr auto kMaxRetryDelay = std::chrono::seconds{10};
@@ -845,8 +778,8 @@ void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
     const shared::Vec3 shown = vehicle.at(arrived).position;
 
     const bool counted = vehicle.snapshots > 0;
-    const shared::Timestamp before =
-        vehicle.timeline.empty() ? state.sentAt : vehicle.timeline.newest().sentAt;
+    const shared::VehicleState before =
+        vehicle.timeline.empty() ? state : vehicle.timeline.newest();
 
     // Объявленное сервером состояние лежит на ленте первым, но снимком не
     // считается: часы его — не часы ведущего, и промежуток между ними ничего не
@@ -857,11 +790,20 @@ void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
         return;
     }
 
-    if (counted && vehicle.timeline.newest().sentAt == state.sentAt) {
-        vehicle.pace.notice(std::chrono::milliseconds{shared::elapsedSince(before, state.sentAt)},
-                            arrived - vehicle.latestAt);
-        vehicle.latestAt = arrived;
-    } else if (!counted) {
+    const bool newest = vehicle.timeline.newest().sentAt == state.sentAt;
+
+    // Оценка отставания пополняется только по значащему снимку, как и у игрока,
+    // и по той же причине: стоящая машина шлёт снимок раз в четверть секунды
+    // лишь потому, что молчать дольше нельзя. Прими мы это за частоту — и
+    // тронувшаяся с места машина показывалась бы на треть секунды позади ещё
+    // десяток секунд после того, как поехала.
+    if (counted && newest && shared::differs(before, state)) {
+        vehicle.pace.notice(
+            std::chrono::milliseconds{shared::elapsedSince(before.sentAt, state.sentAt)},
+            arrived - vehicle.latestAt);
+    }
+
+    if (!counted || newest) {
         vehicle.latestAt = arrived;
     }
 
@@ -1170,7 +1112,7 @@ void Connection::sendStateIfDue() {
         const bool overdue =
             sent == sentVehicles_.end() || Clock::now() - sent->second.at >= kStateKeepalive;
 
-        if (!overdue && !worthSending(sent->second.state, vehicle)) {
+        if (!overdue && !shared::differs(sent->second.state, vehicle)) {
             continue;
         }
 

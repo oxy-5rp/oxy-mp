@@ -454,6 +454,52 @@ VehicleState VehicleState::read(ByteReader& reader) {
     return message;
 }
 
+namespace {
+
+/// То же для машины: угловая скорость и ход педалей.
+///
+/// Сотая радиана в секунду — это оборот за десять минут; сотая доля хода педали
+/// не видна ни в стоп-сигналах, ни в угле колёс.
+constexpr float kSpunEnough = 0.01F;
+constexpr float kNudgedEnough = 0.01F;
+
+/// Разошлись ли два угла заметно, с приведением к кругу.
+///
+/// По кругу, а не как числа: с 359 градусов на 1 машина повернулась на два, а
+/// не на триста пятьдесят восемь.
+[[nodiscard]] bool turned(float from, float to) noexcept {
+    const float apart = std::fmod(std::abs(from - to), 360.0F);
+
+    return std::min(apart, 360.0F - apart) > kTurnedEnough;
+}
+
+} // namespace
+
+bool differs(const VehicleState& sent, const VehicleState& fresh) noexcept {
+    if (sent.id != fresh.id || sent.model != fresh.model || sent.flags != fresh.flags ||
+        sent.doorsOpen != fresh.doorsOpen || sent.doorsBroken != fresh.doorsBroken ||
+        sent.windowsBroken != fresh.windowsBroken || sent.tyresBurst != fresh.tyresBurst ||
+        sent.bodyHealth != fresh.bodyHealth || sent.engineHealth != fresh.engineHealth ||
+        sent.tankHealth != fresh.tankHealth || sent.trailer != fresh.trailer) {
+        return true;
+    }
+
+    if (std::abs(sent.steer - fresh.steer) > kNudgedEnough ||
+        std::abs(sent.throttle - fresh.throttle) > kNudgedEnough ||
+        std::abs(sent.brake - fresh.brake) > kNudgedEnough) {
+        return true;
+    }
+
+    if (turned(sent.rotation.x, fresh.rotation.x) || turned(sent.rotation.y, fresh.rotation.y) ||
+        turned(sent.rotation.z, fresh.rotation.z)) {
+        return true;
+    }
+
+    return moved(sent.position, fresh.position, kMovedEnough) ||
+           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
+           moved(sent.angularVelocity, fresh.angularVelocity, kSpunEnough);
+}
+
 void VehicleStates::write(ByteWriter& writer) const {
     // Слово в слово как у PlayerStates, и намеренно: правило у обеих связок
     // одно, и разойтись им нельзя.
