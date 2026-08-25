@@ -5,8 +5,11 @@
 
 #include "game/native_table.hpp"
 
+#include <oxymp/client/interpolation.hpp>
+
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <string>
@@ -16,6 +19,25 @@
 
 namespace oxymp::client {
 namespace {
+
+/// Насколько далеко разрешено доводить состояние, посчитанное сетевым потоком.
+///
+/// Десятая доля секунды — заведомо больше обычного разнобоя между потоками
+/// (тридцать миллисекунд в худшем случае) и заведомо меньше того, что означало
+/// бы застрявший сетевой поток. Дальше доводить нечего: там уже не поправка, а
+/// гадание, а само достраивание движения сетевая сторона делает и без нас.
+constexpr float kMaxViewAge = 0.1F;
+
+/// Сколько секунд прошло с того мгновения, на которое состояние посчитано.
+[[nodiscard]] float ageOf(std::chrono::steady_clock::time_point computedAt,
+                          std::chrono::steady_clock::time_point now) {
+    if (computedAt == std::chrono::steady_clock::time_point{} || now <= computedAt) {
+        return 0.0F;
+    }
+
+    return std::min(std::chrono::duration<float>{now - computedAt}.count(), kMaxViewAge);
+}
+
 
 /// Точка появления на случай, если сервер её не назвал.
 ///
@@ -1763,13 +1785,32 @@ void GameSession::showRemotePlayers(int ped) {
     // машина, убранная раньше сидящего в ней, оставляет игре персонажа внутри
     // несуществующей сущности. Падает она при этом не здесь, а на ближайшей
     // отрисовке, и след ведёт в d3d11 — туда, где искать нечего.
+    // Состояние посчитано сетевым потоком, а показывает его этот, и мгновения
+    // эти разные: сетевой просыпается на приходе пакетов — вразнобой и реже
+    // кадров, — а мы рисуем свой кадр сейчас. Разница доводится по скорости,
+    // иначе вся плавность, добытая интерполяцией, тратится впустую: кривая
+    // считается ровно, а снимается с неё в неровные мгновения.
+    const auto shownAt = Clock::now();
+
     std::vector<game::Vehicles::View> vehicles;
 
     for (const SessionVehicleView& vehicle : roster_.vehicles()) {
-        vehicles.push_back(game::Vehicles::View{
+        game::Vehicles::View view{
             .state = vehicle.state,
             .owner = vehicle.owner,
-        });
+        };
+
+        // Ничью машину доводить нечего: она стоит там, где её оставили, а
+        // скорость в её последнем снимке — та, с которой из неё вышли.
+        if (const float age = ageOf(vehicle.computedAt, shownAt);
+            age > 0.0F && view.owner != shared::kInvalidPlayerId) {
+            view.state.position =
+                interpolation::advance(view.state.position, view.state.velocity, age);
+            view.state.rotation = interpolation::advanceAngles(
+                view.state.rotation, view.state.angularVelocity, age);
+        }
+
+        vehicles.push_back(view);
     }
 
     // Список полный, включая машины, которые ведём мы: сервер знает обо всех, и
@@ -1783,11 +1824,18 @@ void GameSession::showRemotePlayers(int ped) {
     views.reserve(players.size());
 
     for (const RemoteView& player : players) {
-        views.push_back(game::RemotePlayerView{
+        game::RemotePlayerView view{
             .id = player.id,
             .nickname = player.nickname,
             .state = player.state,
-        });
+        };
+
+        if (const float age = ageOf(player.computedAt, shownAt); age > 0.0F) {
+            view.state.position =
+                interpolation::advance(view.state.position, view.state.velocity, age);
+        }
+
+        views.push_back(std::move(view));
     }
 
     remotePlayers_.sync(views, ped);

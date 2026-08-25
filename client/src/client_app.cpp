@@ -825,6 +825,7 @@ std::vector<RemoteView> describeRemotePlayers(const Connection& connection) {
         view.id = id;
         view.nickname = player.nickname;
         view.state = player.at(now);
+        view.computedAt = now;
 
         players.push_back(std::move(view));
     }
@@ -848,6 +849,7 @@ std::vector<SessionVehicleView> describeSessionVehicles(const Connection& connec
         SessionVehicleView view;
         view.state = vehicle.at(now);
         view.owner = vehicle.owner;
+        view.computedAt = now;
 
         vehicles.push_back(view);
     }

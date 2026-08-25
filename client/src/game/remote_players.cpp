@@ -599,14 +599,29 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
             // только если поза его не отменила сама.
             animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
 
+            // Сидит ли он в машине, которая у нас есть. Разница существенная:
+            // машину везёт нас самих, и снимками её седока вести не нужно, — а
+            // вот седока машины, которой у нас ещё нет, вести приходится.
+            //
+            // Случай не выдуманный: модель машины грузится не мгновенно, и всё
+            // это время его персонаж стоял столбом посреди дороги, пока сама
+            // машина уезжала.
+            const bool carried =
+                riding && vehicles_.handleFor(player.state.vehicleId) != 0;
+
             // Залезающим распоряжается задача входа: она ведёт его к двери сама,
             // и вести его при этом ещё и снимками значит тянуть в две стороны.
-            if (!riding && !entering) {
+            if (!carried && !entering) {
                 // Занятый своим движением ведётся им, а не нами: задача ходьбы,
                 // выданная поверх прыжка, отменяет прыжок — то есть ровно то,
                 // ради чего он и заказан. Положение при этом всё равно
                 // подводится: тело обязано оказаться там, где хозяин.
-                const bool busy = game::PedAnimation::busy(player.state.flags);
+                //
+                // Сидящий в ненайденной машине — тот же случай: положение ему
+                // подводим, а походку и направление не трогаем. Ставить его на
+                // ноги и заставлять идти незачем — он едет.
+                const bool busy =
+                    riding || game::PedAnimation::busy(player.state.flags);
 
                 walk(puppet, player, seconds, now, busy);
 
@@ -614,7 +629,7 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
                     aim(puppet, player);
                     look(puppet, player, now);
                 }
-            } else if (riding && aiming(player.state)) {
+            } else if (carried && aiming(player.state)) {
                 // Сидящий в машине показывает единственное, что может показать:
                 // куда он целится из окна. Ни походки, ни направления движения
                 // у него нет — его ведёт машина.
