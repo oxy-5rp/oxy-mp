@@ -26,15 +26,12 @@ constexpr auto kPingInterval = std::chrono::seconds{2};
 /// слать бессмысленно — лишние снимки сервер выбросит, не разослав; реже —
 /// значит оставлять его такты пустыми.
 ///
-/// Здесь же лежит то, чем клиент пользуется до приветствия и с чем сверяет
-/// сказанное сервером: сервер называет число, и оно приходит по сети, а
-/// поделить на ноль или отвести снимку целую секунду нельзя.
-constexpr std::uint16_t kMinTickRate = 5;
-constexpr std::uint16_t kMaxTickRate = 100;
-
-/// Промежуток между снимками при названной сервером частоте.
+/// Названное сервером число приходит по сети, и верить ему на слово нельзя:
+/// поделить на ноль или отвести снимку целую секунду не выйдет. Границы общие с
+/// сервером — shared::kMinTickRate.
 [[nodiscard]] std::chrono::milliseconds stateInterval(std::uint16_t tickRate) noexcept {
-    const std::uint16_t rate = std::clamp(tickRate, kMinTickRate, kMaxTickRate);
+    const std::uint16_t rate =
+        std::clamp(tickRate, shared::kMinTickRate, shared::kMaxTickRate);
 
     return std::chrono::milliseconds{1000 / rate};
 }
@@ -70,6 +67,13 @@ constexpr float kTurnedEnough = 0.1F;
 constexpr float kAimedEnough = 0.05F;
 constexpr float kSpedEnough = 0.05F;
 
+/// То же для машины: угловая скорость и ход педалей.
+///
+/// Сотая радиана в секунду — это оборот за десять минут; сотая доля хода педали
+/// не видна ни в стоп-сигналах, ни в угле колёс.
+constexpr float kSpunEnough = 0.01F;
+constexpr float kNudgedEnough = 0.01F;
+
 /// Сдвинулось ли заметно.
 [[nodiscard]] bool moved(const shared::Vec3& from, const shared::Vec3& to,
                          float enough) noexcept {
@@ -103,6 +107,51 @@ constexpr float kSpedEnough = 0.05F;
     return turned > kTurnedEnough || moved(sent.position, fresh.position, kMovedEnough) ||
            moved(sent.velocity, fresh.velocity, kSpedEnough) ||
            moved(sent.aimAt, fresh.aimAt, kAimedEnough);
+}
+
+/// Есть ли в свежем снимке машины хоть что-нибудь, чего не было в отправленном.
+///
+/// Та же бережливость, что и у игрока, и повод тот же. Машина шлёт снимок
+/// каждый такт независимо от того, едет она или стоит, — а стоит она в сессии
+/// куда чаще, чем едет: у обочины с работающим мотором, у светофора, у входа в
+/// заведение, пока хозяин отошёл. Снимок этот сервер пересылает каждому, кто
+/// машину видит, и в пробке из двадцати машин каждая платит за каждую.
+///
+/// Пороги — по тому, что видно. Сантиметр положения: вдесятеро меньше того, что
+/// заметно на глаз. Десятая градуса поворота: столько машина отыгрывает на
+/// подвеске, стоя на месте. Сотая доля хода педали: разглядеть её нельзя ни в
+/// стоп-сигналах, ни в угле колёс.
+[[nodiscard]] bool worthSending(const shared::VehicleState& sent,
+                                const shared::VehicleState& fresh) noexcept {
+    if (sent.id != fresh.id || sent.model != fresh.model || sent.flags != fresh.flags ||
+        sent.doorsOpen != fresh.doorsOpen || sent.doorsBroken != fresh.doorsBroken ||
+        sent.windowsBroken != fresh.windowsBroken || sent.tyresBurst != fresh.tyresBurst ||
+        sent.bodyHealth != fresh.bodyHealth || sent.engineHealth != fresh.engineHealth ||
+        sent.tankHealth != fresh.tankHealth || sent.trailer != fresh.trailer) {
+        return true;
+    }
+
+    if (std::abs(sent.steer - fresh.steer) > kNudgedEnough ||
+        std::abs(sent.throttle - fresh.throttle) > kNudgedEnough ||
+        std::abs(sent.brake - fresh.brake) > kNudgedEnough) {
+        return true;
+    }
+
+    // Поворот сравнивается по кругу, как и у игрока: с 359 градусов на 1 машина
+    // повернулась на два, а не на триста пятьдесят восемь.
+    const auto turned = [](float from, float to) {
+        const float apart = std::fmod(std::abs(from - to), 360.0F);
+        return std::min(apart, 360.0F - apart) > kTurnedEnough;
+    };
+
+    if (turned(sent.rotation.x, fresh.rotation.x) || turned(sent.rotation.y, fresh.rotation.y) ||
+        turned(sent.rotation.z, fresh.rotation.z)) {
+        return true;
+    }
+
+    return moved(sent.position, fresh.position, kMovedEnough) ||
+           moved(sent.velocity, fresh.velocity, kSpedEnough) ||
+           moved(sent.angularVelocity, fresh.angularVelocity, kSpunEnough);
 }
 
 /// Границы задержки между попытками подключения.
@@ -602,6 +651,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerWeapon:
+        if (auto look = shared::decode<shared::PlayerWeapon>(packet)) {
+            weaponLooks_.push_back(std::move(*look));
+        }
+        return;
+
     case shared::MessageId::PlayerAnimation:
         if (auto animation = shared::decode<shared::PlayerAnimation>(packet)) {
             animations_.push_back(std::move(*animation));
@@ -1010,6 +1065,10 @@ std::vector<shared::WeaponFired> Connection::takeShots() {
     return std::exchange(shots_, {});
 }
 
+std::vector<shared::PlayerWeapon> Connection::takeWeaponLooks() {
+    return std::exchange(weaponLooks_, {});
+}
+
 std::vector<shared::ChatLine> Connection::takeChatLines() {
     return std::exchange(chatLines_, {});
 }
@@ -1127,9 +1186,32 @@ void Connection::sendStateIfDue() {
     for (shared::VehicleState vehicle : ownedVehicles_) {
         vehicle.sentAt = sentAt;
 
+        // Снимок, в котором ничего не изменилось, не отправляется — но не
+        // дольше, чем kStateKeepalive. Стоящая машина в сессии куда обычнее
+        // едущей, а платит за её снимок каждый, кто её видит.
+        const auto sent = sentVehicles_.find(vehicle.id);
+
+        const bool overdue =
+            sent == sentVehicles_.end() || Clock::now() - sent->second.at >= kStateKeepalive;
+
+        if (!overdue && !worthSending(sent->second.state, vehicle)) {
+            continue;
+        }
+
         const auto vehiclePacket = shared::encode(vehicle);
         host_->send(serverPeer_, shared::Channel::State, shared::ByteView{vehiclePacket});
+
+        sentVehicles_.insert_or_assign(vehicle.id, SentVehicle{vehicle, Clock::now()});
     }
+
+    // Машины, которые перестали быть нашими, забываются: вернувшись, они обязаны
+    // объявиться заново — за то время, что её вёл другой, с ней могло случиться
+    // что угодно.
+    std::erase_if(sentVehicles_, [this](const auto& entry) {
+        return std::ranges::none_of(ownedVehicles_, [&entry](const shared::VehicleState& owned) {
+            return owned.id == entry.first;
+        });
+    });
 
     // Снимок, в котором ничего не изменилось, не отправляется вовсе — но не
     // дольше, чем kStateKeepalive. См. worthSending.
@@ -1246,12 +1328,14 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     explosions_.clear();
     shots_.clear();
     outgoingShots_.clear();
+    weaponLooks_.clear();
 
     // Последний отправленный снимок забывается вместе с соединением: по нему
     // решается, изменилось ли что-нибудь, и оставленный от прошлой сессии он
     // заставил бы промолчать в самой первой отправке новой.
     sentState_ = shared::PlayerState{};
     stateSentAt_ = Clock::time_point{};
+    sentVehicles_.clear();
     attachments_.clear();
     peds_.clear();
     removedPeds_.clear();

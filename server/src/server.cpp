@@ -31,6 +31,19 @@ constexpr float kFarRing = 150.0F * 150.0F;
 constexpr unsigned int kMidEvery = 2;
 constexpr unsigned int kFarEvery = 4;
 
+/// Какой промежуток между снимками игрока считается молчанием.
+///
+/// Клиент не шлёт снимок, в котором ничего не изменилось, — стоящий на месте
+/// человек шлёт его лишь раз в четверть секунды. Такие редкие снимки нельзя
+/// прореживать по расстоянию: прореживание пропускает каждый четвёртый такт, и
+/// снимку, приходящему раз в четверть секунды, случается не совпасть с
+/// пропускаемым тактом несколько раз подряд. Получатель за это время успевает
+/// счесть игрока пропавшим и убрать его персонажа — а тот всего лишь стоял.
+///
+/// Полторы десятых секунды: заметно больше такта на любой разумной частоте и
+/// заметно меньше той четверти секунды, с которой шлёт стоящий.
+constexpr auto kQuietGap = std::chrono::milliseconds{150};
+
 /// Как часто снимок стоящего игрока уходит всё равно.
 ///
 /// Стоящий не шлёт ничего нового, и пересылать его каждый такт незачем. Но
@@ -50,7 +63,16 @@ constexpr auto kTrafficInterval = std::chrono::seconds{10};
 
 /// Шаг цикла обслуживания. Он же — срок, отведённый разбору событий: дольше
 /// одного такта сервер не разбирает их ни при какой нагрузке.
-constexpr auto kTickInterval = std::chrono::milliseconds{1000 / shared::kDefaultTickRate};
+/// Шаг цикла обслуживания при названной частоте.
+///
+/// Больше не постоянная: частоту такта задаёт хозяин сервера строкой
+/// `tickrate`, и по ней же клиент решает, как часто слать свои снимки.
+[[nodiscard]] std::chrono::milliseconds tickInterval(std::uint16_t tickRate) noexcept {
+    const std::uint16_t rate =
+        std::clamp(tickRate, shared::kMinTickRate, shared::kMaxTickRate);
+
+    return std::chrono::milliseconds{1000 / rate};
+}
 
 /// Сколько ждать одного события за раз.
 ///
@@ -141,7 +163,7 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         // до всего остального — ни пересдачи машин, ни раздачи, ни тика
         // скриптов. Замечено на нагрузке: за семьдесят секунд такт не отработал
         // ни разу.
-        const auto deadline = std::chrono::steady_clock::now() + kTickInterval;
+        const auto deadline = std::chrono::steady_clock::now() + tickInterval(config_.tickRate);
 
         // Разбор идёт до срока — и ровно до срока, ни раньше, ни позже.
         //
@@ -433,7 +455,10 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // сессии: хозяин вправе посадить игроков куда угодно, не пересобирая
     // ничего, и сменить это одной строкой в server.cfg.
     welcome.spawnPosition = config_.spawnPosition;
-    welcome.tickRate = shared::kDefaultTickRate;
+    // Частоту называем свою, а не постоянную: по ней клиент решает, как часто
+    // слать снимки, и разойтись этим двум числам нельзя — иначе у сервера
+    // остаются пустые такты либо приходит больше снимков, чем он разошлёт.
+    welcome.tickRate = config_.tickRate;
 
     // Имя сервера — то, что игрок увидит в меню вместо адреса. Знает его один
     // только сервер: в адресе его нет, а каталога, где спросить, у oxyMP тоже
@@ -528,6 +553,12 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     for (const auto& [otherPeer, other] : players_) {
         if (otherPeer != peer && other.appearance.has_value()) {
             sendTo(peer, *other.appearance);
+        }
+
+        // И как у них собрано оружие: вошедший этих объявлений не слышал, а
+        // человека с глушителем увидит.
+        if (otherPeer != peer && other.shownWeapon.weapon != 0) {
+            sendTo(peer, other.shownWeapon);
         }
     }
 
@@ -734,6 +765,11 @@ void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
     // игроков заголовки весят больше самих снимков.
     player->state = state;
     player->stateFresh = true;
+
+    // Оружие в руках сменилось — рассказать остальным, как оно выглядит.
+    // Сравнение с прошлым объявлением живёт внутри: снимок приходит каждый
+    // такт, а насадки меняются раз в несколько минут.
+    announceWeapon(*player);
 }
 
 void Server::reportTraffic() {
@@ -798,6 +834,11 @@ void Server::broadcastStates() {
         // бы его вовсе.
         const bool stale = now - player.stateSentAt >= kStateKeepalive;
 
+        // Молчал ли он до этого снимка. Считается по тому же времени, по
+        // которому решается и всё прочее: stateSentAt — это когда снимок этого
+        // игрока писался в последний раз.
+        slot.quiet = now - player.stateSentAt >= kQuietGap;
+
         if (player.stateFresh || stale) {
             const std::size_t before = blob_.bytes().size();
             player.state.write(blob_);
@@ -849,7 +890,10 @@ void Server::broadcastStates() {
                                        : distance > kNearRing ? kMidEvery
                                                               : 1U;
 
-            if (every > 1 && (tick_ + other.id) % every != 0) {
+            // Молчавшего прореживать нельзя: его снимок и без того редок, и
+            // пропущенный он оставит получателя без вестей на столько, что тот
+            // сочтёт игрока пропавшим и уберёт его персонажа.
+            if (every > 1 && !other.quiet && (tick_ + other.id) % every != 0) {
                 continue;
             }
 
@@ -1456,6 +1500,37 @@ void Server::sendHealth(const Player& player, shared::PlayerId attacker) {
     sendTo(player.peer, changed);
 }
 
+void Server::announceWeapon(Player& player) {
+    shared::PlayerWeapon look;
+    look.playerId = player.id;
+    look.weapon = player.state.weapon;
+
+    // Что навинчено на ствол, знает сервер: снаряжение принадлежит ему целиком.
+    // Оружия, которого он не выдавал, в списке нет — и это верно: собрать его
+    // мог только он.
+    const auto slot = std::ranges::find_if(player.loadout, [&look](const auto& carried) {
+        return carried.weapon == look.weapon;
+    });
+
+    if (look.weapon != 0 && slot != player.loadout.end()) {
+        look.tint = slot->tint;
+        look.components = slot->components;
+    }
+
+    if (look == player.shownWeapon) {
+        return;
+    }
+
+    player.shownWeapon = look;
+
+    // Всем, а не только тем, кто игрока видит, и надёжным каналом. Собранное
+    // оружие живёт минутами: вышедший из-за угла обязан увидеть его сразу, а не
+    // после ближайшей смены ствола. Самому игроку — тоже: у него оно уже такое,
+    // но лишнее сообщение раз в несколько минут дешевле, чем второе правило о
+    // том, кому его слать.
+    broadcast(look);
+}
+
 void Server::sendLoadout(const Player& player, bool replace) {
     shared::PlayerLoadout loadout;
     loadout.weapons = player.loadout;
@@ -1510,6 +1585,12 @@ void Server::healthChanged(const Player& player) {
 
 void Server::loadoutChanged(const Player& player, bool replace) {
     sendLoadout(player, replace);
+
+    // Заодно и остальным: скрипт мог навинтить глушитель на то самое оружие,
+    // которое игрок сейчас держит.
+    if (Player* const carrier = players_.findById(player.id); carrier != nullptr) {
+        announceWeapon(*carrier);
+    }
 }
 
 void Server::appearanceChanged(const Player& player) {

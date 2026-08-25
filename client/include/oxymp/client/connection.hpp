@@ -283,6 +283,9 @@ public:
     /// Выстрелы, о которых сообщил сервер.
     [[nodiscard]] std::vector<shared::WeaponFired> takeShots();
 
+    /// Как собрано оружие у чужих игроков.
+    [[nodiscard]] std::vector<shared::PlayerWeapon> takeWeaponLooks();
+
     /// Забирает пришедшие строки чата. Каждая отдаётся ровно один раз.
     [[nodiscard]] std::vector<shared::ChatLine> takeChatLines();
 
@@ -486,6 +489,7 @@ private:
     std::vector<shared::PlayerAnimation> animations_;
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
+    std::vector<shared::PlayerWeapon> weaponLooks_;
     std::vector<shared::PedState> peds_;
     std::vector<shared::PedId> removedPeds_;
     std::vector<shared::EntityAttachment> attachments_;
@@ -542,6 +546,17 @@ private:
     /// пересылает его каждому соседу.
     shared::PlayerState sentState_;
     Clock::time_point stateSentAt_{};
+
+    /// Снимок машины, который ушёл последним, и когда это было.
+    ///
+    /// По нему решается, стоит ли слать следующий: стоящая машина шлёт одно и то
+    /// же каждый такт, а платит за него каждый, кто её видит.
+    struct SentVehicle {
+        shared::VehicleState state;
+        Clock::time_point at{};
+    };
+
+    std::unordered_map<shared::VehicleId, SentVehicle> sentVehicles_;
 
     /// Промежуток между снимками своего состояния.
     ///

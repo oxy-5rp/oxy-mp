@@ -976,6 +976,12 @@ void GameSession::applyServerEvents(int ped) {
         remotePlayers_.fire(fired.playerId, fired.weapon, fired.target);
     }
 
+    // Как у чужих собрано оружие. Запоминается, а не применяется сразу: насадки
+    // ставятся на ствол, который уже в руках, а выдаётся он кукле по снимку.
+    for (const shared::PlayerWeapon& look : mail_.takeWeaponLooks()) {
+        remotePlayers_.arm(look.playerId, look);
+    }
+
     // Перенос — единственное распоряжение сервера, которое исполняет игра:
     // персонаж живёт здесь, и переставить его больше некому.
     if (ped != 0) {

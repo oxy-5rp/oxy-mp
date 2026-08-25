@@ -309,6 +309,59 @@ TEST_CASE("the horn and the roof survive a round trip", "[messages]") {
     CHECK_FALSE(has(received->flags, VehicleFlag::SirenOn));
 }
 
+TEST_CASE("PlayerWeapon survives a round trip", "[messages]") {
+    PlayerWeapon sent;
+    sent.playerId = 5;
+    sent.weapon = 0xBFEFFF6D; // WEAPON_ASSAULTRIFLE
+    sent.tint = 3;
+    sent.components = {0xA0D89C42U, 0x9D2FBF29U};
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 5);
+    CHECK(received->weapon == 0xBFEFFF6D);
+    CHECK(received->tint == 3);
+    REQUIRE(received->components.size() == 2);
+    CHECK(received->components[0] == 0xA0D89C42U);
+    CHECK(received->components[1] == 0x9D2FBF29U);
+}
+
+TEST_CASE("a bare weapon survives a round trip", "[messages]") {
+    // Ствол без насадок — самый частый случай, и список у него пуст. Пустой
+    // список обязан разобраться, а не превратиться в отказ: иначе у всех с
+    // заводским оружием оно перестало бы показываться вовсе.
+    PlayerWeapon sent;
+    sent.playerId = 1;
+    sent.weapon = 0x1B06D571U;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->weapon == 0x1B06D571U);
+    CHECK(received->tint == 0);
+    CHECK(received->components.empty());
+}
+
+TEST_CASE("a weapon with impossible components is refused", "[messages]") {
+    // Насадок больше, чем их бывает у оружия: пакет испорчен либо собран не
+    // нами. Верить числу, которое уже назвалось неверным, нельзя — по нему
+    // получатель выделил бы память под список, которого нет.
+    std::vector<std::uint8_t> packet = encode(PlayerWeapon{});
+
+    // Последний байт — число насадок; их у оружия в игре пять мест.
+    packet.back() = 200;
+
+    CHECK_FALSE(decode<PlayerWeapon>(ByteView{packet}).has_value());
+}
+
+TEST_CASE("a weapon look keeps its own number", "[messages]") {
+    CHECK(static_cast<std::uint8_t>(MessageId::PlayerWeapon) == 53);
+
+    const auto packet = encode(PlayerWeapon{});
+    CHECK(peekMessageId(ByteView{packet}) == MessageId::PlayerWeapon);
+}
+
 TEST_CASE("WeaponFired survives a round trip", "[messages]") {
     WeaponFired sent;
     sent.playerId = 12;

@@ -316,6 +316,26 @@ public:
         return std::exchange(shots_, {});
     }
 
+    /// Как собрано оружие у чужих игроков.
+    ///
+    /// Состоянием, а не событием, и в этом отличие от выстрела: собранное оружие
+    /// держится, пока его не сменят, и куклы, которой оно предназначено, может
+    /// ещё не быть. Помнит его RemotePlayers — так же, как помнит одежду.
+    void deliverWeaponLooks(std::vector<shared::PlayerWeapon> looks) {
+        if (looks.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        weaponLooks_.insert(weaponLooks_.end(), std::make_move_iterator(looks.begin()),
+                            std::make_move_iterator(looks.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerWeapon> takeWeaponLooks() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(weaponLooks_, {});
+    }
+
     /// Маркеры и контрольные точки, назначенные сервером.
     ///
     /// Тем же порядком, что и метки: пришедшее либо заводится, либо
@@ -693,6 +713,7 @@ private:
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::WeaponFired> outgoingShots_;
+    std::vector<shared::PlayerWeapon> weaponLooks_;
     std::vector<shared::PedState> peds_;
     std::vector<shared::PedId> removedPeds_;
     std::vector<shared::EntityAttachment> attachments_;

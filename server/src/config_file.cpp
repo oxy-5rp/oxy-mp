@@ -398,6 +398,24 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
             understood = point(value, config.spawnPosition);
         } else if (key == "spawnheading") {
             understood = decimal(value, config.spawnHeading);
+        } else if (key == "tickrate") {
+            understood = number(value, config.tickRate);
+
+            // Частоту сервер называет клиенту, а тот по ней решает, как часто
+            // слать свои снимки. Выйди она за границы — и получилась бы сессия,
+            // в которой одна сторона считает по одному числу, а другая по
+            // другому. Поэтому не отказ, а обрезка вслух: сервер, не
+            // поднявшийся из-за опечатки в частоте, хуже сервера, идущего с
+            // ближайшим осмысленным числом.
+            if (understood && (config.tickRate < shared::kMinTickRate ||
+                               config.tickRate > shared::kMaxTickRate)) {
+                complaints.push_back(std::format(
+                    "\"tickrate\": {} вне границ {}..{}, взято ближайшее", config.tickRate,
+                    shared::kMinTickRate, shared::kMaxTickRate));
+
+                config.tickRate = std::clamp(config.tickRate, shared::kMinTickRate,
+                                             shared::kMaxTickRate);
+            }
         } else if (key == "streamdistance") {
             understood = decimal(value, config.streamDistance);
         } else if (key == "maxvehicles") {

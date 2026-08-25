@@ -122,6 +122,15 @@ public:
     /// бьющая по-настоящему, ударила бы второй раз по тому, кто уже посчитан.
     void fire(shared::PlayerId player, std::uint32_t weapon, const shared::Vec3& target);
 
+    /// Запоминает, как собрано оружие у чужого игрока.
+    ///
+    /// Помнится, а не применяется сразу, и по той же причине, что и одежда:
+    /// сообщение идёт надёжным каналом и обгоняет снимки, а куклы до первого
+    /// снимка ещё нет. Да и надевать насадки можно только вместе с самим
+    /// стволом — поставленные на оружие, которого у персонажа нет, игра
+    /// проглатывает молча.
+    void arm(shared::PlayerId player, const shared::PlayerWeapon& look);
+
     /// Одевает чужого игрока так, как он объявил.
     ///
     /// Помнится, а не только применяется, и это не запас: внешность приходит по
@@ -268,6 +277,11 @@ private:
     /// исчезает по мере удаления, а внешность объявляется однажды.
     std::unordered_map<shared::PlayerId, shared::PlayerAppearance> looks_;
 
+    /// Как собрано оружие у каждого. Рядом с одеждой и по тем же правилам:
+    /// приходит надёжным каналом, живёт минутами и обгоняет снимки. Надевается
+    /// вместе со стволом — см. aim.
+    std::unordered_map<shared::PlayerId, shared::PlayerWeapon> guns_;
+
     NativeHandler hashKey_ = nullptr;
     NativeHandler requestModel_ = nullptr;
     NativeHandler hasModelLoaded_ = nullptr;
@@ -307,6 +321,8 @@ private:
     NativeHandler enterVehicle_ = nullptr;
     NativeHandler leaveVehicle_ = nullptr;
     NativeHandler isInVehicle_ = nullptr;
+    NativeHandler giveComponent_ = nullptr;
+    NativeHandler setWeaponTint_ = nullptr;
     NativeHandler shootBullet_ = nullptr;
     NativeHandler shotTimer_ = nullptr;
     NativeHandler boneCoords_ = nullptr;

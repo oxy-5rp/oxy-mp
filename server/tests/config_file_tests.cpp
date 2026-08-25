@@ -61,6 +61,45 @@ TEST_CASE("the config file reads what it is told", "[config]") {
     CHECK(config.admins[2] == 7);
 }
 
+TEST_CASE("the tick rate comes from the config", "[config]") {
+    // Частота такта — главная величина, которой хозяин сервера правит плавность
+    // движения у всех разом: она решает и как часто снимки уходят получателям,
+    // и — через приветствие — как часто клиент шлёт свои.
+    Config config;
+    const auto unknown = settle("tickrate: 60\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.tickRate == 60);
+}
+
+TEST_CASE("the tick rate is trimmed to what both sides understand", "[config]") {
+    // Обрезка вслух, а не отказ: сервер, не поднявшийся из-за опечатки в
+    // частоте, хуже сервера, идущего с ближайшим осмысленным числом. Молча
+    // обрезать тоже нельзя — хозяин вправе знать, что написанное им не
+    // соблюдается.
+    Config tooFast;
+    const auto fastComplaints = settle("tickrate: 500\n", tooFast);
+
+    CHECK(tooFast.tickRate == shared::kMaxTickRate);
+    CHECK_FALSE(fastComplaints.empty());
+
+    Config tooSlow;
+    const auto slowComplaints = settle("tickrate: 1\n", tooSlow);
+
+    CHECK(tooSlow.tickRate == shared::kMinTickRate);
+    CHECK_FALSE(slowComplaints.empty());
+}
+
+TEST_CASE("a server without a tick rate keeps the old one", "[config]") {
+    // Настройка появилась позже самого сервера, и файл без неё обязан
+    // означать то же, что означал раньше.
+    Config config;
+    const auto unknown = settle("name: Без частоты\n", config);
+
+    CHECK(unknown.empty());
+    CHECK(config.tickRate == shared::kDefaultTickRate);
+}
+
 TEST_CASE("an empty password key leaves the server open", "[config]") {
     // Ключ без значения — то, что стоит в server.cfg по умолчанию, и он обязан
     // означать «пароля нет», а не «пароль из пустой строки»: сервер сверяет

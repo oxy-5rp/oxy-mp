@@ -284,6 +284,8 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       enterVehicle_(table.handlerFor(natives::kTaskEnterVehicle)),
       leaveVehicle_(table.handlerFor(natives::kTaskLeaveVehicle)),
       isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)),
+      giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
+      setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
       shootBullet_(table.handlerFor(natives::kShootSingleBulletBetweenCoords)),
       shotTimer_(table.handlerFor(natives::kGetGameTimer)),
       boneCoords_(table.handlerFor(natives::kGetPedBoneCoords)) {}
@@ -443,6 +445,20 @@ void RemotePlayers::fire(shared::PlayerId player, std::uint32_t weapon,
     // она стрелять не будет — см. Puppet::firedAt.
     if (shotTimer_ != nullptr) {
         puppet->second.firedAt = invokeNative<std::int32_t>(shotTimer_);
+    }
+}
+
+void RemotePlayers::arm(shared::PlayerId player, const shared::PlayerWeapon& look) {
+    guns_[player] = look;
+
+    // Надеть прямо сейчас нельзя: насадки ставятся на ствол, который уже в
+    // руках, а он выдаётся кукле по снимку. Забудем об этом — и глушитель
+    // появился бы только после следующей смены оружия.
+    //
+    // Поэтому сбрасываем память о выданном оружии: следующий же кадр выдаст его
+    // заново, теперь уже с насадками.
+    if (const auto puppet = puppets_.find(player); puppet != puppets_.end()) {
+        puppet->second.weapon = 0;
     }
 }
 
@@ -882,6 +898,27 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
             invokeNative<void>(giveWeapon_, puppet.ped, puppet.weapon,
                                static_cast<int>(player.state.ammo), false, true);
             invokeNative<void>(setWeapon_, puppet.ped, puppet.weapon, true);
+
+            // Насадки и расцветка — сразу за стволом и только за ним:
+            // поставленные на оружие, которого у персонажа ещё нет, игра
+            // проглатывает молча. Без них у всех вокруг оружие всегда выглядело
+            // заводским, как бы они его ни собрали.
+            if (const auto gun = guns_.find(player.id);
+                gun != guns_.end() && gun->second.weapon == puppet.weapon) {
+                if (giveComponent_ != nullptr) {
+                    for (const std::uint32_t component : gun->second.components) {
+                        if (component != 0) {
+                            invokeNative<void>(giveComponent_, puppet.ped, puppet.weapon,
+                                               component);
+                        }
+                    }
+                }
+
+                if (setWeaponTint_ != nullptr) {
+                    invokeNative<void>(setWeaponTint_, puppet.ped, puppet.weapon,
+                                       static_cast<int>(gun->second.tint));
+                }
+            }
 
             puppet.ammo = player.state.ammo;
         }

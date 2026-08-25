@@ -1967,6 +1967,7 @@ void run() {
         mail.deliverAnimations(connection->takeAnimations());
         mail.deliverExplosions(connection->takeExplosions());
         mail.deliverShots(connection->takeShots());
+        mail.deliverWeaponLooks(connection->takeWeaponLooks());
         mail.deliverPeds(connection->takePeds(), connection->takeRemovedPeds());
         mail.deliverAttachments(connection->takeAttachments());
         mail.deliverMarkers(connection->takeMarkers());

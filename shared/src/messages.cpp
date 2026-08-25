@@ -1188,6 +1188,48 @@ WeaponFired WeaponFired::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerWeapon::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeU32(weapon);
+    writer.writeU8(tint);
+
+    // Предел тот же, что и у снаряжения: список насадок здесь описывает то же
+    // самое оружие, только увиденное со стороны.
+    const auto parts = static_cast<std::uint8_t>(
+        std::min<std::size_t>(components.size(), kMaxWeaponComponents));
+
+    writer.writeU8(parts);
+
+    for (std::uint8_t part = 0; part < parts; ++part) {
+        writer.writeU32(components[part]);
+    }
+}
+
+PlayerWeapon PlayerWeapon::read(ByteReader& reader) {
+    PlayerWeapon message;
+    message.playerId = reader.readU32();
+    message.weapon = reader.readU32();
+    message.tint = reader.readU8();
+
+    const std::uint8_t parts = reader.readU8();
+
+    if (parts > kMaxWeaponComponents) {
+        // Насадок больше, чем их бывает у оружия: пакет испорчен либо собран не
+        // нами. Разбор прекращается — читать по нему список значило бы верить
+        // числу, которое уже назвалось неверным.
+        reader.fail();
+        return message;
+    }
+
+    message.components.reserve(parts);
+
+    for (std::uint8_t part = 0; part < parts && reader.ok(); ++part) {
+        message.components.push_back(reader.readU32());
+    }
+
+    return message;
+}
+
 std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     if (packet.empty()) {
         return std::nullopt;
@@ -1239,6 +1281,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::VehicleStates:
     case MessageId::Explosion:
     case MessageId::WeaponFired:
+    case MessageId::PlayerWeapon:
         return static_cast<MessageId>(packet.front());
     }
 

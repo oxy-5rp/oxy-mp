@@ -1691,6 +1691,39 @@ struct WeaponFired {
     [[nodiscard]] static WeaponFired read(ByteReader& reader);
 };
 
+/// Как выглядит оружие в руках у игрока.
+///
+/// Только от сервера: снаряжение принадлежит ему целиком, и что на стволе
+/// навинчено, знает он, а не тот, кто из него стреляет.
+///
+/// Описывает ровно одно оружие — то, что игрок держит. Всего его снаряжения
+/// остальным знать незачем: они видят, что у него в руках, а что лежит в
+/// карманах — не их дело. Этим сообщение и отличается от PlayerLoadout, который
+/// уходит одному владельцу и несёт весь список.
+struct PlayerWeapon {
+    static constexpr MessageId kId = MessageId::PlayerWeapon;
+
+    PlayerId playerId = kInvalidPlayerId;
+
+    /// Хеш оружия. Ноль — в руках ничего, и тогда списка насадок нет.
+    std::uint32_t weapon = 0;
+
+    /// Расцветка ствола в нумерации игры. Ноль — заводская.
+    std::uint8_t tint = 0;
+
+    /// Хеши насадок: прицел, глушитель, магазин, фонарик.
+    std::vector<std::uint32_t> components;
+
+    /// Сравнение по всем полям.
+    ///
+    /// Нужно серверу: сообщение уходит по надёжному каналу и только при
+    /// изменении, а узнать об изменении можно только сравнив с тем, что ушло.
+    [[nodiscard]] bool operator==(const PlayerWeapon& other) const = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerWeapon read(ByteReader& reader);
+};
+
 /// Номер прохожего в сессии.
 using PedId = std::uint32_t;
 
