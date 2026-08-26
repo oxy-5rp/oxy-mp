@@ -748,3 +748,75 @@ TEST_CASE("positions move along their velocity", "[interpolation]") {
     CHECK(moved.y == Approx(-2.0F));
     CHECK(moved.z == Approx(5.0F));
 }
+
+TEST_CASE("the show clock starts at the estimated delay", "[interpolation]") {
+    // До первого снимка подтягивать не от чего: часы ставятся сразу.
+    ShowClock clock;
+
+    clock.slew(std::chrono::milliseconds{33}, std::chrono::milliseconds{33},
+               std::chrono::milliseconds{60});
+
+    CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(clock.lag()) ==
+          std::chrono::milliseconds{60});
+}
+
+TEST_CASE("the show clock does not jump on network jitter", "[interpolation]") {
+    // Главная проверка и причина, по которой часы вообще заведены. Отправитель
+    // шлёт ровно раз в тридцать три миллисекунды, а приходят снимки то через
+    // десять, то через шестьдесят. Прежде отставание при всяком приходе
+    // ставилось равным оценке, и показываемое мгновение прыгало на всю эту
+    // разницу — на скорости шесть метров в секунду это четверть метра рывка.
+    ShowClock clock;
+
+    constexpr auto kSent = std::chrono::milliseconds{33};
+    constexpr auto kWanted = std::chrono::milliseconds{60};
+
+    clock.restart(kWanted);
+
+    // Снимок опоздал на двадцать семь миллисекунд. Показываемое мгновение
+    // обязано сдвинуться не на них, а на кроху от них.
+    clock.slew(std::chrono::milliseconds{60}, kSent, kWanted);
+
+    const auto lag = std::chrono::duration_cast<std::chrono::milliseconds>(clock.lag());
+
+    // Отставание ушло от оценки — часы идут своим ходом, а не по её указке.
+    CHECK(lag < kWanted);
+
+    // Но ушло недалеко: шаг подтягивания связан десятой долей прошедшего
+    // времени, то есть шестью миллисекундами из двадцати семи.
+    CHECK(lag > kWanted - std::chrono::milliseconds{28});
+    CHECK(lag >= std::chrono::milliseconds{33});
+}
+
+TEST_CASE("the show clock walks back to the estimate", "[interpolation]") {
+    // Разойдясь с оценкой, часы обязаны к ней вернуться — иначе отставание
+    // уползало бы куда угодно. Возвращаются они медленно и сами.
+    ShowClock clock;
+
+    constexpr auto kSent = std::chrono::milliseconds{33};
+    constexpr auto kWanted = std::chrono::milliseconds{60};
+
+    clock.restart(std::chrono::milliseconds{40});
+
+    for (int step = 0; step < 200; ++step) {
+        clock.slew(kSent, kSent, kWanted);
+    }
+
+    CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(clock.lag()) ==
+          std::chrono::milliseconds{60});
+}
+
+TEST_CASE("a long silence sets the show clock instead of walking it", "[interpolation]") {
+    // Перерыв в снимках — не дрожание, и подтягивать его по десятой доле
+    // значило бы показывать вчерашний день ещё две секунды.
+    ShowClock clock;
+
+    constexpr auto kWanted = std::chrono::milliseconds{60};
+
+    clock.restart(kWanted);
+
+    // Снимков не было секунду, а отправитель за это время прислал один.
+    clock.slew(std::chrono::milliseconds{1000}, std::chrono::milliseconds{33}, kWanted);
+
+    CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(clock.lag()) == kWanted);
+}

@@ -281,7 +281,7 @@ struct Gait {
             seam = std::max(seam, static_cast<double>(std::sqrt(oxymp::shared::distanceSquared(
                                       oxymp::shared::Vec3{}, player.seam))));
 
-            if (now - player.latestAt > player.pace.delay()) {
+            if (now - player.latestAt > player.show.lag()) {
                 aheadSamples += 1.0;
             }
 

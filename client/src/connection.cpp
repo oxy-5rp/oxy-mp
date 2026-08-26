@@ -142,7 +142,7 @@ shared::PlayerState RemotePlayer::at(std::chrono::steady_clock::time_point now) 
     }
 
     const float aged = std::chrono::duration<float>{now - latestAt}.count();
-    const auto sample = timeline.at(now - latestAt, pace.delay());
+    const auto sample = timeline.at(now - latestAt, show.lag());
 
     // Всё, кроме плавно меняющегося, берётся из того снимка, в который мы
     // пришли, а не из самого свежего. Разница есть, и она видна: показываем мы
@@ -198,7 +198,7 @@ shared::VehicleState SessionVehicle::at(std::chrono::steady_clock::time_point no
     }
 
     const float aged = std::chrono::duration<float>{now - latestAt}.count();
-    const auto sample = timeline.at(now - latestAt, pace.delay());
+    const auto sample = timeline.at(now - latestAt, show.lag());
 
     shared::VehicleState state = *sample.to;
 
@@ -783,6 +783,18 @@ void Connection::handleRemoteState(const shared::PlayerState& state) {
             arrived - player.latestAt);
     }
 
+    // Часы показа двигаются по всякому свежему снимку, а не только по
+    // значащему: опора отсчёта сместилась к нему в любом случае, и не сдвинь мы
+    // часы — показываемое мгновение прыгнуло бы ровно на этот сдвиг.
+    if (!known) {
+        player.show.restart(player.pace.delay());
+    } else if (newest) {
+        player.show.slew(
+            arrived - player.latestAt,
+            std::chrono::milliseconds{shared::elapsedSince(before.sentAt, state.sentAt)},
+            player.pace.delay());
+    }
+
     // А вот время прихода обновляется по всякому свежему снимку, значащему или
     // нет: по нему получатель отличает молчащего от пропавшего.
     if (!known || newest) {
@@ -842,6 +854,15 @@ void Connection::handleRemoteVehicle(const shared::VehicleState& state) {
             arrived - vehicle.latestAt);
     }
 
+    if (!counted) {
+        vehicle.show.restart(vehicle.pace.delay());
+    } else if (newest) {
+        vehicle.show.slew(
+            arrived - vehicle.latestAt,
+            std::chrono::milliseconds{shared::elapsedSince(before.sentAt, state.sentAt)},
+            vehicle.pace.delay());
+    }
+
     if (!counted || newest) {
         vehicle.latestAt = arrived;
     }
@@ -874,8 +895,10 @@ void Connection::handleVehicleAdded(const shared::VehicleAdded& added) {
 
     // Объявленная машина стоит там, где сказано, и ни от чего не отстаёт:
     // сглаживать нечего, а оставшийся от прошлой её жизни шов сдвинул бы её
-    // мимо объявленного места.
+    // мимо объявленного места. Часы показа по той же причине ставятся, а не
+    // подтягиваются: подтягивать их не от чего.
     vehicle.seam = shared::Vec3{};
+    vehicle.show.restart(vehicle.pace.delay());
 
     spdlog::debug("в сессии появилась машина {}, ведёт её {}", added.state.id,
                   added.owner == shared::kInvalidPlayerId ? -1 : static_cast<int>(added.owner));
@@ -900,6 +923,10 @@ void Connection::handleVehicleAuthority(const shared::VehicleAuthority& authorit
         // больше эти двое отличались.
         known->second.pace.forget();
         known->second.seam = shared::Vec3{};
+
+        // И часы показа заодно: отсчитывали они от отметок прежнего ведущего, а
+        // отметки нового с ними несравнимы — часы у них свои.
+        known->second.show.restart(known->second.pace.delay());
 
         // От ленты остаётся один последний снимок: отметки нового ведущего с
         // отметками прежнего несравнимы — часы у них свои, — а показывать машину

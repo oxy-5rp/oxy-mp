@@ -165,6 +165,60 @@ float catchUp(float rate, float seconds) noexcept {
     return std::clamp(1.0F - std::exp(-rate * seconds), 0.0F, 1.0F);
 }
 
+std::chrono::nanoseconds ShowClock::lag() const noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<float>{lag_});
+}
+
+void ShowClock::restart(std::chrono::milliseconds delay) noexcept {
+    lag_ = std::chrono::duration<float>{delay}.count();
+    started_ = true;
+}
+
+void ShowClock::slew(std::chrono::nanoseconds arrivalGap, std::chrono::milliseconds sentGap,
+                     std::chrono::milliseconds delay) noexcept {
+    const float wanted = std::chrono::duration<float>{delay}.count();
+
+    if (!started_) {
+        restart(delay);
+        return;
+    }
+
+    const float elapsed = std::chrono::duration<float>{arrivalGap}.count();
+
+    if (elapsed <= 0.0F) {
+        // Снимок пришёл в то же мгновение, что и прошлый. Двигать часы не на
+        // что, а поделив на такой промежуток, мы получили бы любую скорость.
+        return;
+    }
+
+    // Часы идут вперёд сами: с прошлого прихода прошло elapsed, и на столько же
+    // сократилось отставание. А опора сместилась вперёд на sentGap — свежий
+    // снимок стал новым началом отсчёта, и отставание от него больше ровно на
+    // столько, на сколько его отметка обогнала прежнюю.
+    //
+    // Разница между этими двумя и есть дрожание. Прежде она выпадала рывком:
+    // отставание при всяком приходе ставилось равным оценке, а показываемое
+    // мгновение прыгало на эту разницу.
+    const float kept = lag_ - elapsed + std::chrono::duration<float>{sentGap}.count();
+
+    const float off = wanted - kept;
+
+    if (std::abs(off) > kMaxDrift) {
+        // Это уже не дрожание, а перерыв: подтягивать такое по десятой доле
+        // значило бы показывать вчерашний день ещё две секунды.
+        lag_ = wanted;
+        return;
+    }
+
+    // Подтягивание со связанной скоростью: за elapsed часы вправе уйти не
+    // больше чем на kMaxSlew этого времени. Отсюда и берётся вся ровность —
+    // расхождение растворяется в скорости показа, а не выпадает рывком.
+    const float step = kMaxSlew * elapsed;
+
+    lag_ = kept + std::clamp(off, -step, step);
+}
+
 void DelayEstimator::notice(std::chrono::milliseconds span,
                             std::chrono::nanoseconds gap) noexcept {
     const float sent = std::chrono::duration<float>{span}.count();
