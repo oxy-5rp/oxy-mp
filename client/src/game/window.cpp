@@ -3,7 +3,10 @@
 #include <spdlog/spdlog.h>
 
 #include <array>
+#include <atomic>
 #include <cwchar>
+#include <thread>
+#include <utility>
 
 namespace oxymp::client::game {
 namespace {
@@ -17,8 +20,21 @@ constexpr int kIconId = 1;
 /// раза. Заголовок окна не стоит ни одного пропущенного кадра игры.
 constexpr UINT kMessageTimeout = 200;
 
-/// Как часто вообще трогать окно.
+/// Как часто трогать уже названное окно.
 constexpr auto kApplyInterval = std::chrono::seconds{1};
+
+/// Как часто искать окно, которое ещё не названо.
+///
+/// Окно игра создаёт не в первое мгновение, а клиент внедряется раньше него.
+/// Секундный шаг здесь означал бы до секунды с рокстаровским именем и значком в
+/// панели задач — то самое, что видно как «скин встаёт не сразу».
+constexpr auto kSearchInterval = std::chrono::milliseconds{100};
+
+/// Сколько ждать окна, прежде чем жаловаться на его отсутствие.
+///
+/// Полминуты: столько игра идёт от запуска до первого своего кадра, и всё это
+/// время окна может не быть по совершенно законной причине.
+constexpr auto kSearchPatience = std::chrono::seconds{30};
 
 /// Класс главного окна GTA V.
 ///
@@ -104,12 +120,10 @@ HWND Window::findOwnWindow() noexcept {
 }
 
 Window::Window() noexcept {
+    // Окна может не быть вовсе, и это не беда: клиент внедряется раньше, чем
+    // игра его создаёт. Жалоба на пропажу живёт в apply и уходит лишь тогда,
+    // когда ожидание затянулось.
     window_ = findOwnWindow();
-
-    if (window_ == nullptr) {
-        spdlog::warn("the game window was not found: title and icon will stay Rockstar's");
-        return;
-    }
 
     // LoadImage, а не LoadIcon: последний отдаёт значок системного размера, и
     // крупный вариант для панели задач пришлось бы догружать отдельно. Нулевые
@@ -128,13 +142,16 @@ Window::Window() noexcept {
     if (icon_ == nullptr) {
         spdlog::warn("the icon was not found in the module resources: the window keeps Rockstar's");
     }
-
-    spdlog::debug("окно игры найдено: {}", static_cast<const void*>(window_));
 }
 
 void Window::apply(const std::string& title) {
     const auto now = std::chrono::steady_clock::now();
-    if (appliedAt_ != std::chrono::steady_clock::time_point{} && now - appliedAt_ < kApplyInterval) {
+    const auto interval = named_ ? std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                       kApplyInterval)
+                                 : std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                       kSearchInterval);
+
+    if (appliedAt_ != std::chrono::steady_clock::time_point{} && now - appliedAt_ < interval) {
         return;
     }
     appliedAt_ = now;
@@ -146,17 +163,28 @@ void Window::apply(const std::string& title) {
         applied_.clear();
         iconApplied_ = false;
 
+        // Окно у игры новое — значит и названо оно снова её именем, и искать
+        // его до тех пор нужно часто.
+        named_ = false;
+
         if (window_ == nullptr) {
-            // Жаловаться по разу, а не каждую секунду: окна может не быть
-            // считаные мгновения, пока игра его пересоздаёт, и превращать это в
-            // поток жалоб незачем.
-            if (!lostReported_) {
+            // Жалоба по сроку, а не по первой же пропаже, и по разу, а не
+            // каждую проверку. Окна нет в двух совсем разных случаях: в первые
+            // секунды запуска, когда игра его ещё не создала, и в те мгновения,
+            // когда она его пересоздаёт, входя в мир. Оба нормальны, и жаловаться
+            // на них значило бы завести в журнале пугало, за которым ничего нет.
+            if (missingSince_ == std::chrono::steady_clock::time_point{}) {
+                missingSince_ = now;
+            }
+
+            if (!lostReported_ && now - missingSince_ >= kSearchPatience) {
                 lostReported_ = true;
                 spdlog::warn("the game window was not found: title and icon cannot be set yet");
             }
             return;
         }
 
+        missingSince_ = {};
         lostReported_ = false;
         spdlog::debug("окно игры найдено заново: {}", static_cast<const void*>(window_));
     }
@@ -204,6 +232,56 @@ void Window::apply(const std::string& title) {
         iconApplied_ = true;
         spdlog::debug("значок окна игры заменён");
     }
+
+    // Названо. Дальше сверяться раз в секунду довольно: игра переписывает
+    // заголовок считаное число раз за запуск, и лишней секунды с её именем на
+    // таком переходе никто не заметит — в отличие от первой, самой видной.
+    named_ = true;
+}
+
+WindowName::~WindowName() = default;
+
+/// Что видит поток, держащий имя окна.
+struct WindowName::State {
+    /// Имя объявлено до потока: поток читает его, и переживать его оно обязано.
+    std::string title;
+
+    std::atomic<bool> stop{false};
+    std::thread worker;
+
+    ~State() {
+        stop.store(true, std::memory_order_relaxed);
+
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+};
+
+std::unique_ptr<WindowName> WindowName::hold(std::string title) {
+    std::unique_ptr<WindowName> owner{new WindowName};
+
+    owner->state_ = std::make_unique<State>();
+    owner->state_->title = std::move(title);
+
+    State* const state = owner->state_.get();
+
+    state->worker = std::thread{[state] {
+        // Окно заводится здесь, а не снаружи: искать его вправе только тот, кто
+        // с ним и работает, а работает с ним один этот поток.
+        Window window;
+
+        while (!state->stop.load(std::memory_order_relaxed)) {
+            window.apply(state->title);
+
+            // Шаг сна короче любого из шагов самой Window: она сама решает,
+            // трогать окно или пропустить, а нам довольно не проспать
+            // мгновение, когда окно появится.
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        }
+    }};
+
+    return owner;
 }
 
 } // namespace oxymp::client::game

@@ -1088,6 +1088,16 @@ void run() {
     // следующей строки.
     game::reportEnvironment();
 
+    // Имя и значок окна — сразу за журналом и раньше всего остального.
+    //
+    // Раньше это делал сетевой цикл, а он начинается после опознания движка,
+    // постановки перехватов и подъёма Chromium — то есть спустя десятки секунд.
+    // Всё это время в панели задач висела «Grand Theft Auto V» с логотипом
+    // Rockstar, и только потом появлялось наше. Здесь же ждать нечего: свой
+    // поток дремлет, пока окна нет, и называет его в то самое мгновение, когда
+    // игра его создаёт.
+    const std::unique_ptr<game::WindowName> windowName = game::WindowName::hold(kWindowTitle);
+
     const Startup startup = readSettings();
     const Connection::Settings& settings = startup.connection;
 
@@ -1545,12 +1555,6 @@ void run() {
     // ждать чужой процесс, а Discord может быть закрыт или не установлен вовсе.
     DiscordPresence discord{kDiscordClientId};
 
-    // Заголовок и значок окна ведёт этот же поток, а не игровой, и это не
-    // вкусовщина. Окно принадлежит потоку игры, а обращение к чужому окну ждёт
-    // его хозяина; сделай это из кадра игры — и ожидание станет взаимным.
-    // Проверено: игра замирала сразу после ухода экрана загрузки.
-    game::Window window;
-
     // Меню, если оно поднялось. Без него клиент работает по-прежнему — просто
     // рассказывать о ходе подключения будет некому.
     Menu* const menu = ui != nullptr ? ui->menu() : nullptr;
@@ -1563,11 +1567,6 @@ void run() {
     MenuProgress menuProgress;
 
     while (!g_stopRequested.load()) {
-        // Заголовок окна выправляется на каждом обороте, а не только при живом
-        // соединении: окно игра пересоздаёт на переходах, и до появления игрока
-        // в мире это случается не раз.
-        window.apply(kWindowTitle);
-
         // Просьба выйти разбирается прежде всех прочих: отвечать на них уже
         // некому. Прощание — то самое, ради чего просьба сюда и шла: сервер
         // узнаёт об уходе от игрока, а не по молчанию, и остальные видят его
@@ -1947,6 +1946,9 @@ void run() {
         for (const shared::DamageReport& report : mail.takeOutgoingDamage()) {
             connection->reportDamage(report.victim, report.amount, report.weapon);
         }
+        for (const shared::VehicleDamageReport& hit : mail.takeOutgoingVehicleDamage()) {
+            connection->reportVehicleDamage(hit.vehicle, hit.harm, hit.weapon);
+        }
         for (shared::ClientEvent& event : mail.takeOutgoingEvents()) {
             connection->emit(std::move(event.name), std::move(event.payload));
         }
@@ -1964,6 +1966,7 @@ void run() {
         mail.deliverTeleports(connection->takeTeleports());
         mail.deliverVehicleTeleports(connection->takeVehicleTeleports());
         mail.deliverVehicleRepairs(connection->takeVehicleRepairs());
+        mail.deliverVehicleDamage(connection->takeVehicleDamage());
         mail.deliverBlips(connection->takeBlips());
         mail.deliverRemovedBlips(connection->takeRemovedBlips());
         mail.deliverAnimations(connection->takeAnimations());
