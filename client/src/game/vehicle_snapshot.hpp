@@ -138,6 +138,8 @@ private:
     NativeHandler raiseRoof_ = nullptr;
     NativeHandler lowerRoof_ = nullptr;
     NativeHandler convertible_ = nullptr;
+    NativeHandler fix_ = nullptr;
+    NativeHandler fixDeformation_ = nullptr;
     NativeHandler landingGear_ = nullptr;
     NativeHandler setLandingGear_ = nullptr;
     NativeHandler hasLandingGear_ = nullptr;

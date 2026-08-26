@@ -177,6 +177,8 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       raiseRoof_(table.handlerFor(natives::kRaiseConvertibleRoof)),
       lowerRoof_(table.handlerFor(natives::kLowerConvertibleRoof)),
       convertible_(table.handlerFor(natives::kIsVehicleAConvertible)),
+      fix_(table.handlerFor(natives::kSetVehicleFixed)),
+      fixDeformation_(table.handlerFor(natives::kSetVehicleDeformationFixed)),
       landingGear_(table.handlerFor(natives::kGetLandingGearState)),
       setLandingGear_(table.handlerFor(natives::kControlLandingGear)),
       hasLandingGear_(table.handlerFor(natives::kVehicleHasLandingGear)),
@@ -753,6 +755,29 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
         // так же и здесь.
         invokeNative<void>(explode_, vehicle, true, false);
         return;
+    }
+
+    // Обратный переход — и он такой же обязательный. Разбитую машину поставленные
+    // прочности не поднимают: обгорелый остов так и остаётся остовом, сколько ему
+    // ни задавай тысячу. Просьба о починке уходит с сервера одному ведущему, и
+    // до сих пор все остальные смотрели на сгоревшую машину, пока хозяин ездил на
+    // целой. А у брошенной машины ведущего нет вовсе — её не чинил никто.
+    if (!shared::has(state.flags, shared::VehicleFlag::Destroyed) &&
+        shared::has(previous.flags, shared::VehicleFlag::Destroyed) && fix_ != nullptr) {
+        invokeNative<void>(fix_, vehicle);
+
+        // Вмятины — отдельным вызовом: сам fix возвращает прочности и стёкла, но
+        // смятое крыло оставляет как было.
+        if (fixDeformation_ != nullptr) {
+            invokeNative<void>(fixDeformation_, vehicle);
+        }
+
+        // И неуязвимость обратно: перед взрывом мы её сняли, а починенная машина
+        // снова чужая. Оставленная снятой, она взорвалась бы здесь от первого же
+        // взрыва по соседству — и осталась бы целой у того, кто в ней едет.
+        if (invincible_ != nullptr) {
+            invokeNative<void>(invincible_, vehicle, true);
+        }
     }
 
     // Гудок — не на изменение, а пока признак стоит, и это не оплошность.

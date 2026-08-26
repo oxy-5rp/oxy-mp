@@ -79,6 +79,7 @@ TEST_CASE("repairing a vehicle marks it for the next broadcast", "[server][vehic
     CHECK(fixed->state.tyresBurst == 0);
 }
 
+
 TEST_CASE("vehicle numbers are issued by the server and never repeat", "[vehicles]") {
     VehicleDirectory directory;
 
@@ -317,4 +318,24 @@ TEST_CASE("a vehicle that is gone has no appearance to set", "[vehicles]") {
     REQUIRE(directory.remove(id));
 
     CHECK_FALSE(directory.setAppearance(id, {}));
+}
+
+TEST_CASE("a repaired vehicle stops calling itself wrecked", "[server][vehicles]") {
+    // Прочности без признака — починка наполовину. Вошедший позже получил бы
+    // машину разбитой и взорвал бы её у себя сразу, а тем, кто уже смотрит, она
+    // осталась бы остовом: чинят они её по переходу из разбитой в целую, и без
+    // снятого признака перехода не случается вовсе.
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 0, 0.0F);
+
+    shared::VehicleState wrecked = directory.find(id)->state;
+    wrecked.bodyHealth = 0;
+    wrecked.flags = static_cast<std::uint16_t>(shared::VehicleFlag::Destroyed);
+    REQUIRE(directory.applyState(0, wrecked));
+
+    REQUIRE(shared::has(directory.find(id)->state.flags, shared::VehicleFlag::Destroyed));
+
+    REQUIRE(directory.repair(id));
+
+    CHECK_FALSE(shared::has(directory.find(id)->state.flags, shared::VehicleFlag::Destroyed));
 }

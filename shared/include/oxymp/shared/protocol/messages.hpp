@@ -628,6 +628,10 @@ enum class VehicleFlag : std::uint16_t {
     return (flags & static_cast<std::uint16_t>(flag)) != 0;
 }
 
+[[nodiscard]] constexpr std::uint16_t without(std::uint16_t flags, VehicleFlag flag) noexcept {
+    return static_cast<std::uint16_t>(flags & ~static_cast<std::uint16_t>(flag));
+}
+
 /// Стороны, с которых у машины горит неон.
 enum class NeonSide : std::uint8_t {
     Left = 1U << 0U,
