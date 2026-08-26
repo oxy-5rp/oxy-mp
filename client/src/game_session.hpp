@@ -437,6 +437,12 @@ private:
     /// журнале была бы строка на каждую порцию, а их у чужой карты полсотни.
     std::size_t servedFiles_ = 0;
     std::size_t servedDescriptions_ = 0;
+
+    /// Сколько отказов игры уже названо в журнале.
+    ///
+    /// Счёт у StreamingFiles сплошной, а строк отчёта бывает несколько: без
+    /// этой отметки вторая строка повторила бы отказы первой.
+    std::size_t reportedRefusals_ = 0;
     game::Controls controls_;
     game::OnlineMap onlineMap_;
     game::Appearance appearance_;

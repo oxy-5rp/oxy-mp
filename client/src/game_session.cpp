@@ -186,6 +186,14 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
         [&mail = mail_](shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon) {
             mail.postDamage(victim, amount, weapon);
         });
+
+    // Попадания по чужим машинам — той же почтой и по той же причине: замечает
+    // их игровой поток, а отправляет сетевой.
+    vehicles_.reportDamageTo([&mail = mail_](shared::VehicleId vehicle,
+                                             const shared::VehicleHarm& harm,
+                                             std::uint32_t weapon) {
+        mail.postVehicleDamage(vehicle, harm, weapon);
+    });
 }
 
 std::unique_ptr<GameSession> GameSession::create(const game::EngineAddresses& addresses,
@@ -368,8 +376,14 @@ void GameSession::serveFiles() {
     // Объявление стримингу — строго следом, и порядок этот обязателен:
     // объявляемый файл игра тут же открывает, чтобы узнать его размер и
     // раскладку страниц, а открыть его она может только через наше устройство.
+    //
+    // Пока игрок не в мире, объявление идёт крупной порцией: спешить приходится
+    // наперегонки с самой игрой — она грузит мир и вправе завести свой файл под
+    // тем же именем раньше нас, а на занятое имя отвечает отказом. Подробности
+    // у kLoadingBudget.
     watch_.mark("offering files to streaming");
-    const std::size_t streamed = streamed_ != nullptr ? streamed_->pump() : 0;
+    const std::size_t streamed =
+        streamed_ != nullptr ? streamed_->pump(stage_ == Stage::Playing) : 0;
 
     // Описания — последними, и порядок снова обязателен: описание машины
     // ссылается на её модель по имени, а имя к этому времени должно быть уже
@@ -423,8 +437,22 @@ void GameSession::serveFiles() {
     servedDescriptions_ += described;
 
     if (streamed == 0 && described == 0 && (servedFiles_ != 0 || servedDescriptions_ != 0)) {
-        spdlog::info("Custom content: {} files, {} descriptions", servedFiles_,
-                     servedDescriptions_);
+        // Отказы называются здесь же, и это не украшение строки. Прежде в ней
+        // стояли одни принятые файлы, и хозяин сервера, прочитав «Custom
+        // content: 3303 files», не имел ни единого повода заподозрить, что
+        // десяти моделей из его карты в игре нет вовсе.
+        const std::size_t total = streamed_ != nullptr ? streamed_->refused() : 0;
+        const std::size_t refused = total - reportedRefusals_;
+
+        reportedRefusals_ = total;
+
+        if (refused == 0) {
+            spdlog::info("Custom content: {} files, {} descriptions", servedFiles_,
+                         servedDescriptions_);
+        } else {
+            spdlog::warn("Custom content: {} files, {} descriptions, {} files the game refused",
+                         servedFiles_, servedDescriptions_, refused);
+        }
 
         servedFiles_ = 0;
         servedDescriptions_ = 0;
@@ -895,6 +923,14 @@ void GameSession::forgetSessionOnLeaving() {
     // следующего.
     peds_.clear();
 
+    // И память о том, как выглядят чужие игроки. Сами куклы убираются сами —
+    // список игроков опустел, а он им и мерило, — но одежда, модель и сборка
+    // оружия помнятся отдельно и переживают разрыв. Ключ у этой памяти — номер
+    // игрока, а номера выдаёт сервер: на следующем сервере под номером три
+    // будет уже другой человек, и до своего объявления внешности он вышел бы в
+    // мир одетым в чужое и с чужим телом.
+    remotePlayers_.clear();
+
     // Клиентские половины ресурсов останавливаются здесь же, и это не уборка
     // ради опрятности. Движок отказывается поднимать ресурс, чьё имя уже
     // занято, — а занято оно тем, что подняли в прошлой сессии. Оставленные
@@ -933,23 +969,38 @@ void GameSession::applyAnimations(int ped) {
     const Clock::time_point now = Clock::now();
 
     std::erase_if(pendingAnimations_, [&](const PendingAnimation& pending) {
-        // Своё движение играет собственный персонаж, чужое — кукла. Куклы может
-        // не быть вовсе: игрок далеко или его модель ещё грузится.
-        const int target = pending.animation.playerId == self && self != shared::kInvalidPlayerId
-                               ? ped
-                               : remotePlayers_.handleFor(pending.animation.playerId);
+        // Своё движение играет собственный персонаж, чужое — кукла, и дороги у
+        // них разные не для порядка.
+        //
+        // Своим персонажем не распоряжается никто, кроме игры и нас: выданное
+        // ему движение идёт, пока не кончится. Куклу же мы ведём сами — задачей
+        // ходьбы, прицелом, поворотом, — и всё это отменило бы движение в тот же
+        // кадр. Поэтому чужое движение заводится через RemotePlayers: тот, кто
+        // выдаёт задачи, обязан знать, что сейчас идёт движение сервера.
+        const bool own =
+            pending.animation.playerId == self && self != shared::kInvalidPlayerId;
 
-        if (target != 0) {
-            // Пустой набор означает «снять задачи»: у alt:V это отдельный вызов
-            // clearTasks, а по сети — то же самое распоряжение.
-            if (pending.animation.dictionary.empty()) {
-                pedAnimation_.clearTasks(target);
+        // Пустой набор означает «снять задачи»: у alt:V это отдельный вызов
+        // clearTasks, а по сети — то же самое распоряжение.
+        const bool clearing = pending.animation.dictionary.empty();
+
+        if (own) {
+            if (ped != 0) {
+                if (clearing) {
+                    pedAnimation_.clearTasks(ped);
+                    return true;
+                }
+
+                if (pedAnimation_.playNamed(ped, pending.animation)) {
+                    return true;
+                }
+            }
+        } else if (clearing) {
+            if (remotePlayers_.stopAnimating(pending.animation.playerId)) {
                 return true;
             }
-
-            if (pedAnimation_.playNamed(target, pending.animation)) {
-                return true;
-            }
+        } else if (remotePlayers_.animate(pending.animation.playerId, pending.animation)) {
+            return true;
         }
 
         return now - pending.since >= kAnimationPatience;
@@ -1683,6 +1734,13 @@ void GameSession::applyServerState(int ped) {
         player_.applyLoadout(ped, loadout->weapons, loadout->replace);
     }
 
+    // Попадания по машинам, которые ведём мы. Отнимает прочность ведущий, и
+    // только он: у остальных эта машина — кукла, и её прочность им расскажет
+    // наш же следующий снимок.
+    for (const shared::VehicleDamaged& hit : mail_.takeIncomingVehicleDamage()) {
+        vehicles_.harm(hit.vehicle, hit.harm);
+    }
+
     // Предметы: сперва появившиеся, потом пропавшие. Порядок здесь не важен —
     // они друг с другом не связаны никак, — но пропавшие идут вторыми, чтобы
     // предмет, объявленный и убранный в одном пакете, не остался в мире.
@@ -1816,7 +1874,7 @@ void GameSession::showRemotePlayers(int ped) {
     // Список полный, включая машины, которые ведём мы: сервер знает обо всех, и
     // отличить свои от чужих можно по ведущему. Раньше свою приходилось называть
     // отдельно — её не присылали, и без напоминания её сочли бы пропавшей.
-    vehicles_.sync(vehicles, status_.snapshot().playerId);
+    vehicles_.sync(vehicles, status_.snapshot().playerId, ped);
 
     const std::vector<RemoteView> players = roster_.snapshot();
 

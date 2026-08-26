@@ -24,6 +24,24 @@ namespace {
 /// целиком.
 constexpr auto kFrameBudget = std::chrono::milliseconds{4};
 
+/// Порция, пока игрок не в мире.
+///
+/// Вдесятеро больше обычной, и это не небрежность, а исправление по журналу.
+/// Порция в четыре миллисекунды хороша в игре и губительна на загрузке: там
+/// кадры идут по сотне-другой миллисекунд, и объявление трёх тысяч файлов чужой
+/// карты растягивалось на **тридцать девять секунд**. Всё это время игра
+/// грузила мир сама — и к нашему файлу успевала завести свой с тем же именем.
+/// Дальше она отвечала отказом, и модель молча не появлялась.
+///
+/// Отказы эти и были «через раз»: в быстрых заходах объявление укладывалось в
+/// секунду и не терялось ни одного файла, в медленных терялся десяток. Разница
+/// между заходами — только в том, насколько игре хватало кадров.
+///
+/// Полсотни миллисекунд — предел, за которым перестаёт шевелиться наш экран
+/// загрузки: он рисуется тем же кадром, и двадцати в секунду ему довольно.
+/// Игрока за ним всё равно нет — он ещё не в мире, и подвисать нечему.
+constexpr auto kLoadingBudget = std::chrono::milliseconds{50};
+
 } // namespace
 
 std::unique_ptr<StreamingFiles> StreamingFiles::create(const EngineAddresses& addresses,
@@ -51,7 +69,7 @@ void StreamingFiles::add(std::string path, std::string name) {
     pending_.push_back(Wanted{.path = std::move(path), .name = std::move(name)});
 }
 
-std::size_t StreamingFiles::pump() {
+std::size_t StreamingFiles::pump(bool playerInWorld) {
     if (register_ == nullptr) {
         return 0;
     }
@@ -66,6 +84,7 @@ std::size_t StreamingFiles::pump() {
     std::size_t taken = 0;
     std::size_t done = 0;
 
+    const auto budget = playerInWorld ? kFrameBudget : kLoadingBudget;
     const auto started = std::chrono::steady_clock::now();
 
     for (const Wanted& file : batch) {
@@ -78,7 +97,16 @@ std::size_t StreamingFiles::pump() {
         ++done;
 
         if (slot == kNoSlot) {
-            spdlog::warn("the game did not take file {} under the name {}", file.path, file.name);
+            ++refused_;
+
+            // Отказ у этого вызова один и тот же на все причины, и разобрать
+            // его нечем. Но причина у него по опыту одна: имя уже занято — либо
+            // файлом самой игры, либо тем, что она успела завести, пока мы
+            // объявляли. Поэтому в строке названо и имя, и путь: по имени видно,
+            // с чем оно столкнулось, по пути — чей файл потерялся.
+            spdlog::warn("the game did not take file {} under the name {}: the name is most likely "
+                         "taken by the game's own asset",
+                         file.path, file.name);
         } else {
             ++taken;
 
@@ -88,7 +116,7 @@ std::size_t StreamingFiles::pump() {
 
         // Хотя бы один файл за кадр объявляется всегда, даже если срок вышел
         // ещё до начала: иначе очередь не тронулась бы с места на слабой машине.
-        if (std::chrono::steady_clock::now() - started >= kFrameBudget) {
+        if (std::chrono::steady_clock::now() - started >= budget) {
             break;
         }
     }
@@ -103,6 +131,11 @@ std::size_t StreamingFiles::pump() {
     }
 
     return taken;
+}
+
+std::size_t StreamingFiles::refused() const noexcept {
+    const std::lock_guard guard{mutex_};
+    return refused_;
 }
 
 } // namespace oxymp::client::game
