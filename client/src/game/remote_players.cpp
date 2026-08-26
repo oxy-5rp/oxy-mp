@@ -1,5 +1,7 @@
 #include "remote_players.hpp"
 
+#include "puppet_duty.hpp"
+
 #include "native_call.hpp"
 #include "native_hashes.hpp"
 
@@ -26,6 +28,14 @@ constexpr std::uint32_t kRemoteModelHash = 0x705E61F2;
 
 /// Тип персонажа для CREATE_PED. Четвёрка — обычный горожанин.
 constexpr int kCivilianType = 4;
+
+/// Сколько ждать загрузки модели, прежде чем показать носителя заготовкой, в
+/// миллисекундах.
+///
+/// Десять секунд — заведомо больше всякой честной загрузки и заведомо меньше
+/// того, что человек примет за «его тут просто нет». Ждать дольше незачем:
+/// модель, не приехавшая за десять секунд, не приедет вовсе.
+constexpr std::int32_t kModelPatience = 10000;
 
 /// Дальность, с которой персонаж остаётся видимым, в метрах.
 ///
@@ -123,6 +133,63 @@ constexpr int kRagdollDuration = 4000;
 /// Вид рэгдолла. Ноль — обычный, тело падает под собственным весом.
 constexpr int kRagdollKind = 0;
 
+/// Сколько тело поднимается само, прежде чем его поставят на ноги рывком, в
+/// миллисекундах.
+///
+/// Две с половиной секунды — заведомо дольше любого подъёма, какие игра
+/// отыгрывает, и заведомо короче четырёх секунд обмякания, заказанных кукле.
+/// Смысл срока в этом и есть: подъём отдаётся игре, а вот лежание сверх него —
+/// нет.
+constexpr std::int32_t kRisePatience = 2500;
+
+/// Как часто пытаться поднять куклу, которую игра считает мёртвой, а хозяин
+/// живым, в миллисекундах.
+///
+/// Срок здесь потому, что подъём может не удаться, и удаваться он может не
+/// начать никогда. Игра считает персонажа мёртвым не по нулю, а по своему
+/// порогу — и если присланное здоровье ниже него, поднятая кукла ложится
+/// обратно в тот же кадр. Без срока это оборачивалось вечной каруселью:
+/// RESURRECT_PED, здоровье, зачистка задач — шестьдесят раз в секунду, по
+/// пятьдесят шесть тысяч подъёмов за сессию (видно в журналах построчно).
+///
+/// Секунда выбрана так, чтобы удавшийся подъём не заметил задержки вовсе — он
+/// случается с первой попытки, — а неудавшийся перестал быть нагрузкой.
+constexpr std::int32_t kRaiseInterval = 1000;
+
+/// Насколько обмякшему телу разрешено разойтись со снимком, в метрах.
+///
+/// Много больше обычного порога, и это не послабление, а единственный способ
+/// не испортить падение. Обмякшее тело ведёт физика: оно катится по склону,
+/// отскакивает от машины, обвисает на перилах — и у хозяина делает то же самое,
+/// но не в точности так же. Подводить его к снимку понемногу нельзя вовсе, а
+/// рывок нужен лишь тогда, когда тело осталось совсем не там, где хозяин.
+constexpr float kRagdollSnapDistance = 8.0F;
+
+/// Ближе какого угла доворот считается законченным, в градусах.
+constexpr float kSettledAngle = 2.0F;
+
+/// Дальше какого угла доворот не отыгрывается, а ставится рывком, в градусах.
+///
+/// Сорок пять градусов — это уже не «чуть не довернулся», а «стоит лицом не
+/// туда»: доворачивать столько ногами дольше, чем человек успевает заметить
+/// ложь.
+constexpr float kSnapAngle = 45.0F;
+
+/// Через сколько проверяется, идёт ли доворот вообще, в миллисекундах.
+///
+/// Страховка, а не срок на поворот. Желаемое направление персонаж отрабатывает
+/// сам — поворотом на месте, ногами, — но занятый чем-нибудь своим не
+/// отрабатывает вовсе, и без этой проверки он остался бы стоять лицом не туда
+/// навсегда. Ровно эта беда здесь уже была, и вернуть её нельзя.
+constexpr std::int32_t kTurnPatience = 400;
+
+/// Какую долю расхождения доворот обязан съесть за этот срок.
+///
+/// Проверяется именно доля, а не время: долгий поворот — дело обычное, а вот
+/// нетронутое расхождение означает, что поворота нет вовсе. Съел четверть —
+/// значит идёт, и ему дают следующий срок; не съел — угол ставится рывком.
+constexpr float kTurnProgress = 0.75F;
+
 /// Сколько живёт задача прицела или выстрела, в миллисекундах.
 ///
 /// Короткая намеренно: прицел и стрельба кончаются в тот же миг, что и у
@@ -135,6 +202,15 @@ constexpr std::uint32_t kFiringPatternFullAuto = 0xC6EE6B4CU;
 
 /// Признак немедленного выхода из машины: без открывания двери и без анимации.
 constexpr int kWarpOutOfVehicle = 16;
+
+/// Признак обычного выхода: открыть дверь, вылезти, закрыть за собой.
+constexpr int kNormalExit = 0;
+
+/// Сколько отводится задаче выхода, в миллисекундах.
+///
+/// Тот же смысл, что и у срока посадки: не уложилась — высаживаем рывком.
+/// Полторы секунды длится сам выход, три — с запасом на заклинившую дверь.
+constexpr std::int32_t kExitPatience = 3000;
 
 /// Признак обычного входа в машину: подойти, открыть дверь, сесть.
 ///
@@ -151,6 +227,19 @@ constexpr float kRunToVehicle = 2.0F;
 /// этому времени уже едет, и оставить его персонажа снаружи хуже, чем показать
 /// некрасивую посадку.
 constexpr std::int32_t kEntryPatience = 3000;
+
+/// Как часто пересаживать куклу рывком, в миллисекундах.
+///
+/// Пересадка мгновенна: удалась — и следующий же кадр видит персонажа на месте.
+/// А вот не удаться она может насовсем — например когда место названо неверно и
+/// игра отказывается двигать туда того, кто уже сидит в этой машине. Без срока
+/// это оборачивалось SET_PED_INTO_VEHICLE каждый кадр до конца сессии: в
+/// журналах таких пересадок по тридцать тысяч.
+///
+/// Полсекунды: удавшаяся пересадка срока не замечает вовсе, а неудавшаяся
+/// перестаёт быть нагрузкой.
+constexpr std::int32_t kSeatInterval = 500;
+
 
 /// Признаки задачи «иди туда, целясь вон туда»: не стрелять на ходу, не искать
 /// дорогу вокруг препятствий и не сводить прицел мгновенно.
@@ -231,6 +320,18 @@ constexpr int kNoBulletDamage = 0;
 /// сервером и сверен с игрой разряд в разряд.
 constexpr std::uint32_t kThrownGroup = shared::joaat("group_thrown");
 
+/// Сколько движению, названному сервером, даётся на то, чтобы начаться, в
+/// миллисекундах.
+///
+/// Задача начинается в ближайшем обновлении персонажа, а не в кадре выдачи, и
+/// всё это время игра честно отвечает, что такого движения она не играет. Треть
+/// секунды — с запасом на низкую частоту кадров и заведомо меньше всякого
+/// осмысленного движения.
+constexpr std::int32_t kScriptedGrace = 300;
+
+/// Довод IS_ENTITY_PLAYING_ANIM, которым его зовут скрипты самой игры.
+constexpr int kPlayingAnimTaskFlag = 3;
+
 /// Сколько кукла ждёт присланного выстрела, прежде чем начать стрелять сама.
 ///
 /// Полсекунды — заметно больше промежутка между выстрелами любого автомата и
@@ -247,6 +348,19 @@ bool aiming(const shared::PlayerState& state) {
            shared::has(state.flags, shared::PlayerFlag::Shooting);
 }
 
+/// Кратчайший угол между двумя направлениями, в градусах. Всегда неотрицателен.
+float angleBetween(float from, float to) {
+    float difference = std::fmod(to - from, 360.0F);
+
+    if (difference < -180.0F) {
+        difference += 360.0F;
+    } else if (difference > 180.0F) {
+        difference -= 360.0F;
+    }
+
+    return std::abs(difference);
+}
+
 } // namespace
 
 RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles) noexcept
@@ -256,11 +370,15 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       hashKey_(table.handlerFor(natives::kGetHashKey)),
       requestModel_(table.handlerFor(natives::kRequestModel)),
       hasModelLoaded_(table.handlerFor(natives::kHasModelLoaded)),
+      modelInCdimage_(table.handlerFor(natives::kIsModelInCdimage)),
+      releaseModel_(table.handlerFor(natives::kSetModelAsNoLongerNeeded)),
+      selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)),
       createPed_(table.handlerFor(natives::kCreatePed)),
       deletePed_(table.handlerFor(natives::kDeletePed)),
       doesExist_(table.handlerFor(natives::kDoesEntityExist)),
       setCoords_(table.handlerFor(natives::kSetEntityCoordsNoOffset)),
       setHeading_(table.handlerFor(natives::kSetEntityHeading)),
+      getHeading_(table.handlerFor(natives::kGetEntityHeading)),
       desiredHeading_(table.handlerFor(natives::kSetPedDesiredHeading)),
       defaultVariation_(table.handlerFor(natives::kSetPedDefaultComponentVariation)),
       blockEvents_(table.handlerFor(natives::kSetBlockingOfNonTemporaryEvents)),
@@ -278,6 +396,7 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       getHealth_(table.handlerFor(natives::kGetEntityHealth)),
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
       setArmour_(table.handlerFor(natives::kSetPedArmour)),
+      getArmour_(table.handlerFor(natives::kGetPedArmour)),
       gameTimer_(table.handlerFor(natives::kGetGameTimer)),
       clearTasks_(table.handlerFor(natives::kClearPedTasksImmediately)),
       damagedBy_(table.handlerFor(natives::kHasEntityBeenDamagedByEntity)),
@@ -290,10 +409,13 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       taskShoot_(table.handlerFor(natives::kTaskShootAtCoord)),
       setRagdoll_(table.handlerFor(natives::kSetPedToRagdoll)),
       canRagdoll_(table.handlerFor(natives::kSetPedCanRagdoll)),
+      isRagdoll_(table.handlerFor(natives::kIsPedRagdoll)),
       setIntoVehicle_(table.handlerFor(natives::kSetPedIntoVehicle)),
       enterVehicle_(table.handlerFor(natives::kTaskEnterVehicle)),
       leaveVehicle_(table.handlerFor(natives::kTaskLeaveVehicle)),
       isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)),
+      pedInSeat_(table.handlerFor(natives::kGetPedInVehicleSeat)),
+      playingAnim_(table.handlerFor(natives::kIsEntityPlayingAnim)),
       giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
       setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
       shootBullet_(table.handlerFor(natives::kShootSingleBulletBetweenCoords)),
@@ -335,23 +457,82 @@ std::uint32_t RemotePlayers::model() {
     return model_;
 }
 
-int RemotePlayers::spawn(const RemotePlayerView& player) {
-    const std::uint32_t wanted = model();
+std::uint32_t RemotePlayers::wantedModel(shared::PlayerId player) {
+    const auto known = looks_.find(player);
+
+    if (known == looks_.end() || known->second.model == 0) {
+        // Сервер о модели ничего не сказал — показываем заготовкой. Ноль здесь
+        // законное значение, а не пропуск: у alt:V `player.model` нулём не
+        // бывает, у нас же ноль означает «не назначали».
+        return model();
+    }
+
+    // Модель, которой мы уже перестали ждать, — первой: этот ответ ничего не
+    // стоит, а спрашивают его каждый кадр у каждого её носителя.
+    //
+    // Так бывает с моделью, которая у игры числится, а грузиться всё равно
+    // отказывается: например, когда её файлы приехали от сервера битыми.
+    if (unloadable_.contains(known->second.model)) {
+        return model();
+    }
+
+    // Заказ несуществующей модели ждёт её вечно, и вечно ждущий игрок не
+    // появился бы в мире ни разу — молча. Поэтому спрашиваем игру, есть ли у
+    // неё такая вообще, и не найдя — показываем заготовкой: показать человека
+    // не тем, кем он есть, куда лучше, чем не показать вовсе.
+    if (modelInCdimage_ != nullptr &&
+        !invokeNative<bool>(modelInCdimage_, known->second.model)) {
+        return model();
+    }
+
+    return known->second.model;
+}
+
+RemotePlayers::Born RemotePlayers::spawn(const RemotePlayerView& player) {
+    const std::uint32_t wanted = wantedModel(player.id);
     if (wanted == 0) {
-        return 0;
+        return {};
     }
 
     invokeNative<void>(requestModel_, wanted);
+
     if (!invokeNative<bool>(hasModelLoaded_, wanted)) {
-        return 0;
+        // Ждём — но не бесконечно. Сколько ждём, считается от первого заказа
+        // этой модели, а не этого игрока: не грузится она, а не он.
+        if (gameTimer_ != nullptr && wanted != model()) {
+            const auto now = invokeNative<std::int32_t>(gameTimer_);
+            const auto [asked, added] = modelAskedAt_.try_emplace(wanted, now);
+
+            if (!added && now - asked->second >= kModelPatience) {
+                spdlog::warn("ped model {:#010x} does not load: players wearing it are shown "
+                             "with the freemode body instead",
+                             wanted);
+
+                unloadable_.insert(wanted);
+            }
+        }
+
+        return {};
     }
+
+    // Загрузилась — значит ждать её больше не нужно, и помнить о заказе тоже.
+    modelAskedAt_.erase(wanted);
 
     const int ped =
         invokeNative<int>(createPed_, kCivilianType, wanted, player.state.position.x,
                           player.state.position.y, player.state.position.z, player.state.heading,
                           false, false);
+
+    // Заказ снимается сразу за созданием: пока он стоит, игра держит модель в
+    // памяти, даже если персонажа этой модели не осталось ни одного. С одной
+    // заготовкой на всех это было безразлично, а моделей, назначенных сервером,
+    // бывает столько же, сколько игроков.
+    if (releaseModel_ != nullptr) {
+        invokeNative<void>(releaseModel_, wanted);
+    }
+
     if (ped == 0) {
-        return 0;
+        return {};
     }
 
     invokeNative<void>(defaultVariation_, ped, false);
@@ -384,8 +565,11 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
 
     invokeNative<void>(lodDistance_, ped, kLodDistance);
 
+    // Падать по своей воле кукла не должна: см. allowRagdoll. Здесь запрет
+    // ставится прямо, а не через него, — записи о кукле ещё нет, а игре сказать
+    // нужно до того, как её кто-нибудь заденет.
     if (canRagdoll_ != nullptr) {
-        invokeNative<void>(canRagdoll_, ped, true);
+        invokeNative<void>(canRagdoll_, ped, false);
     }
 
     // Одежда надевается сразу за созданием, а не следующим кадром: иначе игрок
@@ -395,8 +579,9 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
         appearance_.apply(ped, known->second);
     }
 
-    spdlog::debug("игрок {} ({}) показан персонажем {}", player.id, player.nickname, ped);
-    return ped;
+    spdlog::debug("игрок {} ({}) показан персонажем {} модели {:#010x}", player.id,
+                  player.nickname, ped, wanted);
+    return Born{.ped = ped, .model = wanted};
 }
 
 void RemotePlayers::fire(shared::PlayerId player, std::uint32_t weapon,
@@ -573,10 +758,12 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
         const auto known = puppets_.find(player.id);
 
         if (known == puppets_.end()) {
-            if (const int ped = spawn(player); ped != 0) {
+            if (const Born born = spawn(player); born.ped != 0) {
                 puppets_.emplace(player.id,
-                                 Puppet{.ped = ped,
+                                 Puppet{.ped = born.ped,
+                                        .model = born.model,
                                         .appliedHealth = player.state.health,
+                                        .appliedArmour = player.state.armour,
                                         .actionSequence = player.state.actionSequence});
             }
             continue;
@@ -592,73 +779,162 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
             continue;
         }
 
-        settleHealth(puppet, player, localPed);
+        // Сервер назначил игроку другую модель. Сменить её у готового
+        // персонажа нельзя — модель это и есть тело, — поэтому персонаж
+        // заводится заново, а одежда наденется на него при создании.
+        //
+        // Заведётся он следующим кадром, а не этим: модель может оказаться
+        // ещё не загруженной, и городить здесь второй заход незачем — список
+        // придёт снова через кадр.
+        //
+        // Объявленное сравнивается раньше разрешённого нарочно: разрешение
+        // спрашивает у игры, есть ли у неё такая модель, а это вызов натива на
+        // каждого показанного человека в каждом кадре. Совпало объявленное с
+        // тем, из чего кукла сделана, — спрашивать не о чем.
+        const auto dressed = looks_.find(player.id);
+        const std::uint32_t announced =
+            dressed != looks_.end() ? dressed->second.model : 0;
+
+        // Разрешённая модель спрашивается только при расхождении: сама проверка
+        // ходит к игре, а разошлось объявленное с телом — случай редкий.
+        const std::uint32_t wanted =
+            announced != 0 && announced != puppet.model ? wantedModel(player.id) : puppet.model;
+
+        if (wanted != puppet.model) {
+            spdlog::debug("player {} changed model from {:#010x} to {:#010x}, the ped is remade",
+                          player.id, puppet.model, wanted);
+
+            remove(puppet.ped);
+            puppets_.erase(known);
+            continue;
+        }
+
+        // Падать кукле разрешено только тогда, когда об этом сказал хозяин, —
+        // и решается это раньше всего прочего в кадре.
+        //
+        // Смерть здесь наравне с рэгдоллом, и это не запас: убитая кукла с
+        // запретом на падение осталась бы стоять столбом на месте собственной
+        // смерти. Разрешение выдаётся до settleHealth намеренно — именно она
+        // обнуляет здоровье, то есть убивает.
+        allowRagdoll(puppet, shared::has(player.state.flags, shared::PlayerFlag::Ragdoll) ||
+                                 shared::has(player.state.flags, shared::PlayerFlag::Dead));
+
+        settleHealth(puppet, player, localPed, now);
 
         // Мёртвый никуда не идёт и никуда не смотрит: он лежит там, где упал.
         // Ставить ему положение значило бы возить труп по земле.
         if (!shared::has(player.state.flags, shared::PlayerFlag::Dead)) {
             ride(puppet, player, now);
 
-            const bool riding = shared::has(player.state.flags, shared::PlayerFlag::InVehicle);
-            const bool entering =
-                shared::has(player.state.flags, shared::PlayerFlag::EnteringVehicle);
+            // Кто в этом кадре распоряжается телом, решает отдельный разбор
+            // без единого натива — его и проверить можно списком случаев (см.
+            // puppet_duty.hpp). Здесь остаётся только исполнить решённое.
+            //
+            // Два ответа из шести приходится добывать до него, и оба у игры:
+            // обмякло ли тело на самом деле и идёт ли движение сервера. Ни то
+            // ни другое из снимка хозяина не выводится.
+            const bool limp = settleRagdoll(puppet, player, now);
+
+            const PuppetDuty duty = dutyFor(PuppetSituation{
+                .flags = player.state.flags,
+                .verticalSpeed = player.state.velocity.z,
+                .limp = limp,
+                .scripted = !limp && scripted(puppet, now),
+                .leaving = puppet.leavingSince != 0,
+                .carried = shared::has(player.state.flags, shared::PlayerFlag::InVehicle) &&
+                           vehicles_.handleFor(player.state.vehicleId) != 0,
+            });
 
             // Поза задаётся раньше движения, и порядок здесь важен. Прыжок,
             // лазание и уход в укрытие — это задачи, а задача ходьбы, выданная
-            // следом, их отменяет. Поэтому сперва поза, а потом — движение, и
-            // только если поза его не отменила сама.
-            animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
+            // следом, их отменяет.
+            if (duty.posture) {
+                animation_.applyPosture(puppet.ped, player.state.flags, puppet.flags);
 
-            // Сидит ли он в машине, которая у нас есть. Разница существенная:
-            // машину везёт нас самих, и снимками её седока вести не нужно, — а
-            // вот седока машины, которой у нас ещё нет, вести приходится.
-            //
-            // Случай не выдуманный: модель машины грузится не мгновенно, и всё
-            // это время его персонаж стоял столбом посреди дороги, пока сама
-            // машина уезжала.
-            const bool carried =
-                riding && vehicles_.handleFor(player.state.vehicleId) != 0;
+                // Оружие вкладывается в руки там же, где разрешена поза, и по
+                // той же причине: это состояние, а не задача, и спорить ему не с
+                // чем. Обмякшему телу и занятому движением сервера — не
+                // вкладывается: выдача сбрасывает позу.
+                equip(puppet, player);
+            }
 
-            // Залезающим распоряжается задача входа: она ведёт его к двери сама,
-            // и вести его при этом ещё и снимками значит тянуть в две стороны.
-            if (!carried && !entering) {
-                // Занятый своим движением ведётся им, а не нами: задача ходьбы,
-                // выданная поверх прыжка, отменяет прыжок — то есть ровно то,
-                // ради чего он и заказан. Положение при этом всё равно
-                // подводится: тело обязано оказаться там, где хозяин.
-                //
-                // Сидящий в ненайденной машине — тот же случай: положение ему
-                // подводим, а походку и направление не трогаем. Ставить его на
-                // ноги и заставлять идти незачем — он едет.
-                const bool busy =
-                    riding || game::PedAnimation::busy(player.state.flags);
+            // Задачу ходьбы с падающего снимают на переходе и только на нём:
+            // оставленная, она заставляет персонажа перебирать ногами в воздухе.
+            if (duty.falling && !puppet.falling) {
+                animation_.clearTasks(puppet.ped);
+                puppet.taskedAt = 0;
+            }
 
-                walk(puppet, player, seconds, now, busy);
+            puppet.falling = duty.falling;
 
-                if (!busy) {
+            switch (duty.body) {
+            case PuppetBody::Physics:
+                // Телом распоряжается физика. Подводим его к снимку только
+                // тогда, когда оно уехало совсем далеко, — понемногу нельзя.
+                drift(puppet, player);
+                break;
+
+            case PuppetBody::Boarding:
+                // Ни положением, ни задачей: персонажа ведёт своя задача входа
+                // или выхода, а сидящего — машина.
+                break;
+
+            case PuppetBody::Scripted:
+                // Положение подводим — тело обязано оказаться там, где хозяин, —
+                // а задач не даём вовсе: всякая отменила бы движение сервера.
+                walk(puppet, player, seconds, now, true);
+                break;
+
+            case PuppetBody::Riding:
+                if (aiming(player.state)) {
+                    // Сидящий в машине показывает единственное, что может
+                    // показать: куда он целится из окна.
+                    animation_.applyDriveBy(puppet.ped, player.state.aimAt,
+                                            shared::has(player.state.flags,
+                                                        shared::PlayerFlag::Shooting) &&
+                                                ownFire(puppet));
+                } else {
+                    // А не целящийся — то же, что и пеший: куда смотрит. Без
+                    // этого водитель и пассажиры едут, уставившись строго перед
+                    // собой, как манекены.
+                    look(puppet, player, now);
+                }
+                break;
+
+            case PuppetBody::Ours:
+                walk(puppet, player, seconds, now, !duty.tasks);
+
+                if (duty.tasks) {
                     aim(puppet, player);
                     look(puppet, player, now);
                 }
-            } else if (carried && aiming(player.state)) {
-                // Сидящий в машине показывает единственное, что может показать:
-                // куда он целится из окна. Ни походки, ни направления движения
-                // у него нет — его ведёт машина.
-                animation_.applyDriveBy(puppet.ped, player.state.aimAt);
+                break;
             }
 
-            act(puppet, player);
+            // Удар обмякшему телу не показать: движение поверх рэгдолла игра
+            // проглатывает молча, а номер движения мы бы при этом запомнили как
+            // показанный. Поверх движения, которое велел сервер, удар тоже не
+            // показывают — но по другой причине: он бы его отменил.
+            if (duty.action) {
+                act(puppet, player);
+            }
         }
 
         puppet.flags = player.state.flags;
     }
 }
 
-void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
-                                 int localPed) const {
+void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player, int localPed,
+                                 std::int32_t now) const {
     const bool wasDead = shared::has(puppet.flags, shared::PlayerFlag::Dead);
     const bool dead = shared::has(player.state.flags, shared::PlayerFlag::Dead);
 
     const int current = invokeNative<int>(getHealth_, puppet.ped);
+
+    // Броня читается до того, как её вернут на место, — иначе читать было бы
+    // нечего.
+    const int currentArmour =
+        getArmour_ != nullptr ? invokeNative<int>(getArmour_, puppet.ped) : puppet.appliedArmour;
 
     // Попадание замечается по разнице между тем, что мы поставили в прошлый
     // кадр, и тем, что осталось сейчас. Проверка «кто ударил» обязательна: без
@@ -666,10 +942,39 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     // всё то, что хозяин уже посчитал у себя.
     if (onDamage_ && localPed != 0 && damagedBy_ != nullptr && !dead) {
         if (invokeNative<bool>(damagedBy_, puppet.ped, localPed, true)) {
-            const int lost = puppet.appliedHealth - current;
+            // Считается вместе с бронёй, и это была не мелочь, а дыра в самой
+            // перестрелке.
+            //
+            // Пуля уходит сперва в броню и только потом в здоровье. Броню же мы
+            // возвращаем кукле каждый кадр — она принадлежит хозяину, как и
+            // здоровье, — и потому за кадр она успевает поглотить попадание и
+            // восстановиться. По разнице одного здоровья такое попадание не
+            // видно вовсе: бронированный игрок не терял ничего, сколько в него
+            // ни стреляй.
+            //
+            // Серверу уходит полный урон, а не остаток: он делит его на броню и
+            // здоровье сам и по тем же самым числам, что и игра здесь.
+            const int lostArmour = std::max(puppet.appliedArmour - currentArmour, 0);
+            const int lost = std::max(puppet.appliedHealth - current, 0) + lostArmour;
 
             if (lost > 0) {
-                onDamage_(player.id, static_cast<std::uint16_t>(lost), player.state.weapon);
+                // Оружие называется наше, а не жертвы, и это было настоящей
+                // ошибкой: сюда уходил ствол того, в кого попали. Сервер
+                // пересказывает это число дважды — жертве, чтобы показать, из
+                // чего по ней попали, и скрипту в событии смерти как оружие
+                // убийства, — и оба раза оно называло не то. Безоружная жертва
+                // делала всякое убийство ударом кулака.
+                //
+                // Спрашивается ствол в руках, а не разбирается причина урона:
+                // причину игра наружу не отдаёт, и сбитый машиной запишется на
+                // то, что у нас в руках. Это неточно, но это ближе правды, чем
+                // чужой ствол, и заметно только в редком случае.
+                const std::uint32_t weapon =
+                    selectedWeapon_ != nullptr
+                        ? invokeNative<std::uint32_t>(selectedWeapon_, localPed)
+                        : player.state.weapon;
+
+                onDamage_(player.id, static_cast<std::uint16_t>(lost), weapon);
             }
 
             if (clearDamage_ != nullptr) {
@@ -694,8 +999,38 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     // скрипта, и до ответного снимка хозяина признак ещё не поднят. Поднимай мы
     // куклу по признаку — она вставала бы и падала замертво каждый кадр, потому
     // что следом ей ставят тот самый ноль.
-    if (wanted > 0 && resurrect_ != nullptr && isDead_ != nullptr &&
-        invokeNative<bool>(isDead_, puppet.ped)) {
+    const bool downHere = wanted > 0 && resurrect_ != nullptr && isDead_ != nullptr &&
+                          invokeNative<bool>(isDead_, puppet.ped);
+
+    if (!downHere) {
+        // Стоит на ногах — значит и память о попытках поднять больше не нужна:
+        // следующая смерть начнёт счёт заново.
+        puppet.raisedAt = 0;
+        puppet.raiseFailureTold = false;
+    }
+
+    // Подъём — по сроку, а не каждый кадр, и это правка по журналу.
+    //
+    // Он может не удаться вовсе: мёртвым игра считает персонажа не по нулю
+    // здоровья, а по своему порогу, и кукла, которой мы ставим здоровье ниже
+    // порога, ложится обратно в том же кадре. Без срока получалась вечная
+    // карусель — подъём, здоровье, зачистка задач, шестьдесят раз в секунду.
+    // В одной сессии таких подъёмов насчиталось пятьдесят шесть тысяч.
+    const bool raiseDue = puppet.raisedAt == 0 || now - puppet.raisedAt >= kRaiseInterval;
+
+    if (downHere && raiseDue) {
+        // Не удался прошлый — говорим об этом один раз и называем число, из-за
+        // которого он не удаётся: чаще всего дело именно в нём.
+        if (puppet.raisedAt != 0 && !puppet.raiseFailureTold) {
+            puppet.raiseFailureTold = true;
+
+            spdlog::warn("player {} stays dead in the game at health {} while the owner reports "
+                         "him alive: the game treats a ped at this health as dead",
+                         player.id, wanted);
+        }
+
+        puppet.raisedAt = now;
+
         invokeNative<void>(resurrect_, puppet.ped);
 
         // Признаки после подъёма выставляются заново: часть их игра снимает
@@ -704,8 +1039,32 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
         invokeNative<void>(blockEvents_, puppet.ped, true);
         invokeNative<void>(diesWhenInjured_, puppet.ped, false);
 
+        // И запрет падать — тоже, а память о нём объявляется неверной.
+        //
+        // Разрешение падать мы помним, а не спрашиваем: спросить у игры «а можно
+        // ли ему падать» нельзя. Подъём же сбрасывает признаки персонажа мимо
+        // нашей памяти — и та осталась бы говорить «запрещено» о теле, которому
+        // уже можно. Со стороны это выглядело бы так, что после первой же смерти
+        // человек снова начинает крутиться от выстрела и ползать от толчка.
+        if (canRagdoll_ != nullptr) {
+            invokeNative<void>(canRagdoll_, puppet.ped, false);
+        }
+
+        puppet.ragdollAllowed = false;
+
         invokeNative<void>(clearTasks_, puppet.ped);
         puppet.taskedAt = 0;
+
+        // И память об оружии — тоже, иначе поднятая кукла останется с пустыми
+        // руками навсегда.
+        //
+        // Смерть отбирает у персонажа всё, что было в руках, а выдаём мы оружие
+        // только при смене: сверяется присланный хеш с тем, что мы выдали в
+        // прошлый раз, — и после подъёма они совпадают, хотя в руках уже ничего
+        // нет. Забыв выданное, мы заставляем следующий же кадр выдать его
+        // заново.
+        puppet.weapon = 0;
+        puppet.ammo = 0;
 
         spdlog::debug("player {} was dead here but alive at the owner, resurrected", player.id);
     }
@@ -720,6 +1079,13 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     // по-настоящему.
     if (setArmour_ != nullptr) {
         invokeNative<void>(setArmour_, puppet.ped, static_cast<int>(player.state.armour));
+        puppet.appliedArmour = static_cast<int>(player.state.armour);
+    } else {
+        // Броню поставить нечем — значит и терять её кукле неоткуда, и считать
+        // по ней урон нельзя. Запоминаем то, что у неё есть на самом деле: иначе
+        // разница с воображаемой бронёй ушла бы серверу как попадание, которого
+        // не было.
+        puppet.appliedArmour = currentArmour;
     }
 
     if (dead == wasDead) {
@@ -731,24 +1097,72 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
     invokeNative<void>(clearTasks_, puppet.ped);
     puppet.taskedAt = 0;
 
+    // И память об оружии — по той же причине, что и выше: смерть отбирает у
+    // персонажа всё, что было в руках. Здесь это на случай, когда кукла умерла и
+    // поднялась мимо resurrect — например, когда хозяин объявил смерть и жизнь
+    // между двумя нашими кадрами.
+    puppet.weapon = 0;
+    puppet.ammo = 0;
+
     spdlog::debug("игрок {} {}", player.id, dead ? "погиб" : "снова жив");
 }
 
 void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player, std::int32_t now) const {
     const bool riding = shared::has(player.state.flags, shared::PlayerFlag::InVehicle);
     const bool entering = shared::has(player.state.flags, shared::PlayerFlag::EnteringVehicle);
+    const bool leaving = shared::has(player.state.flags, shared::PlayerFlag::LeavingVehicle);
 
     if (!riding && !entering) {
         if (puppet.vehicleId == shared::kInvalidVehicleId) {
+            puppet.leavingSince = 0;
             return;
         }
 
-        // Вышел. Высаживаем сразу, а не с открыванием двери: хозяин к этому
-        // времени уже стоит на асфальте, и отыгрывать выход некогда.
         const int left = vehicles_.handleFor(puppet.vehicleId);
+
+        // Хозяин вылезает прямо сейчас — и кукла вылезает вместе с ним, тем же
+        // движением: открывает дверь, выбирается, закрывает за собой.
+        //
+        // Прежде этого признака не было вовсе, и о выходе мы узнавали лишь по
+        // тому, что хозяин перестал числиться сидящим. К этому мгновению он уже
+        // стоял на асфальте, и кукле оставалось выпасть наружу рывком —
+        // полутора секунд выхода со стороны не было видно никогда.
+        //
+        // Отыграть выход можно только тому, кто внутри. Проверка не
+        // придирчивость: кукла могла не успеть сесть вовсе, и тогда задача
+        // выхода не сделает ничего — а мы бы полторы секунды ждали её конца,
+        // не ведя персонажа ни положением, ни походкой. Со стороны это
+        // выглядело бы замиранием на ровном месте.
+        const bool inside = left != 0 && leaveVehicle_ != nullptr &&
+                            (isInVehicle_ == nullptr ||
+                             invokeNative<bool>(isInVehicle_, puppet.ped, left, true));
+
+        // Сроку задача подчиняется так же, как и посадка: не уложилась —
+        // высаживаем рывком. Дверь могло заклинить о стену, а хозяин к этому
+        // времени уже идёт своей дорогой.
+        const bool overdue =
+            puppet.leavingSince != 0 && now - puppet.leavingSince >= kExitPatience;
+
+        if (leaving && inside && !overdue) {
+            if (puppet.leavingSince == 0) {
+                puppet.leavingSince = now;
+                invokeNative<void>(leaveVehicle_, puppet.ped, left, kNormalExit);
+
+                spdlog::debug("player {} is climbing out of vehicle {:#010x}", player.id,
+                              puppet.vehicleId);
+            }
+
+            // Задача идёт. Место в машине за куклой пока числится: пока она не
+            // вылезла, она в ней сидит.
+            return;
+        }
+
+        // Вылез. Дальше — только страховка: если задача выхода не успела или её
+        // не было вовсе (старый клиент выхода не объявляет), высаживаем рывком.
         puppet.vehicleId = shared::kInvalidVehicleId;
         puppet.seat = shared::kNoSeat;
         puppet.enteringSince = 0;
+        puppet.leavingSince = 0;
 
         if (left != 0 && leaveVehicle_ != nullptr) {
             invokeNative<void>(leaveVehicle_, puppet.ped, left, kWarpOutOfVehicle);
@@ -805,32 +1219,85 @@ void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player, std::in
         return;
     }
 
-    // Хозяин уже сидит. Если наш персонаж тоже — вход удался, и трогать его
-    // больше не нужно.
+    // Хозяин уже сидит. Сидит ли наш персонаж — и, главное, на том ли месте.
+    //
+    // Спрашивается именно место, а не «в машине ли он вообще», и это то самое,
+    // из-за чего чужой игрок оказывался пассажиром в собственной машине.
+    // Сверялась прежде одна только память о нашей же просьбе: попросили
+    // водительское — считаем, что он за рулём. А задача входа вправе усадить
+    // персонажа не туда, куда её просили: место могло оказаться занято, дверь
+    // — заблокирована, игра могла счесть, что с другой стороны ближе. Усаженный
+    // не на своё место оставался там навсегда, потому что спросить об этом было
+    // некому.
     const bool placed =
         puppet.vehicleId == player.state.vehicleId && puppet.seat == player.state.seat;
 
-    // Спросить игру надёжнее, чем помнить самим: персонажа могло выбросить из
-    // машины взрывом. Но если спросить нечем, память — единственное, что есть, и
-    // считать по ней «не сидит» нельзя: мы сажали бы его рывком каждый кадр.
-    const bool seated = isInVehicle_ != nullptr
-                            ? invokeNative<bool>(isInVehicle_, puppet.ped, vehicle, false)
-                            : placed;
+    // Если спросить нечем, память — единственное, что есть, и считать по ней
+    // «не сидит» нельзя: мы сажали бы его рывком каждый кадр.
+    const bool seated =
+        pedInSeat_ != nullptr
+            ? invokeNative<int>(pedInSeat_, vehicle, seat) == puppet.ped
+            : (isInVehicle_ != nullptr
+                   ? placed && invokeNative<bool>(isInVehicle_, puppet.ped, vehicle, false)
+                   : placed);
 
-    if (placed && seated) {
+    if (seated) {
+        puppet.vehicleId = player.state.vehicleId;
+        puppet.seat = player.state.seat;
         puppet.enteringSince = 0;
+        puppet.leavingSince = 0;
+
+        // Сидит на своём месте — значит и память о неудачных пересадках больше
+        // не нужна: следующая начнёт счёт заново.
+        puppet.seatedAt = 0;
+        puppet.seatFailureTold = false;
         return;
     }
 
     // Вход был начат и ещё не кончился — дадим ему доиграть. Но не бесконечно:
     // дверь могло заклинить о стену, а хозяин уже едет.
-    if (!seated && puppet.enteringSince != 0 && now - puppet.enteringSince < kEntryPatience) {
+    if (puppet.enteringSince != 0 && now - puppet.enteringSince < kEntryPatience) {
         return;
+    }
+
+    // Где он оказался вместо своего места — в журнал: занятое чужим место
+    // означает, что двое считают себя на нём одновременно, и разбираться с этим
+    // придётся не здесь.
+    if (pedInSeat_ != nullptr && isInVehicle_ != nullptr &&
+        invokeNative<bool>(isInVehicle_, puppet.ped, vehicle, false)) {
+        spdlog::debug("player {} sat in the wrong seat of vehicle {:#010x}, moving to seat {}",
+                      player.id, player.state.vehicleId, seat);
+    }
+
+    // Пересадка — по сроку, а не каждый кадр. Удалась — срока никто не заметит,
+    // не удалась — она хотя бы перестанет быть каруселью на всю сессию.
+    const bool sameSeat =
+        puppet.seatedVehicle == player.state.vehicleId && puppet.seatedIndex == player.state.seat;
+
+    if (sameSeat && puppet.seatedAt != 0 && now - puppet.seatedAt < kSeatInterval) {
+        return;
+    }
+
+    if (sameSeat && puppet.seatedAt != 0 && !puppet.seatFailureTold) {
+        puppet.seatFailureTold = true;
+
+        spdlog::warn("player {} does not stay in seat {} of vehicle {:#010x}: the game keeps him "
+                     "elsewhere",
+                     player.id, seat, player.state.vehicleId);
     }
 
     puppet.vehicleId = player.state.vehicleId;
     puppet.seat = player.state.seat;
     puppet.enteringSince = 0;
+    puppet.leavingSince = 0;
+
+    puppet.seatedVehicle = player.state.vehicleId;
+    puppet.seatedIndex = player.state.seat;
+    puppet.seatedAt = now;
+
+    if (!sameSeat) {
+        puppet.seatFailureTold = false;
+    }
 
     if (setIntoVehicle_ != nullptr) {
         invokeNative<void>(setIntoVehicle_, puppet.ped, vehicle, seat);
@@ -840,25 +1307,262 @@ void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player, std::in
                   seat);
 }
 
-void RemotePlayers::turn(const Puppet& puppet, const RemotePlayerView& player, bool moving) const {
+void RemotePlayers::turn(Puppet& puppet, const RemotePlayerView& player, bool moving,
+                         std::int32_t now) const {
     // Угол приходит уже посчитанным на это мгновение — тем же расчётом и на то
     // же время, что и положение. Доводить его здесь долей за кадр, как делалось
     // раньше, не нужно и вредно: доля за кадр означает, что скорость доворота
     // зависит от частоты кадров, а до нужного угла персонаж доходит уже тогда,
     // когда хозяин смотрит в другую сторону.
-    if (!moving && setHeading_ != nullptr) {
-        // Стоящему угол задаётся прямо: у него нет ни задачи, ни походки,
-        // которые могли бы этот угол оспорить.
-        invokeNative<void>(setHeading_, puppet.ped, player.state.heading);
+    if (desiredHeading_ == nullptr) {
+        if (setHeading_ != nullptr) {
+            invokeNative<void>(setHeading_, puppet.ped, player.state.heading);
+        }
         return;
     }
 
-    if (desiredHeading_ != nullptr) {
-        // Идущему — желаемое направление, а не мгновенное: игра доворачивает
-        // персонажа сама, отыгрывая шаг ногами, вместо того чтобы вращать его
-        // вокруг оси.
-        invokeNative<void>(desiredHeading_, puppet.ped, player.state.heading);
+    // Желаемое направление, а не мгновенное: игра доворачивает персонажа сама,
+    // отыгрывая поворот ногами, вместо того чтобы вращать его вокруг оси.
+    //
+    // Идущему так было и раньше. Стоящему угол ставился прямо — и стоящий
+    // человек разворачивался, как башня: тело мгновенно оказывалось лицом
+    // туда, куда хозяин только начал поворачиваться. Поворота на месте, который
+    // игра прекрасно умеет, со стороны не было видно ни разу.
+    invokeNative<void>(desiredHeading_, puppet.ped, player.state.heading);
+
+    if (moving || getHeading_ == nullptr || setHeading_ == nullptr) {
+        // Идущего доворачивает походка, и подгонять его рывком незачем:
+        // направление движения и без того задаёт задача.
+        puppet.turningSince = 0;
+        return;
     }
+
+    // Но полагаться на один лишь доворот нельзя, и это здесь уже стоило беды:
+    // персонаж, занятый чем-нибудь своим, желаемое направление не отрабатывает
+    // вовсе и остаётся стоять лицом не туда. Поэтому за доворотом следим, и
+    // если он не идёт — ставим угол рывком.
+    const float off = angleBetween(invokeNative<float>(getHeading_, puppet.ped),
+                                   player.state.heading);
+
+    if (off <= kSettledAngle) {
+        puppet.turningSince = 0;
+        return;
+    }
+
+    if (off >= kSnapAngle) {
+        // Так далеко ногами не доворачивают: пока персонаж отыгрывал бы полный
+        // разворот, хозяин успел бы обернуться дважды.
+        invokeNative<void>(setHeading_, puppet.ped, player.state.heading);
+        puppet.turningSince = 0;
+        return;
+    }
+
+    if (puppet.turningSince == 0) {
+        puppet.turningSince = now;
+        puppet.turningGap = off;
+        return;
+    }
+
+    if (now - puppet.turningSince < kTurnPatience) {
+        return;
+    }
+
+    if (off <= puppet.turningGap * kTurnProgress) {
+        // Доворот идёт — пусть доворачивает. Срок отсчитывается заново от того
+        // расхождения, что осталось.
+        puppet.turningSince = now;
+        puppet.turningGap = off;
+        return;
+    }
+
+    // Расхождение стоит на месте: желаемое направление персонаж не отрабатывает.
+    invokeNative<void>(setHeading_, puppet.ped, player.state.heading);
+    puppet.turningSince = 0;
+}
+
+bool RemotePlayers::animate(shared::PlayerId player, const shared::PlayerAnimation& animation) {
+    const auto known = puppets_.find(player);
+    if (known == puppets_.end() || known->second.ped == 0) {
+        // Куклы ещё нет: игрок далеко либо его модель грузится. Распоряжение
+        // подождёт — его повторят в следующем кадре.
+        return false;
+    }
+
+    if (!animation_.playNamed(known->second.ped, animation)) {
+        return false;
+    }
+
+    // Запоминаем не ради памяти, а ради задач: пока это движение идёт, кукле
+    // нельзя выдавать ни походку, ни прицел — они его отменят.
+    known->second.scriptedDictionary = animation.dictionary;
+    known->second.scriptedName = animation.name;
+    known->second.scriptedAt = gameTimer_ != nullptr
+                                   ? invokeNative<std::int32_t>(gameTimer_)
+                                   : 0;
+
+    return true;
+}
+
+bool RemotePlayers::stopAnimating(shared::PlayerId player) {
+    const auto known = puppets_.find(player);
+    if (known == puppets_.end() || known->second.ped == 0) {
+        return false;
+    }
+
+    animation_.clearTasks(known->second.ped);
+
+    known->second.scriptedDictionary.clear();
+    known->second.scriptedName.clear();
+    known->second.scriptedAt = 0;
+    known->second.taskedAt = 0;
+
+    return true;
+}
+
+bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
+    if (puppet.scriptedDictionary.empty()) {
+        return false;
+    }
+
+    // Отсрочка. Задача начинается не в тот же миг, когда её выдали, и вопрос,
+    // заданный сразу, ответит «не играет». Поверив ему, мы снесли бы движение
+    // задачей ходьбы в том же кадре, в котором завели.
+    if (puppet.scriptedAt != 0 && now - puppet.scriptedAt < kScriptedGrace) {
+        return true;
+    }
+
+    if (playingAnim_ != nullptr &&
+        invokeNative<bool>(playingAnim_, puppet.ped, puppet.scriptedDictionary.c_str(),
+                           puppet.scriptedName.c_str(), kPlayingAnimTaskFlag)) {
+        return true;
+    }
+
+    // Кончилось — своим ходом либо чужой задачей. Забываем: держать за куклой
+    // движение, которого нет, значит не вести её вовсе.
+    puppet.scriptedDictionary.clear();
+    puppet.scriptedName.clear();
+    puppet.scriptedAt = 0;
+
+    return false;
+}
+
+bool RemotePlayers::ownFire(const Puppet& puppet) const {
+    // Своя стрельба — только пока не идут присланные выстрелы. Иначе очередь
+    // выходит двойной, и половина её летит не туда, куда целился хозяин, а
+    // куда попадёт кукла со своей меткостью.
+    //
+    // Спрашивают об этом двое — пеший прицел и стрельба из окна, — и ответ у них
+    // обязан быть один. Пока правило жило внутри одного из них, второй о нём не
+    // знал вовсе и палил вдобавок к присланному.
+    return shotTimer_ == nullptr ||
+           invokeNative<std::int32_t>(shotTimer_) - puppet.firedAt >= kShotFallback;
+}
+
+void RemotePlayers::allowRagdoll(Puppet& puppet, bool allowed) const {
+    if (canRagdoll_ == nullptr || puppet.ragdollAllowed == allowed) {
+        return;
+    }
+
+    invokeNative<void>(canRagdoll_, puppet.ped, allowed);
+    puppet.ragdollAllowed = allowed;
+}
+
+bool RemotePlayers::settleRagdoll(Puppet& puppet, const RemotePlayerView& player,
+                                  std::int32_t now) const {
+    const bool wanted = shared::has(player.state.flags, shared::PlayerFlag::Ragdoll);
+    const bool rising = shared::has(player.state.flags, shared::PlayerFlag::GettingUp);
+
+    // Что с телом на самом деле. Спросить игру обязательно: помнить одну лишь
+    // свою просьбу мало — уронить куклу может и сама игра, столкновением или
+    // выстрелом, а хозяин об этом не говорил ничего.
+    const bool limp = isRagdoll_ != nullptr ? invokeNative<bool>(isRagdoll_, puppet.ped)
+                                            : puppet.ragdolling;
+
+    if (wanted && !puppet.ragdolling) {
+        // Рэгдолл заказывается на переходе, а не каждый кадр: заказанный
+        // повторно, он поднимает тело и роняет заново, и вместо падения выходит
+        // судорога.
+        //
+        // Разрешение к этому мгновению уже выдано — его выдаёт sync по тому же
+        // признаку, и по запрещённому телу SET_PED_TO_RAGDOLL не сделал бы
+        // ничего, причём молча.
+        if (setRagdoll_ != nullptr) {
+            invokeNative<void>(setRagdoll_, puppet.ped, kRagdollDuration, kRagdollDuration,
+                               kRagdollKind, true, true, false);
+        }
+
+        puppet.ragdolling = true;
+        puppet.taskedAt = 0;
+        puppet.turningSince = 0;
+        puppet.risingSince = 0;
+        return true;
+    }
+
+    if (wanted) {
+        return true;
+    }
+
+    // Хозяин поднялся. Разрешение к этому мгновению уже снято — его снимает sync
+    // по тому же признаку.
+    puppet.ragdolling = false;
+
+    if (!limp) {
+        puppet.risingSince = 0;
+        return false;
+    }
+
+    // Тело ещё обмякшее, а хозяин уже нет. Дальше важно, что именно у хозяина
+    // происходит.
+    //
+    // Он поднимается — значит и наше тело поднимается тем же путём, само:
+    // вставать после рэгдолла игра умеет и делает это куда убедительнее рывка.
+    // Отнять у неё этот подъём значило бы менять падение с последующим вставанием
+    // на падение с последующим вскакиванием.
+    //
+    // Но ждать сколько угодно нельзя: кукле заказано четыре секунды обмякания, а
+    // хозяин мог подняться через одну.
+    if (rising) {
+        if (puppet.risingSince == 0) {
+            puppet.risingSince = now;
+        }
+
+        if (now - puppet.risingSince < kRisePatience) {
+            return true;
+        }
+    }
+
+    // Либо хозяин вовсе не падал — уронила игра, а такое случается и с запретом
+    // (взрыв рядом, машина в упор), — либо подъём затянулся дольше всякого
+    // разумного. Оставлять как есть нельзя: у хозяина ничего не происходит, он
+    // бежит дальше, а его изображение ползёт по асфальту.
+    //
+    // Поднимается тело немедленной зачисткой задач: своего «встань» у игры нет,
+    // а эта её как раз и возвращает из рэгдолла в стойку.
+    invokeNative<void>(clearTasks_, puppet.ped);
+    puppet.taskedAt = 0;
+    puppet.turningSince = 0;
+    puppet.risingSince = 0;
+
+    // Один кадр телом всё ещё распоряжается физика: подводить его в этом кадре
+    // значило бы дёрнуть падающего.
+    return true;
+}
+
+void RemotePlayers::drift(const Puppet& puppet, const RemotePlayerView& player) const {
+    NativeContext coords;
+    coords.push(puppet.ped);
+    coords.push(true);
+    getCoords_(coords.address());
+
+    const shared::Vec3 actual{coords.result<float>(0), coords.result<float>(1),
+                              coords.result<float>(2)};
+
+    if (distanceBetween(actual, player.state.position) <= kRagdollSnapDistance) {
+        return;
+    }
+
+    invokeNative<void>(setCoords_, puppet.ped, player.state.position.x, player.state.position.y,
+                       player.state.position.z, false, false, false);
 }
 
 void RemotePlayers::steer(Puppet& puppet, const RemotePlayerView& player, float speed,
@@ -907,11 +1611,18 @@ void RemotePlayers::steer(Puppet& puppet, const RemotePlayerView& player, float 
         return;
     }
 
-    // Скорость задаче отдаётся та же, что и походке: разойдись они, персонаж
-    // поехал бы по земле — ноги отыгрывали бы одну скорость, а перемещала бы
-    // его другая.
-    invokeNative<void>(taskGoTo_, puppet.ped, target.x, target.y, target.z, speed, kTaskTimeout,
-                       player.state.heading, kNoSliding);
+    // Скорость задаче отдаётся та же, что и походке, — и это то самое место,
+    // где они расходились.
+    //
+    // Задача ждёт не метров в секунду, а номера походки: единица — шаг, двойка
+    // — бег, тройка — во весь дух. Отдавались же ей метры в секунду. Бегущий со
+    // своими тремя с половиной получал задачу «во весь дух» и походку «бег»:
+    // ноги отыгрывали одно, а перемещало его другое, и персонаж ехал по земле,
+    // не попадая шагом в собственное движение. Целящегося это не касалось
+    // никогда — его задача с самого начала получала номер походки, — и именно
+    // поэтому со стороны выходило, что криво идут все, кроме целящихся.
+    invokeNative<void>(taskGoTo_, puppet.ped, target.x, target.y, target.z, blendForSpeed(speed),
+                       kTaskTimeout, player.state.heading, kNoSliding);
 }
 
 void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float seconds,
@@ -944,21 +1655,6 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float s
                            false, false);
     }
 
-    // Рэгдолл заказывается на переходе, а не каждый кадр: заказанный повторно,
-    // он поднимает тело и роняет заново, и вместо падения выходит судорога.
-    const bool ragdoll = shared::has(player.state.flags, shared::PlayerFlag::Ragdoll);
-    if (ragdoll && !shared::has(puppet.flags, shared::PlayerFlag::Ragdoll) &&
-        setRagdoll_ != nullptr) {
-        invokeNative<void>(setRagdoll_, puppet.ped, kRagdollDuration, kRagdollDuration,
-                           kRagdollKind, true, true, false);
-        puppet.taskedAt = 0;
-    }
-
-    // Обмякшее тело не ходит и не поворачивается — им распоряжается физика.
-    if (ragdoll) {
-        return;
-    }
-
     const float speed = length(player.state.velocity);
     const bool moving = speed >= kStandingSpeed;
 
@@ -971,7 +1667,7 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float s
         return;
     }
 
-    turn(puppet, player, moving);
+    turn(puppet, player, moving, now);
 
     invokeNative<void>(moveBlend_, puppet.ped, blendForSpeed(speed));
 
@@ -979,8 +1675,25 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float s
         // Стоящему задача движения не нужна: без неё он просто стоит, а с ней
         // топтался бы на месте, пытаясь дойти до цели, которой мы его не
         // снабдили.
+        //
+        // Но снимать её нельзя, если персонаж в это самое мгновение начал
+        // перезаряжаться, и это была настоящая поломка. Перезарядка — тоже
+        // задача, и выданная выше, в applyPosture, она заняла место задачи
+        // ходьбы. Зачистка здесь сносила её в том же кадре, в котором она
+        // началась, — то есть перезарядки со стороны не было видно ни разу у
+        // того, кто остановился, чтобы перезарядиться. А останавливаются ради
+        // этого почти все.
         if (puppet.taskedAt != 0) {
-            invokeNative<void>(clearTasks_, puppet.ped);
+            if (!shared::has(player.state.flags, shared::PlayerFlag::Reloading)) {
+                // Не немедленной зачисткой, а обычной: немедленная обрывает
+                // движение там, где оно есть, и остановившийся человек застывал
+                // на полушаге. Обычная даёт игре доиграть шаг и перейти в
+                // стойку.
+                animation_.clearTasks(puppet.ped);
+            }
+
+            // Задача в любом случае больше не наша: либо мы её сняли, либо её
+            // заняла перезарядка.
             puppet.taskedAt = 0;
         }
         return;
@@ -989,7 +1702,7 @@ void RemotePlayers::walk(Puppet& puppet, const RemotePlayerView& player, float s
     steer(puppet, player, speed, now);
 }
 
-void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
+void RemotePlayers::equip(Puppet& puppet, const RemotePlayerView& player) const {
     if (giveWeapon_ == nullptr || setWeapon_ == nullptr) {
         return;
     }
@@ -1039,8 +1752,25 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
 
         puppet.ammo = player.state.ammo;
     }
+}
+
+void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
+    if (taskAim_ == nullptr && taskShoot_ == nullptr) {
+        return;
+    }
 
     if (!aiming(player.state)) {
+        return;
+    }
+
+    // Перезаряжающийся оружие не наводит — он его опускает и меняет магазин. И
+    // дело здесь не в правдоподобии: перезарядка выдана задачей, а задача
+    // прицела, выданная каждый кадр поверх неё, сносила бы её без конца.
+    //
+    // Признак прицела при этом стоит: человек держит правую кнопку всю
+    // перезарядку и целится сразу, как она кончится. Поэтому спрашиваем не
+    // «целится ли он», а «занят ли он сейчас другим».
+    if (shared::has(player.state.flags, shared::PlayerFlag::Reloading)) {
         return;
     }
 
@@ -1052,17 +1782,10 @@ void RemotePlayers::aim(Puppet& puppet, const RemotePlayerView& player) const {
 
     const bool shooting = shared::has(player.state.flags, shared::PlayerFlag::Shooting);
 
-    // Своя стрельба — только пока не идут присланные выстрелы. Иначе очередь
-    // выходит двойной, и половина её летит не туда, куда целился хозяин, а
-    // куда попадёт кукла со своей меткостью.
-    const bool ownFire =
-        shotTimer_ == nullptr ||
-        invokeNative<std::int32_t>(shotTimer_) - puppet.firedAt >= kShotFallback;
-
     // Задача выдаётся коротким сроком и каждый кадр: и прицел, и стрельба — это
     // состояния, которые кончаются в тот же миг, что и у хозяина, а не длятся
     // сами по себе.
-    if (shooting && ownFire && taskShoot_ != nullptr) {
+    if (shooting && ownFire(puppet) && taskShoot_ != nullptr) {
         invokeNative<void>(taskShoot_, puppet.ped, player.state.aimAt.x, player.state.aimAt.y,
                            player.state.aimAt.z, kAimTaskDuration, kFiringPatternFullAuto);
         return;
@@ -1181,6 +1904,16 @@ void RemotePlayers::clear() {
     }
 
     puppets_.clear();
+
+    // Внешность и сборка оружия — тоже забываются, и это не опрятность.
+    // Ключ у них — номер игрока, а номера выдаёт сервер: на следующем сервере
+    // под тем же номером будет другой человек, и до своего объявления
+    // внешности он вышел бы в мир одетым в чужое и с чужим телом.
+    looks_.clear();
+    guns_.clear();
+
+    // А вот о моделях, которые не грузятся, забывать незачем: это свойство
+    // самой игры, а не сессии, и следующий сервер его не изменит.
 }
 
 } // namespace oxymp::client::game
