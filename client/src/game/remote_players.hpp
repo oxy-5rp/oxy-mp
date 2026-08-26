@@ -296,7 +296,6 @@ private:
     NativeHandler asMissionEntity_ = nullptr;
     NativeHandler canBeTargetted_ = nullptr;
     NativeHandler diesWhenInjured_ = nullptr;
-    NativeHandler criticalHits_ = nullptr;
     NativeHandler resurrect_ = nullptr;
     NativeHandler isDead_ = nullptr;
     NativeHandler invincible_ = nullptr;

@@ -267,7 +267,6 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       asMissionEntity_(table.handlerFor(natives::kSetEntityAsMissionEntity)),
       canBeTargetted_(table.handlerFor(natives::kSetPedCanBeTargetted)),
       diesWhenInjured_(table.handlerFor(natives::kSetPedDiesWhenInjured)),
-      criticalHits_(table.handlerFor(natives::kSetPedSuffersCriticalHits)),
       resurrect_(table.handlerFor(natives::kResurrectPed)),
       isDead_(table.handlerFor(natives::kIsEntityDead)),
       invincible_(table.handlerFor(natives::kSetEntityInvincible)),
@@ -373,16 +372,15 @@ int RemotePlayers::spawn(const RemotePlayerView& player) {
     invokeNative<void>(invincible_, ped, false);
 
     // Умирать сам он при этом не должен: смерть решает хозяин.
+    //
+    // Кроме выстрела в голову: тот убивает персонажа мимо всех расчётов урона, и
+    // этот запрет его не держит. Отбирать у игры критические попадания
+    // (SET_PED_SUFFERS_CRITICAL_HITS) нельзя — с ними уходит и смертельность
+    // выстрела в голову, а её игрок замечает первой же перестрелкой. Пусть
+    // кукла падает: попадание уйдёт серверу разницей здоровья, то есть целиком,
+    // и жертва умрёт по-настоящему. А если выживет — броня, скрипт со своими
+    // правилами, — куклу поднимут ниже, по общей проверке.
     invokeNative<void>(diesWhenInjured_, ped, false);
-
-    // И одного этого мало: выстрел в голову убивает персонажа мимо всех расчётов
-    // урона, и никакое «не умирать от ран» его не держит. Кукла падала замертво
-    // у стрелявшего — а у остальных и у самого хозяина игрок продолжал бегать,
-    // потому что попадание сервер посчитал обычным уроном. Вернуть её оттуда
-    // тоже нечем: поставленное здоровье мертвеца не поднимает.
-    if (criticalHits_ != nullptr) {
-        invokeNative<void>(criticalHits_, ped, false);
-    }
 
     invokeNative<void>(lodDistance_, ped, kLodDistance);
 
@@ -686,10 +684,17 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
 
     // Но поднять поставленным здоровьем куклу, которую игра всё же успела
     // записать в мёртвые, нельзя — для этого есть отдельный натив. Сюда мы
-    // приходим за тем, чего не предусмотрели: взрыв рядом, огонь, падение с
-    // высоты, добивание в ближнем бою. Перечислять такие пути поимённо
-    // бессмысленно, а проверка одна и стоит один вызов.
-    if (!dead && resurrect_ != nullptr && isDead_ != nullptr &&
+    // приходим за тем, чего не предусмотрели: выстрел в голову, от которого
+    // жертва уцелела, взрыв рядом, огонь, падение с высоты, добивание в ближнем
+    // бою. Перечислять такие пути поимённо бессмысленно, а проверка одна и
+    // стоит один вызов.
+    //
+    // Спрашивается здесь именно поставленное здоровье, а не признак смерти.
+    // Разойтись они могут: сервер вправе обнулить здоровье распоряжением
+    // скрипта, и до ответного снимка хозяина признак ещё не поднят. Поднимай мы
+    // куклу по признаку — она вставала бы и падала замертво каждый кадр, потому
+    // что следом ей ставят тот самый ноль.
+    if (wanted > 0 && resurrect_ != nullptr && isDead_ != nullptr &&
         invokeNative<bool>(isDead_, puppet.ped)) {
         invokeNative<void>(resurrect_, puppet.ped);
 
@@ -698,15 +703,13 @@ void RemotePlayers::settleHealth(Puppet& puppet, const RemotePlayerView& player,
         // события и умирала бы от следующей же царапины.
         invokeNative<void>(blockEvents_, puppet.ped, true);
         invokeNative<void>(diesWhenInjured_, puppet.ped, false);
-        if (criticalHits_ != nullptr) {
-            invokeNative<void>(criticalHits_, puppet.ped, false);
-        }
 
         invokeNative<void>(clearTasks_, puppet.ped);
         puppet.taskedAt = 0;
 
         spdlog::debug("player {} was dead here but alive at the owner, resurrected", player.id);
     }
+
     if (current != wanted) {
         invokeNative<void>(setHealth_, puppet.ped, wanted);
     }
