@@ -138,6 +138,9 @@ private:
     NativeHandler raiseRoof_ = nullptr;
     NativeHandler lowerRoof_ = nullptr;
     NativeHandler convertible_ = nullptr;
+    NativeHandler landingGear_ = nullptr;
+    NativeHandler setLandingGear_ = nullptr;
+    NativeHandler hasLandingGear_ = nullptr;
     NativeHandler setSteerBias_ = nullptr;
     NativeHandler setHandbrake_ = nullptr;
     NativeHandler setBrakeLights_ = nullptr;

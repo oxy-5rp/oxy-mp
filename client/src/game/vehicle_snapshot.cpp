@@ -17,6 +17,16 @@ namespace {
 constexpr int kRoofLowering = 1;
 constexpr int kRoofDown = 2;
 
+/// Состояния шасси в нумерации игры: выпущено, убирается, выпускается, убрано.
+/// Числа те же, что и у крыши, но натив другой, и общего имени у них нет.
+constexpr int kGearRetracting = 1;
+constexpr int kGearRetracted = 3;
+
+/// Что заказывают шасси: выпустить или убрать. Промежуточные два игра принимает
+/// тоже, но заказывать их незачем — она сама через них проходит.
+constexpr int kGearDeploy = 0;
+constexpr int kGearRetract = 1;
+
 /// На сколько заводится гудок за один раз.
 ///
 /// Заводится он заново каждый кадр, пока признак стоит, — своего «перестань» у
@@ -167,6 +177,9 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       raiseRoof_(table.handlerFor(natives::kRaiseConvertibleRoof)),
       lowerRoof_(table.handlerFor(natives::kLowerConvertibleRoof)),
       convertible_(table.handlerFor(natives::kIsVehicleAConvertible)),
+      landingGear_(table.handlerFor(natives::kGetLandingGearState)),
+      setLandingGear_(table.handlerFor(natives::kControlLandingGear)),
+      hasLandingGear_(table.handlerFor(natives::kVehicleHasLandingGear)),
       setSteerBias_(table.handlerFor(natives::kSetVehicleSteerBias)),
       setHandbrake_(table.handlerFor(natives::kSetVehicleHandbrake)),
       setBrakeLights_(table.handlerFor(natives::kSetVehicleBrakeLights)),
@@ -311,6 +324,17 @@ shared::VehicleState VehicleSnapshot::read(int vehicle, bool driving) const {
         const int roof = invokeNative<int>(roofState_, vehicle);
 
         set(shared::VehicleFlag::RoofOpen, roof == kRoofLowering || roof == kRoofDown);
+    }
+
+    if (landingGear_ != nullptr &&
+        (hasLandingGear_ == nullptr || invokeNative<bool>(hasLandingGear_, vehicle))) {
+        // Спрашивать состояние у машины без шасси нельзя: натив читает его из
+        // части, которой у неё нет, и отвечает мусором. Отсюда проверка перед
+        // вопросом — у крыши ту же роль играет IS_VEHICLE_A_CONVERTIBLE.
+        const int gear = invokeNative<int>(landingGear_, vehicle);
+
+        set(shared::VehicleFlag::LandingGearUp,
+            gear == kGearRetracting || gear == kGearRetracted);
     }
 
     if (lightsState_ != nullptr) {
@@ -748,6 +772,16 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
         // Не мгновенно: у хозяина крыша едет своим ходом, и мгновенная у
         // зрителя оказалась бы на месте за секунду до его.
         invokeNative<void>(open ? lowerRoof_ : raiseRoof_, vehicle, false);
+    }
+
+    // Шасси — тем же порядком, что и крыша: только на изменение, и только тому,
+    // у кого оно есть. Заказанное каждым кадром движение начиналось бы заново, а
+    // заказанное машине без шасси не сделает ничего — молча.
+    if (flagsChanged && setLandingGear_ != nullptr &&
+        (hasLandingGear_ == nullptr || invokeNative<bool>(hasLandingGear_, vehicle))) {
+        const bool up = shared::has(state.flags, shared::VehicleFlag::LandingGearUp);
+
+        invokeNative<void>(setLandingGear_, vehicle, up ? kGearRetract : kGearDeploy);
     }
 
     if (state.bodyHealth != previous.bodyHealth && setBodyHealth_ != nullptr) {
