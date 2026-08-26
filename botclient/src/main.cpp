@@ -15,6 +15,7 @@
 #include <cmath>
 #include <format>
 #include <csignal>
+#include <random>
 #include <set>
 #include <unordered_map>
 #include <thread>
@@ -48,6 +49,16 @@ std::atomic<bool> g_stopRequested{false};
 
 extern "C" void onInterrupt(int) {
     g_stopRequested.store(true);
+}
+
+/// Случайная задержка от нуля до предела, в миллисекундах.
+///
+/// Свой источник случайных чисел, а не rand: тот один на процесс, и стая из
+/// двухсот ботов дёргала бы его из одного места.
+[[nodiscard]] unsigned int unevenness(unsigned int limit) {
+    static thread_local std::mt19937 source{std::random_device{}()};
+
+    return std::uniform_int_distribution<unsigned int>{0, limit}(source);
 }
 
 void printUsage() {
@@ -200,14 +211,34 @@ struct Gait {
     double total = 0.0;
     double fastest = 0.0;
 
-    /// Реже этого не мерим: на слишком коротком промежутке частное пути на
-    /// время — это уже не скорость, а разрядность часов.
-    static constexpr auto kGap = std::chrono::milliseconds{8};
+    /// Сколько замеров вышло заметно быстрее среднего прошлого окна.
+    ///
+    /// По этой доле видно, что именно происходит: редкое событие раз в секунду
+    /// или постоянная неровность. Лечится это разным.
+    double bursts = 0.0;
+    double watermark = 0.0;
+
+    /// Реже этого не мерим.
+    ///
+    /// Промежуток между замерами должен быть не короче промежутка между
+    /// снимками. На более коротком окне частное пути на время перестаёт быть
+    /// скоростью движения и становится производной от того, что успело
+    /// случиться внутри окна: пришёл снимок или не пришёл, сдвинулось
+    /// отставание или нет. Это не неровность чужого — это разрешающая
+    /// способность самого замера.
+    static constexpr auto kGap = std::chrono::milliseconds{33};
+
+    /// Сколько снимков должно прийти, прежде чем игрока стоит мерить.
+    ///
+    /// Пока лента не набрана, показываемое положение прыгает по делу: сперва
+    /// единственный снимок, потом самый старый из двух, потом уже настоящий
+    /// расчёт. Это не неровность движения, а его начало.
+    static constexpr std::uint32_t kWarmedUp = 4;
 
     void sample(const oxymp::client::Connection& connection,
                 std::chrono::steady_clock::time_point now) {
         for (const auto& [id, player] : connection.remotePlayers()) {
-            if (!player.visible()) {
+            if (!player.visible() || player.snapshots < kWarmedUp) {
                 continue;
             }
 
@@ -232,14 +263,21 @@ struct Gait {
             total += speed;
             fastest = std::max(fastest, speed);
 
+            if (watermark > 0.0 && speed > watermark) {
+                bursts += 1.0;
+            }
+
             known->second = Seen{.position = shown, .at = now};
         }
     }
 
     void forget() {
+        watermark = samples > 0.0 ? (total / samples) * 1.5 : watermark;
+
         samples = 0.0;
         total = 0.0;
         fastest = 0.0;
+        bursts = 0.0;
     }
 };
 
@@ -394,6 +432,15 @@ int main(int argc, char** argv) {
     unsigned int bots = 1;
     float spread = 0.0F;
 
+    // На сколько миллисекунд сбивать собственное обслуживание.
+    //
+    // Сеть без дрожания бывает только на петле обратной связи, а проверять
+    // поведение при дрожании чем-то надо. Бот сбивает не сеть, а себя: спит
+    // случайное время перед обслуживанием соединения — и снимки уходят
+    // вразнобой ровно так же, как у клиента на неровной машине или неровном
+    // канале.
+    unsigned int jitter = 0;
+
     // Стоять вместо того, чтобы ходить.
     //
     // Нужно ради одного замера, но замера важного: клиент не шлёт снимок, в
@@ -419,6 +466,11 @@ int main(int argc, char** argv) {
             settings.nickname = args[++i];
         } else if (argument == "--still") {
             still = true;
+        } else if (argument == "--jitter" && hasValue) {
+            if (!parseNumber(args[++i], jitter)) {
+                std::cerr << "дрожание должно быть числом миллисекунд\n";
+                return 2;
+            }
         } else if (argument == "--offset" && hasValue) {
             unsigned int offset = 0;
             if (!parseNumber(args[++i], offset)) {
@@ -497,6 +549,12 @@ int main(int argc, char** argv) {
         // секунды и не прислала бы за это время ни одного снимка. Ждём один раз
         // за оборот и снаружи.
         const auto budget = std::chrono::milliseconds{bots == 1 ? 20 : 0};
+
+        // Сбиваем сами себя, если попросили: обслуживание опаздывает на
+        // случайное время, и снимки уходят вразнобой.
+        if (jitter > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{unevenness(jitter)});
+        }
 
         const float elapsed =
             std::chrono::duration<float>{std::chrono::steady_clock::now() - started}.count();
@@ -638,9 +696,10 @@ int main(int argc, char** argv) {
                     // двойка и выше — рывки. Сама скорость нужна, чтобы видеть,
                     // что движение вообще идёт.
                     spdlog::info("  чужие идут: {:.2f} м/с в среднем, {:.2f} наибольшая, "
-                                 "отношение {:.2f}",
+                                 "отношение {:.2f}, всплесков {:.1f}% из {:.0f}",
                                  average, gait.fastest,
-                                 average > 0.0 ? gait.fastest / average : 0.0);
+                                 average > 0.0 ? gait.fastest / average : 0.0,
+                                 gait.bursts / gait.samples * 100.0, gait.samples);
 
                     gait.forget();
                 }
