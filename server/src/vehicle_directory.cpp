@@ -70,6 +70,17 @@ bool VehicleDirectory::place(shared::VehicleId id, const shared::Vec3& position,
     state.velocity = shared::Vec3{};
     state.angularVelocity = shared::Vec3{};
 
+    // Состояние изменилось — значит его надо разослать. Без этой отметки
+    // переставленная машина доезжала только до вошедших позже: тем, кто уже
+    // на неё смотрит, рассылка её не показывала, потому что решает она по
+    // этой самой отметке.
+    //
+    // Ведущего это не касается — ему уходит отдельная просьба, и он пришлёт
+    // снимок сам. А вот у брошенной машины ведущего нет вовсе, и прислать
+    // снимок о ней некому: она так и оставалась стоять на прежнем месте у
+    // всех, кто её видел.
+    found->second.stateAt = Clock::now();
+
     return true;
 }
 
@@ -89,6 +100,10 @@ bool VehicleDirectory::repair(shared::VehicleId id) {
     state.doorsBroken = 0;
     state.windowsBroken = 0;
     state.tyresBurst = 0;
+
+    // Как и у place: прочности изменились, и рассылка узнаёт об этом только по
+    // отметке. Брошенную машину чинить некому — снимка о ней не пришлёт никто.
+    found->second.stateAt = Clock::now();
 
     return true;
 }

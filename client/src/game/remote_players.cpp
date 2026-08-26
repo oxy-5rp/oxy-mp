@@ -734,7 +734,23 @@ void RemotePlayers::ride(Puppet& puppet, const RemotePlayerView& player, std::in
         // Хозяин ещё лезет. Задача входа выдаётся один раз и дальше идёт сама:
         // персонаж подходит к двери, открывает её и садится — то самое, чего со
         // стороны не было видно вовсе, пока его пересаживали рывком.
-        if (puppet.enteringSince != 0 || enterVehicle_ == nullptr) {
+        //
+        // Выдаётся заново в двух случаях, и оба живые. Первый: хозяин передумал
+        // и полез в другую машину или на другое место — задача же ведёт куклу к
+        // прежней двери и сама об этом не узнает. Второй: задача идёт дольше
+        // отведённого ей срока — дверь могло заклинить о стену, а до неё ещё и
+        // дойти надо.
+        const bool sameTarget = puppet.vehicleId == player.state.vehicleId &&
+                                puppet.seat == player.state.seat;
+
+        const bool overdue =
+            puppet.enteringSince != 0 && now - puppet.enteringSince >= kEntryPatience;
+
+        if (puppet.enteringSince != 0 && sameTarget && !overdue) {
+            return;
+        }
+
+        if (enterVehicle_ == nullptr) {
             return;
         }
 

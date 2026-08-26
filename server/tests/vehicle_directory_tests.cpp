@@ -28,6 +28,57 @@ shared::VehicleId spawn(VehicleDirectory& directory, shared::PlayerId owner, flo
 
 } // namespace
 
+TEST_CASE("moving a vehicle marks it for the next broadcast", "[server][vehicles]") {
+    // Рассылка решает по этой отметке, кого пересылать в такте. Без неё
+    // переставленная скриптом машина доезжала только до вошедших позже: тем,
+    // кто уже на неё смотрит, её не показывали.
+    //
+    // Ведущего это не касается — ему уходит отдельная просьба, и снимок он
+    // пришлёт сам. А у брошенной машины ведущего нет, и прислать снимок о ней
+    // некому.
+    VehicleDirectory vehicles;
+
+    const shared::VehicleId id = spawn(vehicles, shared::kInvalidPlayerId, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    const VehicleDirectory::Vehicle* const parked = vehicles.find(id);
+    REQUIRE(parked != nullptr);
+
+    const auto before = parked->stateAt;
+
+    REQUIRE(vehicles.place(id, shared::Vec3{.x = 100.0F, .y = 200.0F, .z = 30.0F}, 90.0F));
+
+    const VehicleDirectory::Vehicle* const moved = vehicles.find(id);
+    REQUIRE(moved != nullptr);
+
+    CHECK(moved->stateAt > before);
+    CHECK(moved->state.position.x == 100.0F);
+
+    // И скорость обнулилась: переставленная на ходу машина, сохранив её,
+    // поехала бы на новом месте сама.
+    CHECK(moved->state.velocity.x == 0.0F);
+}
+
+TEST_CASE("repairing a vehicle marks it for the next broadcast", "[server][vehicles]") {
+    // По той же причине: прочности изменились, а рассылка узнаёт об этом только
+    // по отметке.
+    VehicleDirectory vehicles;
+
+    const shared::VehicleId id = spawn(vehicles, shared::kInvalidPlayerId, 0.0F);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    const auto before = vehicles.find(id)->stateAt;
+
+    REQUIRE(vehicles.repair(id));
+
+    const VehicleDirectory::Vehicle* const fixed = vehicles.find(id);
+    REQUIRE(fixed != nullptr);
+
+    CHECK(fixed->stateAt > before);
+    CHECK(fixed->state.bodyHealth == shared::kFullVehicleHealth);
+    CHECK(fixed->state.tyresBurst == 0);
+}
+
 TEST_CASE("vehicle numbers are issued by the server and never repeat", "[vehicles]") {
     VehicleDirectory directory;
 

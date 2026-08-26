@@ -1625,24 +1625,39 @@ void Server::sendHealth(const Player& player, shared::PlayerId attacker) {
 }
 
 void Server::announceWeapon(Player& player) {
-    shared::PlayerWeapon look;
-    look.playerId = player.id;
-    look.weapon = player.state.weapon;
+    const std::uint32_t weapon = player.state.weapon;
 
     // Что навинчено на ствол, знает сервер: снаряжение принадлежит ему целиком.
     // Оружия, которого он не выдавал, в списке нет — и это верно: собрать его
     // мог только он.
-    const auto slot = std::ranges::find_if(player.loadout, [&look](const auto& carried) {
-        return carried.weapon == look.weapon;
+    const auto slot = std::ranges::find_if(player.loadout, [weapon](const auto& carried) {
+        return carried.weapon == weapon;
     });
 
-    if (look.weapon != 0 && slot != player.loadout.end()) {
-        look.tint = slot->tint;
-        look.components = slot->components;
+    const bool known = weapon != 0 && slot != player.loadout.end();
+
+    const std::uint8_t tint = known ? slot->tint : 0;
+
+    // Сравниваем, ничего не собирая. Зовут это на каждый снимок каждого игрока —
+    // то есть сотню раз в секунду на сотню человек, — а собранное объявление
+    // несёт список насадок, и всякая сборка означала бы выделение памяти в
+    // самом горячем месте сервера. Меняется же оно раз в несколько минут.
+    const bool same = player.shownWeapon.weapon == weapon &&
+                      player.shownWeapon.tint == tint &&
+                      (known ? player.shownWeapon.components == slot->components
+                             : player.shownWeapon.components.empty());
+
+    if (same) {
+        return;
     }
 
-    if (look == player.shownWeapon) {
-        return;
+    shared::PlayerWeapon look;
+    look.playerId = player.id;
+    look.weapon = weapon;
+    look.tint = tint;
+
+    if (known) {
+        look.components = slot->components;
     }
 
     player.shownWeapon = look;
