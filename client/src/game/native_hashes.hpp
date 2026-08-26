@@ -102,6 +102,12 @@ inline constexpr std::uint64_t kLowerConvertibleRoof = 0X232B023FE4D977E2;
 /// IS_VEHICLE_A_CONVERTIBLE, канонический хеш 0X52F357A30698BCCE.
 inline constexpr std::uint64_t kIsVehicleAConvertible = 0X7943BD10E2A03FAC;
 
+/// SET_PED_SUFFERS_CRITICAL_HITS, канонический хеш 0XEBD76F2359F190AC.
+inline constexpr std::uint64_t kSetPedSuffersCriticalHits = 0XE915224DCA36212A;
+
+/// RESURRECT_PED, канонический хеш 0X71BC8E838B9C6035.
+inline constexpr std::uint64_t kResurrectPed = 0X6ED737C2A74E181D;
+
 /// GET_LANDING_GEAR_STATE, канонический хеш 0X9B0F3DCA3DB0F4CD.
 inline constexpr std::uint64_t kGetLandingGearState = 0X68F7F7C5DF6717F8;
 
