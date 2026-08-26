@@ -338,6 +338,17 @@ struct Menu::State {
 
     /// Разбирает событие от страницы.
     void handle(std::string_view name, std::string_view argumentsJson) {
+        // Всякое слово страницы — в журнал, и это не шум.
+        //
+        // Страница говорит редко: щелчок по кнопке, переход по вкладке, правка
+        // настройки. Зато жалоба вида «кнопка не работает с первого раза» без
+        // этой строки не разбирается вовсе — по ней одной сразу видно, дошёл ли
+        // щелчок до клиента или потерялся раньше, на самой странице.
+        //
+        // Уровень отладочный: игроку здесь читать нечего, а тому, кто чинит,
+        // нужна каждая строка.
+        spdlog::debug("страница просит: {} {}", name, argumentsJson);
+
         const nlohmann::json arguments =
             nlohmann::json::parse(argumentsJson, nullptr, false, true);
 
@@ -397,6 +408,11 @@ struct Menu::State {
         if (name == "connection:disconnect" || name == "connection:abort") {
             if (actions.disconnect) {
                 actions.disconnect();
+            } else {
+                // Некому исполнить — значит меню подняли без сетевой части.
+                // Молчать об этом нельзя: снаружи это ровно то же самое, что
+                // «кнопка не работает».
+                spdlog::warn("the page asked to disconnect, but nothing is listening");
             }
             return;
         }

@@ -1334,7 +1334,10 @@ void run() {
             request.ask(address, password);
         };
 
-        actions.disconnect = [&request] { request.askDisconnect(); };
+        actions.disconnect = [&request] {
+            spdlog::debug("the menu asks to disconnect");
+            request.askDisconnect();
+        };
 
         // Строка из консоли страницы уходит в чат — тем же путём, каким игрок
         // отправил бы её сам. Ничего сверх этого консоль не даёт и не должна:
@@ -1588,6 +1591,12 @@ void run() {
                 connection.reset();
 
                 spdlog::info("Disconnected");
+            } else {
+                // Просили отключиться, а соединения уже нет. Само по себе это
+                // не беда — так выходит, когда щёлкнули дважды, — но по этой
+                // строке видно, что просьба дошла, и разбираться дальше нужно
+                // не в ней.
+                spdlog::debug("отключиться просили, а соединения уже не было");
             }
 
             // Мир при этом остаётся загруженным, и притворяться иначе нечем:
