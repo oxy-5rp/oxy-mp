@@ -259,6 +259,7 @@ namespace {
         .priority = blip.state.priority,
         .name = blip.state.name,
         .dimension = blip.dimension,
+        .global = blip.global,
         .targets = blip.targets,
     };
 }
@@ -1532,7 +1533,7 @@ shared::BlipId ServerCore::createBlip(const script::BlipInfo& blip) {
     }
 
     (void)blips_->setDimension(id, blip.dimension);
-    (void)blips_->setTargets(id, blip.targets);
+    (void)blips_->setTargets(id, blip.global, blip.targets);
 
     sink_->blipChanged(id);
     return id;
@@ -1548,7 +1549,7 @@ bool ServerCore::updateBlip(shared::BlipId id, const script::BlipInfo& blip) {
     // Список тех, кому метка видна, накладывается тем же путём, что и слой:
     // скрипт правит метку целиком, и не наложи мы его — `addTarget` не сделал
     // бы ничего, а метка осталась бы видна всем.
-    (void)blips_->setTargets(id, blip.targets);
+    (void)blips_->setTargets(id, blip.global, blip.targets);
 
     sink_->blipChanged(id);
     return true;

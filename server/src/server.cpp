@@ -741,7 +741,7 @@ template<typename Entry>
     }
 
     if constexpr (requires { entry.targets; }) {
-        return entry.targets.empty() ||
+        return entry.global ||
                std::ranges::find(entry.targets, player) != entry.targets.end();
     } else {
         return true;

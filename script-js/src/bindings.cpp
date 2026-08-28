@@ -2031,11 +2031,17 @@ public:
     }
 
     /// Признак. Отсутствующий — ложь, как и у alt:V.
-    [[nodiscard]] bool flag(const char* name) const {
+    /// Признак с умолчанием. Умолчание нужно не для красоты: у `global` оно
+    /// «да», и не назвавший его слой получил бы метку, не видимую никому.
+    [[nodiscard]] bool flag(const char* name, bool fallback = false) const {
         v8::Local<v8::Value> field;
 
         if (!object_->Get(context_, toJs(context_->GetIsolate(), name)).ToLocal(&field)) {
-            return false;
+            return fallback;
+        }
+
+        if (field->IsUndefined() || field->IsNull()) {
+            return fallback;
         }
 
         return field->BooleanValue(context_->GetIsolate());
@@ -2647,9 +2653,12 @@ void detachEntity(const v8::FunctionCallbackInfo<v8::Value>& info) {
     blip.priority = fields->byte("priority", 0);
     blip.name = fields->text("name");
 
-    // Кому метка видна — списком номеров, а не сущностей: слой alt:V держит
-    // игроков объектами, а сюда доезжают их номера. Пустой список означает
-    // «всем», как `isGlobal` у alt:V.
+    // Общая ли метка. Умолчание — «да»: у alt:V довод `global` необязателен, и
+    // не назвавший его режим ждёт обычную метку, видимую всем.
+    blip.global = fields->flag("global", true);
+
+    // Кому метка видна, если она не общая, — списком номеров, а не сущностей:
+    // слой alt:V держит игроков объектами, а сюда доезжают их номера.
     for (const double target : fields->numbers("targets")) {
         blip.targets.push_back(static_cast<shared::PlayerId>(target));
     }

@@ -1041,8 +1041,8 @@ TEST_CASE("a blip remembers who it was meant for", "[server][script]") {
 }
 
 TEST_CASE("a blip without targets is meant for everyone", "[server][script]") {
-    // Пустой список означает «всем», а не «никому»: так же читает его alt:V, и
-    // метка, поставленная без списка, обязана быть видна всей сессии.
+    // Метка, поставленная без списка, обязана быть видна всей сессии: так же
+    // читает её alt:V, и режим, назвавший только положение, ждёт обычную метку.
     Session session;
 
     const shared::BlipId id = session.core.createBlip(script::BlipInfo{});
@@ -1051,7 +1051,46 @@ TEST_CASE("a blip without targets is meant for everyone", "[server][script]") {
     const auto got = session.core.blip(id);
 
     REQUIRE(got);
+    CHECK(got->global);
     CHECK(got->targets.empty());
+}
+
+TEST_CASE("a blip that is not global and names nobody is meant for nobody",
+          "[server][script]") {
+    // Разница между «общая» и «пустой список» — не отвлечённая. Прежде общность
+    // выводилась из пустоты списка, и метка, заведённая с `global = false`,
+    // успевала мигнуть у всех до того, как ей назовут получателей; а не
+    // назвавшая их ни разу оставалась общей навсегда.
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.global = false;
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK_FALSE(got->global);
+    CHECK(got->targets.empty());
+}
+
+TEST_CASE("naming a target does not make a global blip private", "[server][script]") {
+    // Обратное тоже верно: общность называется при заведении и списком не
+    // меняется. У alt:V `isGlobal` объявлено `readonly` ровно поэтому.
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.targets = {3};
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->global);
 }
 
 TEST_CASE("editing a blip carries its targets, not just its looks",

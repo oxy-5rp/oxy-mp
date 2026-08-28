@@ -474,8 +474,15 @@
         /// всех дважды.
         #settled = false;
 
-        constructor(x, y, z) {
+        constructor(x, y, z, global) {
             super('blip');
+
+            // Умолчание — «общая»: у alt:V довод необязателен, и не назвавший
+            // его режим ждёт обычную метку. Именно `!== false`, а не
+            // `?? true`: `new PointBlip(pos)` доводит сюда `undefined`, и
+            // приводить его к «нет» значило бы заводить невидимую метку всякому,
+            // кто написал короткую форму.
+            this.#global = global !== false;
 
             this.pos = new shared.Vector3(x, y, z);
             this.dimension = 0;
@@ -494,7 +501,17 @@
             this.priority = 0;
         }
 
-        /// Кому метка видна. Пустой список — всем, как `isGlobal` у alt:V.
+        /// Общая ли метка. Называется при заведении и потом не меняется — так
+        /// же, как у alt:V, где `isGlobal` объявлено `readonly`.
+        ///
+        /// Признаком, а не пустотой списка получателей, и разница не
+        /// отвлечённая: метка с `global = false`, ещё не назвавшая получателей,
+        /// предназначена **никому**. Прежде она выводилась из пустоты — и такая
+        /// метка успевала мигнуть у всех, а не назвавшая получателей ни разу
+        /// оставалась общей навсегда.
+        #global = true;
+
+        /// Кому метка видна, если она не общая.
         ///
         /// Список хранится номерами игроков, а наружу отдаётся сущностями: у
         /// alt:V это `readonly Player[]`, и режим, получивший оттуда числа,
@@ -509,7 +526,7 @@
         }
 
         get isGlobal() {
-            return this.#targets.length === 0;
+            return this.#global;
         }
 
         addTarget(player) {
@@ -563,6 +580,7 @@
                 priority: this.priority,
                 name: this.name,
                 dimension: this.dimension,
+                global: this.#global,
                 targets: this.#targets,
             };
         }
@@ -614,23 +632,31 @@
     }
 
     class PointBlip extends Blip {
-        constructor(x, y, z) {
-            // alt:V принимает и точку, и три числа.
+        /// alt:V принимает три вида доводов: три числа, точку и сущность —
+        /// и вторым доводом у двух последних идёт `global`.
+        constructor(x, y, z, global) {
             if (typeof x === 'object' && x !== null) {
-                const point = new shared.Vector3(x);
-                super(point.x, point.y, point.z);
+                // У сущности берётся её нынешнее положение. Ездить за ней метка
+                // не будет: привязка живёт на клиенте, и об этом честно говорит
+                // `attachTo`. Взять положение всё же лучше, чем сложить из
+                // сущности вектор — там вышли бы нули, и метка встала бы в
+                // начало координат.
+                const точка = new shared.Vector3(x.pos ?? x);
+
+                // Второй довод здесь `global`: у коротких форм `y` — это он.
+                super(точка.x, точка.y, точка.z, y);
                 this.settle();
                 return;
             }
 
-            super(x, y, z);
+            super(x, y, z, global);
             this.settle();
         }
     }
 
     class AreaBlip extends Blip {
-        constructor(x, y, z, width, height) {
-            super(x, y, z);
+        constructor(x, y, z, width, height, global) {
+            super(x, y, z, global);
 
             this.scaleXY = new shared.Vector2(width, height);
             this.settle();
@@ -638,8 +664,8 @@
     }
 
     class RadiusBlip extends Blip {
-        constructor(x, y, z, radius) {
-            super(x, y, z);
+        constructor(x, y, z, radius, global) {
+            super(x, y, z, global);
 
             this.radius = Number(radius) || 0;
             this.settle();
