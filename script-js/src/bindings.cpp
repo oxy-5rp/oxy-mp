@@ -664,6 +664,21 @@ void playerAddDecoration(const v8::FunctionCallbackInfo<v8::Value>& info) {
         return;
     }
 
+    // Третий довод alt:V — сколько раз наложить рисунок. Хранится татуировка у
+    // нас парой «набор и рисунок», и повторить её нечем: два одинаковых рисунка
+    // на одном месте — это тот же самый рисунок. Молчать об этом нельзя, и
+    // отказывать тоже: просивший один раз получил бы отказ ни за что.
+    if (const std::optional<std::int64_t> count = argAt(info, 2); count && *count != 1) {
+        static bool told = false;
+
+        if (!told) {
+            told = true;
+            spdlog::warn("player.addDecoration: повтор рисунка не хранится — "
+                         "татуировка описана набором и рисунком, и повторённая "
+                         "она та же самая");
+        }
+    }
+
     info.GetReturnValue().Set(
         resourceOf(isolate).core().addDecoration(*id, *collection, *overlay));
 }
@@ -1002,17 +1017,25 @@ void playerClearClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
         return;
     }
 
-    Core& core = resourceOf(isolate).core();
-    bool done = false;
+    // Слот называется доводом, и это не придирка. У alt:V объявлено
+    // `clearClothes(component: number)` — снять одну вещь, а не раздеть
+    // человека. Довод здесь однажды не читался вовсе, и всякий
+    // `player.clearClothes(11)` снимал с игрока всё: и штаны, и обувь, и маску.
+    // Ошибка молчала — вызов удавался, ответ был `true`.
+    const std::optional<std::int64_t> slot = argAt(info, 0);
 
-    for (std::uint8_t slot = 0; slot < shared::kPedComponentCount; ++slot) {
-        // Каждый слот отдельным распоряжением, но рассылка от этого не растёт
-        // вдвенадцатеро: уходит наружу вся внешность целиком одним сообщением,
-        // а здесь меняются её поля.
-        done = core.setClothes(*id, slot, 0, 0, 0) || done;
+    if (!slot) {
+        fail(isolate, "clearClothes ждёт номер слота одежды");
+        return;
     }
 
-    info.GetReturnValue().Set(done);
+    if (*slot < 0 || *slot >= static_cast<std::int64_t>(shared::kPedComponentCount)) {
+        fail(isolate, "clearClothes: такого слота одежды у персонажа нет");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().setClothes(*id, static_cast<std::uint8_t>(*slot), 0, 0, 0));
 }
 
 /// Цвет мелирования отдельно от цвета волос.
@@ -1512,6 +1535,21 @@ void playerClearWeapons(const v8::FunctionCallbackInfo<v8::Value>& info) {
     const std::optional<shared::PlayerId> id = selfPlayer(info);
     if (!id) {
         return;
+    }
+
+    // Довод alt:V — отбирать ли заодно патроны. У нас патроны лежат внутри
+    // самого ствола (`WeaponSlot::ammo`), и оставить их без него нечем: слот
+    // уходит целиком. Просящий отобрать всё получает ровно то, о чём просит;
+    // просящий оставить патроны — узнаёт, что так мы не умеем.
+    if (const std::optional<std::int64_t> keepAmmo = argAt(info, 0);
+        keepAmmo && *keepAmmo == 0) {
+        static bool told = false;
+
+        if (!told) {
+            told = true;
+            spdlog::warn("player.removeAllWeapons: патроны отбираются вместе со стволами — "
+                         "они лежат внутри слота оружия, а не отдельно");
+        }
     }
 
     info.GetReturnValue().Set(resourceOf(info.GetIsolate()).core().clearWeapons(*id));

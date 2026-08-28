@@ -818,6 +818,26 @@ TEST_CASE("a blip is handed a number by the server, not by the script", "[server
     CHECK(session.sink.sent.back() == std::format("blip {}", id));
 }
 
+TEST_CASE("clearing one clothing slot leaves the rest on", "[server][script]") {
+    // У alt:V объявлено `clearClothes(component)` — снять одну вещь. Довод
+    // здесь однажды не читался вовсе, и всякий `clearClothes(11)` раздевал
+    // человека целиком: и штаны, и обувь, и маску. Ошибка молчала — вызов
+    // удавался, ответ был `true`.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.setClothes(player.id, 11, 15, 0, 0));
+    REQUIRE(session.core.setClothes(player.id, 4, 7, 0, 0));
+
+    REQUIRE(session.core.setClothes(player.id, 11, 0, 0, 0));
+
+    const auto look = session.core.appearance(player.id);
+
+    REQUIRE(look);
+    CHECK(look->components[11].drawable == 0);
+    CHECK(look->components[4].drawable == 7);
+}
+
 TEST_CASE("a weapon given to be held says so to the client", "[server][script]") {
     // Просьба вложить в руки уезжает вместе со списком, а не отдельным
     // распоряжением: список и так придёт, и второе сообщение о том же оружии
