@@ -420,6 +420,8 @@ bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint1
     }
 
     const bool wasAlive = player->health != 0;
+    const std::uint16_t healthWas = player->health;
+    const std::uint16_t armourWas = player->armour;
 
     // Обрезается, а не принимается как есть. Скрипт вправе ошибиться в числе, и
     // ошибка эта тихая: игра больше двухсот единиц не показывает, и человек с
@@ -429,6 +431,21 @@ bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint1
     player->armour = std::min(armour, player->maxArmour);
 
     sink_->healthChanged(*player);
+
+    // Лечение объявляется отдельным событием, как у alt:V. Не всякая перемена
+    // здоровья — лечение: убыль это урон, и о нём говорит своё событие там, где
+    // известен ударивший. Здесь же известно только, что стало больше.
+    if (player->health > healthWas || player->armour > armourWas) {
+        script::Event healed;
+        healed.kind = script::EventKind::PlayerHeal;
+        healed.player = script::Player{*this, id};
+        healed.healthHarm = healthWas;
+        healed.armourHarm = armourWas;
+        healed.health = player->health;
+        healed.armour = player->armour;
+
+        events_->dispatch(healed);
+    }
 
     // Смерть по воле скрипта — тоже смерть, и объявить её нужно. Убийцы у неё
     // нет: тот, кто убил чужой рукой, объявляет её сам и называет стрелявшего —

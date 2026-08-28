@@ -862,6 +862,38 @@ TEST_CASE("a vehicle tells the scripts how far its wheel is turned", "[server][s
     CHECK(got->steer == -0.75F);
 }
 
+TEST_CASE("healing is told apart from taking damage", "[server][script]") {
+    // Не всякая перемена здоровья — лечение: убыль это урон, и о нём говорит
+    // своё событие там, где известен ударивший. Сюда попадает только рост.
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+    REQUIRE(session.core.setHealth(player.id, 100, 0));
+
+    session.events.subscribe(&recorder);
+
+    REQUIRE(session.core.setHealth(player.id, 180, 20));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PlayerHeal);
+    CHECK(recorder.seen.front().player == player.id);
+}
+
+TEST_CASE("losing health is not called healing", "[server][script]") {
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+    REQUIRE(session.core.setHealth(player.id, 180, 0));
+
+    session.events.subscribe(&recorder);
+
+    REQUIRE(session.core.setHealth(player.id, 100, 0));
+
+    CHECK(recorder.seen.empty());
+}
+
 TEST_CASE("armour is capped by the limit the script set, not the game default",
           "[server][script]") {
     // Тяжёлый бронежилет в режимах — это поднятый предел, а не броня сверх

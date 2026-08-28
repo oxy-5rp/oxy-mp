@@ -1573,14 +1573,26 @@
     /// метаданные эти принадлежат не телу, а тому, кто за ним сидит.
     Object.assign(Player.prototype, {
         setLocalMeta(key, value) {
-            localFor(this.id).set(key, value);
+            const store = localFor(this.id);
+            const было = store.get(key);
+
+            store.set(key, value);
             publishLocal(this, key, value);
+
+            // Объявляется и на сервере: у alt:V `localMetaChange` есть здесь, и
+            // подписываются на него именно тут — там, где живёт то, что
+            // реагирует на перемену.
+            server.fireLocal('localMetaChange', [this, key, value, было]);
         },
         getLocalMeta(key) { return localFor(this.id).get(key); },
         hasLocalMeta(key) { return localFor(this.id).has(key); },
         deleteLocalMeta(key) {
-            localFor(this.id).delete(key);
+            const store = localFor(this.id);
+            const было = store.get(key);
+
+            store.delete(key);
             publishLocal(this, key, undefined);
+            server.fireLocal('localMetaChange', [this, key, undefined, было]);
         },
         getLocalMetaKeys() { return [...localFor(this.id).keys()]; },
     });
