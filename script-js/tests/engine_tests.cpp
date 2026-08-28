@@ -111,7 +111,7 @@ Engine* engine() {
 }
 
 void brokenEntryIsRefused() {
-    const Sandbox broken{"index.js", "throw new Error('нарочно ломаюсь');\n"};
+    const Sandbox broken{"index.js", R"js(throw new Error('нарочно ломаюсь');)js"};
 
     std::string error;
 
@@ -144,7 +144,7 @@ void wholeResourceRisesAfterBrokenOne() {
     // остались, их деструкторы сработали по мёртвой памяти, и сервер падал
     // целиком: `Check failed: node->IsInUse()`. Снаружи это выглядело так, что
     // сервер молча умирает при запуске, и виноватого в журнале не было.
-    const Sandbox broken{"index.js", "throw new Error('первый ломается');\n"};
+    const Sandbox broken{"index.js", R"js(throw new Error('нарочно');)js"};
 
     std::string error;
     expect(!engine()->start("first", broken.root(), "index.js", error),
@@ -221,6 +221,36 @@ void aResourceHearsItsOwnStart() {
                wrote(resource.root() / "started.txt"));
 
     engine()->stop("mine");
+}
+
+/// О ресурсе, который не поднялся, соседи узнают.
+///
+/// Молчать нельзя: не вставший ресурс выглядит для соседей точно так же, как
+/// ресурс, которого не просили, — а на соседей режимы вешают свою сборку.
+void aRefusedResourceIsAnnouncedToNeighbours() {
+    const Sandbox first{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('anyResourceError', (name) =>
+    fs.writeFileSync(path.join(__dirname, 'broken.txt'), name));
+)js"};
+
+    std::string error;
+    expect(engine()->start("first", first.root(), "index.js", error),
+           "первый ресурс не поднялся: " + error);
+
+    // Точка входа, которая падает на первой строке.
+    const Sandbox broken{"index.js", R"js(throw new Error('нарочно');)js"};
+
+    expect(!engine()->start("broken", broken.root(), "index.js", error),
+           "сломанный ресурс поднялся, чего быть не должно");
+
+    expect(wrote(first.root() / "broken.txt") == "broken",
+           "сосед не услышал о сломанном: " + wrote(first.root() / "broken.txt"));
+
+    engine()->stop("first");
 }
 
 void aResourceHearsAboutItsNeighbours() {
@@ -387,6 +417,8 @@ const std::map<std::string, std::function<void()>>& cases() {
         {"a-resource-still-hears-its-own-emit", &aResourceStillHearsItsOwnEmit},
         {"a-resource-hears-its-own-start", &aResourceHearsItsOwnStart},
         {"a-resource-hears-about-its-neighbours", &aResourceHearsAboutItsNeighbours},
+        {"a-refused-resource-is-announced-to-neighbours",
+         &aRefusedResourceIsAnnouncedToNeighbours},
         {"broken-entry-is-refused", &brokenEntryIsRefused},
         {"absent-name-is-refused", &absentNameIsRefused},
         {"whole-resource-rises-after-broken-one", &wholeResourceRisesAfterBrokenOne},

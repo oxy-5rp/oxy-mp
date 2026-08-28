@@ -44,6 +44,11 @@ constexpr std::string_view kLocalPrefix = "local:";
 constexpr std::string_view kResourceStart = "resourceStart";
 constexpr std::string_view kResourceStop = "resourceStop";
 constexpr std::string_view kAnyResourceStart = "anyResourceStart";
+
+/// Имя события о неподнявшемся ресурсе. Отдельной строкой, а не собранное из
+/// кусков: паритет считается сверкой имён с объявлениями alt:V, и спрятанное в
+/// склейке имя числится отсутствующим.
+constexpr std::string_view kAnyResourceError = "anyResourceError";
 constexpr std::string_view kAnyResourceStop = "anyResourceStop";
 
 /// Строка в вид, годный для JSON.
@@ -285,6 +290,16 @@ public:
         });
 
         if (!resource->start(entry, error)) {
+            // Неподнявшийся получает свой `resourceStart` с признаком «сломан»,
+            // а соседи — `anyResourceError`. Молчать нельзя: ресурс, который не
+            // встал, выглядит для соседей точно так же, как ресурс, которого не
+            // просили, — а на соседей режимы вешают свою сборку.
+            //
+            // Ему самому — до разбора: разобранный уже ничего не услышит.
+            resource->deliver(std::string{kLocalPrefix} + std::string{kResourceStart},
+                              "[true]");
+
+            announce(kAnyResourceError, std::format("[{}]", asJsonString(key)));
             return false;
         }
 

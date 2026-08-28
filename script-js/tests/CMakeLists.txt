@@ -41,7 +41,8 @@ foreach(case
     a-refused-connection-arrives-whole
     a-resource-still-hears-its-own-emit
     a-resource-hears-its-own-start
-    a-resource-hears-about-its-neighbours)
+    a-resource-hears-about-its-neighbours
+    a-refused-resource-is-announced-to-neighbours)
 
     add_test(NAME "script-js: ${case}"
              COMMAND oxymp_script_js_tests "${case}")
