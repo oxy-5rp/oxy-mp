@@ -1390,12 +1390,53 @@ shared::PedId ServerCore::createPed(const script::PedInfo& ped) {
 }
 
 bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
+    const PedDirectory::Ped* const before = peds_->find(id);
+
+    if (before == nullptr) {
+        return false;
+    }
+
+    const std::uint16_t healthWas = before->state.health;
+    const std::uint16_t armourWas = before->state.armour;
+
     if (!peds_->update(id, describe(ped))) {
         return false;
     }
 
     (void)peds_->setDimension(id, ped.dimension);
     sink_->pedChanged(id);
+
+    // Смерть и лечение — по тем же правилам, что и у игрока: смерть это
+    // обнуление здоровья у живого, лечение — его рост. Урона здесь нет и быть
+    // не может: у него есть ударивший, а о попаданиях по прохожим клиент
+    // серверу не сообщает.
+    const PedDirectory::Ped* const after = peds_->find(id);
+
+    if (after == nullptr) {
+        return true;
+    }
+
+    if (healthWas != 0 && after->state.health == 0) {
+        script::Event death;
+        death.kind = script::EventKind::PedDeath;
+        death.ped = id;
+        death.weapon = after->state.weapon;
+
+        events_->dispatch(death);
+        return true;
+    }
+
+    if (after->state.health > healthWas || after->state.armour > armourWas) {
+        script::Event healed;
+        healed.kind = script::EventKind::PedHeal;
+        healed.ped = id;
+        healed.healthHarm = healthWas;
+        healed.armourHarm = armourWas;
+        healed.health = after->state.health;
+        healed.armour = after->state.armour;
+
+        events_->dispatch(healed);
+    }
 
     return true;
 }

@@ -1691,6 +1691,49 @@ script::PedInfo standing(std::uint32_t model) {
 
 } // namespace
 
+TEST_CASE("a ped that ran out of health is announced dead", "[server][script]") {
+    Session session;
+    Recorder recorder;
+
+    const shared::PedId id = session.core.createPed(standing(0x9C9EFFD8));
+    REQUIRE(id != shared::kInvalidPedId);
+
+    session.events.subscribe(&recorder);
+
+    script::PedInfo dead = standing(0x9C9EFFD8);
+    dead.health = 0;
+
+    REQUIRE(session.core.updatePed(id, dead));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PedDeath);
+}
+
+TEST_CASE("a ped given health back is announced healed, not killed",
+          "[server][script]") {
+    // Смерть и лечение разводятся так же, как у игрока: смерть это обнуление
+    // здоровья у живого, лечение — его рост. Урона у прохожего нет вовсе: у
+    // урона есть ударивший, а о попаданиях по прохожим клиент не сообщает.
+    Session session;
+    Recorder recorder;
+
+    script::PedInfo hurt = standing(0x9C9EFFD8);
+    hurt.health = 40;
+
+    const shared::PedId id = session.core.createPed(hurt);
+    REQUIRE(id != shared::kInvalidPedId);
+
+    session.events.subscribe(&recorder);
+
+    script::PedInfo whole = standing(0x9C9EFFD8);
+    whole.health = 190;
+
+    REQUIRE(session.core.updatePed(id, whole));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PedHeal);
+}
+
 TEST_CASE("a ped keeps the id the server gave it", "[server][script]") {
     Session session;
 

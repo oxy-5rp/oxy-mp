@@ -76,6 +76,10 @@ namespace {
         return "playerHeal";
     case EventKind::PlayerDimensionChange:
         return "playerDimensionChange";
+    case EventKind::PedHeal:
+        return "pedHeal";
+    case EventKind::PedDeath:
+        return "pedDeath";
     case EventKind::VehicleAttach:
         return "vehicleAttach";
     case EventKind::VehicleDetach:
@@ -591,6 +595,25 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
         arguments.push_back(
             wrapVehicle(*this, context, static_cast<shared::VehicleId>(event.weapon)));
+        break;
+
+    case EventKind::PedHeal:
+        // Порядок доводов — alt:V: кукла, прежнее здоровье, нынешнее, прежняя
+        // броня, нынешняя.
+        arguments.push_back(wrapPed(*this, context, event.ped));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.healthHarm)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.health)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armourHarm)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armour)));
+        break;
+
+    case EventKind::PedDeath:
+        // Кукла, убийца, оружие. Убийцы у нас нет и взяться ему неоткуда — о
+        // попаданиях по прохожим клиент не сообщает, — и потому здесь пустота,
+        // а не выдуманный игрок: место довода держится, а лжи в нём нет.
+        arguments.push_back(wrapPed(*this, context, event.ped));
+        arguments.push_back(v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
         break;
 
     case EventKind::ClientEvent:
