@@ -224,6 +224,39 @@ struct Session {
 
 } // namespace
 
+TEST_CASE("the server describes itself to scripts without handing out the password",
+          "[server][script]") {
+    // Пароль сюда не попадает никогда, и это единственное в описании сервера,
+    // что стоит проверки: остальное — перенос поля в поле, а пароль, утёкший
+    // отсюда, режим положил бы в свой журнал или показал бы в своём окне, и
+    // раздал бы его игрокам. Признак того, что пароль есть, режиму нужен;
+    // сам пароль — никогда.
+    Session session;
+
+    session.config.name = "У Оксти";
+    session.config.password = "тайна";
+    session.config.resources = {"admin", "amcj"};
+
+    const script::ServerConfigInfo described = session.core.config();
+
+    CHECK(described.name == "У Оксти");
+    CHECK(described.passworded);
+    CHECK(described.resources == std::vector<std::string>{"admin", "amcj"});
+
+    // Само слово нигде в описании не встречается — ни своим полем, ни случайно
+    // в имени.
+    CHECK(described.name.find("тайна") == std::string::npos);
+}
+
+TEST_CASE("a server without a password says so", "[server][script]") {
+    // Признак выводится из пустоты пароля, а не хранится отдельно: два
+    // источника правды об одном разошлись бы, и разошедшиеся дали бы табло,
+    // объявляющее пароль там, где его нет.
+    Session session;
+
+    CHECK_FALSE(session.core.config().passworded);
+}
+
 TEST_CASE("the core shows a player as the registries know them", "[server][script]") {
     Session session;
 
