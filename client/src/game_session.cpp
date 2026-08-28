@@ -177,7 +177,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       objects_(table),
       peds_(table),
       nameplates_(table, hud_),
-      sessionState_(addresses),
+      sessionState_(addresses, table),
       networkGame_(addresses),
       netSession_(addresses, table) {
     // Попадания уходят в ту же почту, что и реплики чата: замечает их игровой
@@ -1544,7 +1544,21 @@ void GameSession::holdSession() {
     //
     // Поэтому: сессия жива — держим, сессии больше не будет — отпускаем.
     if (networkBail_ != nullptr) {
-        networkBail_->hold(sessionState_.started() || !netSession_.gaveUp());
+        // Держим, пока сессия есть, а не пока она «начата».
+        //
+        // Разница эта дорого стоила. `NETWORK_IS_SESSION_STARTED` гаснет через
+        // сорок пять секунд после подъёма, а сама сессия остаётся живой:
+        // `IS_SESSION_ACTIVE`, `IS_IN_SESSION`, `IS_GAME_IN_PROGRESS` и
+        // `IS_HOST` держатся после этого ещё пятнадцать секунд — и гаснут не
+        // сами, а ровно тогда, когда мы отпускаем дверь, приняв погасший
+        // `started` за конец сессии. Хоронили её мы.
+        //
+        // Держать при этом приходится всё время, пока сессия жива: отпертая
+        // дверь валит и устоявшуюся — за двести миллисекунд, проверено. А чтобы
+        // игра не умерла от вечного запора, сам перехват пропускает один вызов
+        // раз в двадцать тысяч отбитых (`NetworkBail`); сессия от пропуска
+        // ложится и тут же поднимается заново.
+        networkBail_->hold(sessionState_.active() || !netSession_.gaveUp());
     }
 
     netSession_.host(settings_.sessionMode);
@@ -1553,7 +1567,10 @@ void GameSession::holdSession() {
     // средством и работала против себя: сессию просили поднять каждый кадр, пока
     // та поднималась, и от этого она и разваливалась. С выдержкой она стала тем,
     // чем должна быть, — запасным выходом, который почти никогда не нужен.
-    netSession_.rehostIfDropped(settings_.sessionMode, sessionState_.started());
+    // И поднимать заново — по тому же признаку: сессия, у которой погас один
+    // лишь `started`, никуда не девалась, и поднимать её значило бы ломать
+    // живую машину состояний ради выдуманной беды.
+    netSession_.rehostIfDropped(settings_.sessionMode, sessionState_.active());
 }
 
 void GameSession::spawn() {

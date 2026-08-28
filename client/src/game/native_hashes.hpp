@@ -1182,6 +1182,7 @@ inline constexpr std::uint64_t kSetPedFaceFeature = 0XAAF9B08B469F707F;
 /// Ставит дверь под заданным углом, а не распахивает до упора. Доводы: машина,
 /// номер двери, скорость и угол от нуля до единицы.
 inline constexpr std::uint64_t kSetVehicleDoorControl = 0X3E13A302AA0F06BF;
+inline constexpr std::uint64_t kNetworkIsSessionActive = 0X7B3F26F5D11BF3BE;
 inline constexpr std::uint64_t kTaskStartScenarioInPlace = 0X21B9EFA4B4AA3A5B;
 inline constexpr std::uint64_t kIsPedUsingScenario = 0X282B0289FBD3C119;
 inline constexpr std::uint64_t kRollDownWindow = 0X260EEEEBF5F35F72;

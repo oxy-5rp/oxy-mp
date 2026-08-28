@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine_addresses.hpp"
+#include "native_table.hpp"
 
 namespace oxymp::client::game {
 
@@ -20,17 +21,30 @@ namespace oxymp::client::game {
 /// контекст ей не нужен, это не натив.
 class SessionState {
 public:
-    explicit SessionState(const EngineAddresses& addresses) noexcept;
+    SessionState(const EngineAddresses& addresses, const NativeTable& table) noexcept;
 
     [[nodiscard]] bool ready() const noexcept { return started_ != nullptr; }
 
     /// Начата ли сетевая сессия. Ложь, если спросить не у кого.
     [[nodiscard]] bool started() const;
 
+    /// Есть ли сессия вообще.
+    ///
+    /// Не то же самое, что `started()`, и разница эта дорого стоила. Замерено
+    /// живой игрой: `started` гаснет через сорок пять секунд после подъёма, а
+    /// `active`, `IS_IN_SESSION`, `IS_GAME_IN_PROGRESS` и `IS_HOST` держатся
+    /// после этого ещё пятнадцать — и гаснут не сами, а тогда, когда мы
+    /// отпускаем дверь выхода, приняв погасший `started` за конец сессии.
+    ///
+    /// То есть сессия была жива, а хоронили её мы. Держать нужно по этому
+    /// признаку: он и означает «есть что держать».
+    [[nodiscard]] bool active() const;
+
 private:
     using StartedFunction = bool (*)();
 
     StartedFunction started_ = nullptr;
+    NativeHandler active_ = nullptr;
 };
 
 } // namespace oxymp::client::game
