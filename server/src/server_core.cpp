@@ -79,6 +79,8 @@ namespace {
         // Замки помнит сервер, а не снимок: ведущий о них не рассказывает — он
         // их исполняет, как и всякий, кто машину видит.
         .lockState = vehicle.lockState,
+        .windowsOpen = vehicle.windowsOpen,
+        .roofState = vehicle.state.roofState,
         .passengers = vehicles.seatedIn(id),
 
         .dimension = vehicle.dimension,
@@ -1288,6 +1290,15 @@ bool ServerCore::setVehicleDoor(shared::VehicleId id, std::uint8_t door, std::ui
 
 bool ServerCore::setVehicleLock(shared::VehicleId id, std::uint8_t lockState) {
     if (!vehicles_->setLockState(id, lockState)) {
+        return false;
+    }
+
+    sink_->vehicleControlChanged(id);
+    return true;
+}
+
+bool ServerCore::setVehicleWindows(shared::VehicleId id, std::uint8_t windowsOpen) {
+    if (!vehicles_->setWindows(id, windowsOpen)) {
         return false;
     }
 

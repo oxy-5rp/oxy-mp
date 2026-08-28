@@ -199,6 +199,8 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       doorAngle_(table.handlerFor(natives::kGetVehicleDoorAngleRatio)),
       lockDoors_(table.handlerFor(natives::kSetVehicleDoorsLocked)),
       doorControl_(table.handlerFor(natives::kSetVehicleDoorControl)),
+      rollDown_(table.handlerFor(natives::kRollDownWindow)),
+      rollUp_(table.handlerFor(natives::kRollUpWindow)),
       shutDoor_(table.handlerFor(natives::kSetVehicleDoorShut)),
       doorDamaged_(table.handlerFor(natives::kIsVehicleDoorDamaged)),
       breakDoor_(table.handlerFor(natives::kSetVehicleDoorBroken)),
@@ -331,14 +333,6 @@ shared::VehicleState VehicleSnapshot::read(int vehicle, bool driving) const {
         set(shared::VehicleFlag::HornOn, invokeNative<bool>(hornActive_, vehicle));
     }
 
-    if (roofState_ != nullptr) {
-        // Игра держит четыре состояния, а по сети едет одно: куда крыша едет.
-        // Опущенная и опускающаяся — обе «открыта», поднятая и поднимающаяся —
-        // обе «закрыта». Саму дорогу получатель отыграет тем же движением.
-        const int roof = invokeNative<int>(roofState_, vehicle);
-
-        set(shared::VehicleFlag::RoofOpen, roof == kRoofLowering || roof == kRoofDown);
-    }
 
     if (landingGear_ != nullptr &&
         (hasLandingGear_ == nullptr || invokeNative<bool>(hasLandingGear_, vehicle))) {
@@ -380,6 +374,18 @@ shared::VehicleState VehicleSnapshot::read(int vehicle, bool driving) const {
         if (doorDamaged_ != nullptr && invokeNative<bool>(doorDamaged_, vehicle, door)) {
             state.doorsBroken |= bit;
         }
+    }
+
+    // Крыша: по сети едет само её положение, а не признак «открыта». Четыре
+    // числа те же, что у игры и у alt:V; получатель сводит их к «едет вверх или
+    // вниз» сам — ему важно направление, а не доля пути.
+    //
+    // Спрашивать её у машины без складной крыши нельзя: натив читает состояние
+    // из части, которой у неё нет. Отсюда проверка перед вопросом — та же, что
+    // у шасси.
+    if (roofState_ != nullptr &&
+        (convertible_ == nullptr || invokeNative<bool>(convertible_, vehicle, false))) {
+        state.roofState = static_cast<std::uint8_t>(invokeNative<int>(roofState_, vehicle));
     }
 
     for (int window = 0; window < shared::kVehicleWindowCount; ++window) {
@@ -816,13 +822,20 @@ bool VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
 
     // А крыша — наоборот, только на изменение: движение крыши длится секунды, и
     // заказанное повторно оно начиналось бы с начала каждый кадр.
-    if (flagsChanged && raiseRoof_ != nullptr && lowerRoof_ != nullptr &&
-        (convertible_ == nullptr || invokeNative<bool>(convertible_, vehicle, false))) {
-        const bool open = shared::has(state.flags, shared::VehicleFlag::RoofOpen);
+    //
+    // Сравниваются не сами числа, а куда крыша едет: опущенная и опускающаяся —
+    // обе «открыта», поднятая и поднимающаяся — обе «закрыта». По самим числам
+    // движение заказывалось бы дважды — на «поехала» и на «приехала».
+    const auto roofOpen = [](std::uint8_t roof) {
+        return roof == kRoofLowering || roof == kRoofDown;
+    };
 
+    if (roofOpen(state.roofState) != roofOpen(previous.roofState) && raiseRoof_ != nullptr &&
+        lowerRoof_ != nullptr &&
+        (convertible_ == nullptr || invokeNative<bool>(convertible_, vehicle, false))) {
         // Не мгновенно: у хозяина крыша едет своим ходом, и мгновенная у
         // зрителя оказалась бы на месте за секунду до его.
-        invokeNative<void>(open ? lowerRoof_ : raiseRoof_, vehicle, false);
+        invokeNative<void>(roofOpen(state.roofState) ? lowerRoof_ : raiseRoof_, vehicle, false);
     }
 
     // Шасси — тем же порядком, что и крыша: только на изменение, и только тому,
@@ -1010,6 +1023,40 @@ std::uint32_t VehicleSnapshot::doorLevelOf(int vehicle, int door) const {
         (ratio * static_cast<float>(shared::kDoorFullyOpen)) + 0.5F);
 
     return std::min(steps, shared::kDoorFullyOpen);
+}
+
+void VehicleSnapshot::applyWindows(int vehicle, std::uint8_t open) const {
+    if (vehicle == 0) {
+        return;
+    }
+
+    for (int window = 0; window < shared::kVehicleWindowCount; ++window) {
+        const bool down = (open & (1U << window)) != 0;
+
+        // Наложение идёт всякий раз целиком, а не разницей: спросить у игры,
+        // опущено ли стекло, нечем, и память о наложенном залипла бы — почин­ка
+        // машины (`SET_VEHICLE_FIXED`) поднимает стёкла сама, ничего нам не
+        // сказав.
+        if (down && rollDown_ != nullptr) {
+            invokeNative<void>(rollDown_, vehicle, window);
+        } else if (!down && rollUp_ != nullptr) {
+            invokeNative<void>(rollUp_, vehicle, window);
+        }
+    }
+}
+
+void VehicleSnapshot::applyRoof(int vehicle, std::uint8_t roof) const {
+    if (vehicle == 0 || roof == 0) {
+        return;
+    }
+
+    // Последний довод — мгновенно ли. Нет: крыша складывается на глазах, как у
+    // хозяина, иначе зритель увидел бы её сложенной рывком.
+    if (roof == 1 && raiseRoof_ != nullptr) {
+        invokeNative<void>(raiseRoof_, vehicle, false);
+    } else if (roof == 2 && lowerRoof_ != nullptr) {
+        invokeNative<void>(lowerRoof_, vehicle, false);
+    }
 }
 
 void VehicleSnapshot::applyLock(int vehicle, std::uint8_t lockState) const {

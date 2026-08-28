@@ -2175,6 +2175,8 @@ void Server::vehicleControlChanged(shared::VehicleId id) {
     shared::VehicleControl control;
     control.id = id;
     control.lockState = vehicle->lockState;
+    control.windowsOpen = vehicle->windowsOpen;
+    control.touchesWindows = vehicle->windowsTold;
 
     // Всем без разбора: у тех, кто машину не видит, её и так нет, а выяснять,
     // кто видел, значило бы помнить это на каждого. То же и у меток.

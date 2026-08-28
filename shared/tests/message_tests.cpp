@@ -476,7 +476,10 @@ TEST_CASE("vehicle flags keep their bits", "[messages]") {
     CHECK(static_cast<std::uint16_t>(VehicleFlag::HighBeams) == 8U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::SirenOn) == 16U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::HornOn) == 32U);
-    CHECK(static_cast<std::uint16_t>(VehicleFlag::RoofOpen) == 64U);
+    // Номер снятого признака закреплён за ним навсегда, как и номер снятого
+    // сообщения: признак «крыша открыта» жил здесь, пока по сети не поехало
+    // само её положение.
+    CHECK(static_cast<std::uint16_t>(VehicleFlag::RetiredRoofOpen) == 64U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::Destroyed) == 128U);
     CHECK(static_cast<std::uint16_t>(VehicleFlag::TowHook) == 256U);
 }
@@ -551,19 +554,36 @@ TEST_CASE("a wrecked vehicle says so out loud", "[messages]") {
 }
 
 TEST_CASE("the horn and the roof survive a round trip", "[messages]") {
-    // Оба признака завелись позже прочих, и проверка нужна именно за тем, что
-    // они лежат в том же числе: разъехавшись, они гудели бы вместо того, чтобы
-    // открывать крышу.
+    // Гудок лежит в признаках, а крыша — своим числом: у неё четыре положения,
+    // и признаком «открыта» из них видно два. Проверка нужна затем, что едут
+    // они рядом: разъехавшись, машина гудела бы вместо того, чтобы открывать
+    // крышу.
     VehicleState sent;
     sent.id = 3;
-    sent.flags = VehicleFlag::HornOn | VehicleFlag::RoofOpen;
+    sent.flags = static_cast<std::uint16_t>(VehicleFlag::HornOn);
+    sent.roofState = 2;
 
     const auto received = roundTrip(sent);
 
     REQUIRE(received.has_value());
     CHECK(has(received->flags, VehicleFlag::HornOn));
-    CHECK(has(received->flags, VehicleFlag::RoofOpen));
+    CHECK(received->roofState == 2);
     CHECK_FALSE(has(received->flags, VehicleFlag::SirenOn));
+}
+
+TEST_CASE("the roof keeps all four of the states the game has", "[messages]") {
+    // Признаком «открыта» из четырёх видно два, и потому признак снят: alt:V
+    // отдаёт наружу именно число, а едущая вверх крыша отличима от приехавшей.
+    for (const std::uint8_t position : {0, 1, 2, 3}) {
+        VehicleState sent;
+        sent.id = 1;
+        sent.roofState = position;
+
+        const auto received = roundTrip(sent);
+
+        REQUIRE(received.has_value());
+        CHECK(received->roofState == position);
+    }
 }
 
 TEST_CASE("PlayerWeapon survives a round trip", "[messages]") {
@@ -1570,6 +1590,42 @@ TEST_CASE("door levels of the sixth door survive the three written bytes",
 
     REQUIRE(back);
     CHECK(doorLevel(back->doorLevels, 5) == 7);
+}
+
+TEST_CASE("a vehicle command carries which windows are down", "[protocol]") {
+    // Стёкла едут распоряжением, а не снимком: спросить у игры, опущено ли
+    // стекло, нечем — натив есть только на «опусти» и «подними». Признак
+    // «сервер о стёклах говорил» отдельно от самого набора: ноль в нём законен
+    // и означает «все подняты».
+    VehicleControl sent;
+    sent.id = 9;
+    sent.windowsOpen = 0b0000'0101;
+    sent.touchesWindows = true;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->windowsOpen == 0b0000'0101);
+    CHECK(received->touchesWindows);
+}
+
+TEST_CASE("a vehicle command that says nothing about windows is told apart from one "
+          "that raises them all",
+          "[protocol]") {
+    VehicleControl silent;
+    silent.id = 1;
+
+    VehicleControl raised;
+    raised.id = 1;
+    raised.touchesWindows = true;
+
+    CHECK_FALSE(silent == raised);
+
+    const auto back = roundTrip(raised);
+
+    REQUIRE(back.has_value());
+    CHECK(back->touchesWindows);
+    CHECK(back->windowsOpen == 0);
 }
 
 TEST_CASE("a lock of a vehicle names both the vehicle and the lock", "[protocol]") {

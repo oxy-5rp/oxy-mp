@@ -1282,6 +1282,67 @@ void vehicleSetDoorState(const v8::FunctionCallbackInfo<v8::Value>& info) {
         *id, static_cast<std::uint8_t>(*door), static_cast<std::uint8_t>(*level)));
 }
 
+/// Опущено ли это стекло.
+void vehicleWindowOpened(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    const std::optional<std::int64_t> window = argAt(info, 0);
+
+    if (!id || !window) {
+        fail(isolate, "isWindowOpened ждёт номер стекла числом");
+        return;
+    }
+
+    if (*window < 0 || *window >= shared::kVehicleWindowCount) {
+        fail(isolate, "isWindowOpened: стёкол у машины восемь — от 0 до 7");
+        return;
+    }
+
+    const std::optional<VehicleInfo> vehicle = resourceOf(isolate).core().vehicle(*id);
+    if (!vehicle) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set((vehicle->windowsOpen & (1U << *window)) != 0);
+}
+
+/// Опускает стекло или поднимает его.
+void vehicleSetWindowOpened(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    const std::optional<std::int64_t> window = argAt(info, 0);
+
+    if (!id || !window || info.Length() < 2) {
+        fail(isolate, "setWindowOpened ждёт номер стекла и признак");
+        return;
+    }
+
+    if (*window < 0 || *window >= shared::kVehicleWindowCount) {
+        fail(isolate, "setWindowOpened: стёкол у машины восемь — от 0 до 7");
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    const std::optional<VehicleInfo> vehicle = core.vehicle(*id);
+    if (!vehicle) {
+        info.GetReturnValue().Set(false);
+        return;
+    }
+
+    // Правится одно стекло, а уходит весь набор: помнит их сервер целиком, и
+    // отправлять по стеклу значило бы слать восемь сообщений об одной машине.
+    const auto bit = static_cast<std::uint8_t>(1U << *window);
+    const std::uint8_t wanted = info[1]->BooleanValue(isolate)
+                                    ? static_cast<std::uint8_t>(vehicle->windowsOpen | bit)
+                                    : static_cast<std::uint8_t>(vehicle->windowsOpen & ~bit);
+
+    info.GetReturnValue().Set(core.setVehicleWindows(*id, wanted));
+}
+
 /// Запирает машину или отпирает её.
 void setVehicleLock(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                     const v8::PropertyCallbackInfo<void>& info) {
@@ -3308,6 +3369,14 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "passengers", vehiclePassengers);
     addGetter(isolate, shape, "lockState", vehicleField<&VehicleInfo::lockState>,
               setVehicleLock);
+    addMethod(isolate, shape, "isWindowOpened", vehicleWindowOpened);
+    addMethod(isolate, shape, "setWindowOpened", vehicleSetWindowOpened);
+
+    // Крыша — только на чтение: четыре её положения приходят из снимка
+    // ведущего. Своего распоряжения о ней нет, и выдумывать его не стоит —
+    // накладывает крышу тот же снимок, и второе наложение спорило бы с ним.
+    addGetter(isolate, shape, "roofState", vehicleField<&VehicleInfo::roofState>);
+
     addMethod(isolate, shape, "getDoorState", vehicleDoorState);
     addMethod(isolate, shape, "setDoorState", vehicleSetDoorState);
 

@@ -490,7 +490,16 @@ void Vehicles::lock(const shared::VehicleControl& control) {
         return;
     }
 
-    known->second.wantedLock = control.lockState;
+    Entry& entry = known->second;
+
+    entry.wantedLock = control.lockState;
+
+    // Стёкла — только если сервер о них говорил: ноль в поле законен и означает
+    // «все подняты», а машине, о стёклах которой не говорили, поднимать нечего.
+    if (control.touchesWindows) {
+        entry.wantedWindows = control.windowsOpen;
+        entry.windowsTold = true;
+    }
 }
 
 void Vehicles::openDoors(const shared::VehicleDoors& doors) {
@@ -719,6 +728,15 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
             entry.lockState = entry.wantedLock;
         }
 
+        // Стёкла — там же и на тех же правах: сервер о них помнит, потому что
+        // игра о них не отвечает. Сравнивается наложенное с желаемым, а не с
+        // игрой, и потому починка обязана объявить наложенное забытым — как и
+        // всё прочее ниже.
+        if (entry.windowsTold && entry.appliedWindows != entry.wantedWindows) {
+            snapshot_.applyWindows(entry.vehicle, entry.wantedWindows);
+            entry.appliedWindows = entry.wantedWindows;
+        }
+
         // Починенная машина вышла из-под ремонта заводской, и вместе с вмятинами
         // с неё снялось всё, что мы накладывали когда-то: свет, сирена,
         // зажигание, крыша. Накладывается это только на изменение, а изменения
@@ -734,6 +752,10 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
             // незапертая. Объявляем наложенное забытым — следующий кадр наложит
             // его заново.
             entry.lockState = 0;
+
+            // Стёкла — тем же порядком: починка их поднимает, и не забудь мы
+            // наложенное, опущенные так и остались бы поднятыми навсегда.
+            entry.appliedWindows = 0;
         }
     }
 }

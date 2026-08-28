@@ -461,6 +461,7 @@ void VehicleState::write(ByteWriter& writer) const {
     writer.writeU8(doorsBroken);
     writer.writeU8(windowsBroken);
     writer.writeU8(tyresBurst);
+    writer.writeU8(roofState);
     writer.writeU32(trailer);
 }
 
@@ -498,6 +499,7 @@ VehicleState VehicleState::read(ByteReader& reader) {
     message.doorsBroken = reader.readU8();
     message.windowsBroken = reader.readU8();
     message.tyresBurst = reader.readU8();
+    message.roofState = reader.readU8();
     message.trailer = reader.readU32();
     return message;
 }
@@ -925,12 +927,16 @@ VehicleDoors VehicleDoors::read(ByteReader& reader) {
 void VehicleControl::write(ByteWriter& writer) const {
     writer.writeU32(id);
     writer.writeU8(lockState);
+    writer.writeU8(windowsOpen);
+    writer.writeU8(static_cast<std::uint8_t>(touchesWindows));
 }
 
 VehicleControl VehicleControl::read(ByteReader& reader) {
     VehicleControl message;
     message.id = reader.readU32();
     message.lockState = reader.readU8();
+    message.windowsOpen = reader.readU8();
+    message.touchesWindows = reader.readU8() != 0;
     return message;
 }
 

@@ -312,6 +312,7 @@ public:
     bool removeObject(shared::ObjectId id) override;
     bool setVehicleDoor(shared::VehicleId id, std::uint8_t door, std::uint8_t level) override;
     bool setVehicleLock(shared::VehicleId id, std::uint8_t lockState) override;
+    bool setVehicleWindows(shared::VehicleId id, std::uint8_t windowsOpen) override;
     bool moveObject(shared::ObjectId id, const shared::Vec3& position,
                     const shared::Vec3& rotation) override;
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;

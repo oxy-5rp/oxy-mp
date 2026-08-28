@@ -125,6 +125,17 @@ bool VehicleDirectory::setLockState(shared::VehicleId id, std::uint8_t lockState
     return true;
 }
 
+bool VehicleDirectory::setWindows(shared::VehicleId id, std::uint8_t windowsOpen) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    found->second.windowsOpen = windowsOpen;
+    found->second.windowsTold = true;
+    return true;
+}
+
 bool VehicleDirectory::setDoorLevel(shared::VehicleId id, int door, std::uint32_t level) {
     const auto found = vehicles_.find(id);
     if (found == vehicles_.end() || door < 0 || door >= shared::kVehicleDoorCount) {

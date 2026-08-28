@@ -86,6 +86,13 @@ public:
     /// Накладывается всем, кто машину видит, а не одному ведущему: запертую
     /// дверь игра проверяет у того, кто в неё лезет, а лезут в чужую машину как
     /// раз не ведущие.
+    /// Опускает и поднимает стёкла. Целиком, а не разницей: прочесть у игры
+    /// нынешнее положение нечем.
+    void applyWindows(int vehicle, std::uint8_t open) const;
+
+    /// Складывает или поднимает крышу. Ноль означает «не трогать».
+    void applyRoof(int vehicle, std::uint8_t roof) const;
+
     void applyLock(int vehicle, std::uint8_t lockState) const;
 
     void applyDamage(int vehicle, const shared::VehicleState& state,
@@ -219,6 +226,8 @@ private:
     NativeHandler doorAngle_ = nullptr;
     NativeHandler lockDoors_ = nullptr;
     NativeHandler doorControl_ = nullptr;
+    NativeHandler rollDown_ = nullptr;
+    NativeHandler rollUp_ = nullptr;
     NativeHandler shutDoor_ = nullptr;
     NativeHandler doorDamaged_ = nullptr;
     NativeHandler breakDoor_ = nullptr;
