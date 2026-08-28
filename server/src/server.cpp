@@ -1247,6 +1247,8 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
     // только сравнением — так же, как посадку в машину.
     const VehicleDirectory::Vehicle* const before = vehicles_.find(state.id);
     const std::uint16_t wasFlags = before == nullptr ? 0 : before->state.flags;
+    const shared::VehicleId wasTrailer =
+        before == nullptr ? shared::kInvalidVehicleId : before->state.trailer;
 
     // Снимок принимается только от ведущего. Всё остальное — отставший снимок
     // того, у кого машину уже забрали, или ошибка в клиенте; и то и другое
@@ -1255,7 +1257,7 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
         return;
     }
 
-    tellScriptsAboutVehicle(*player, state.id, wasFlags, state.flags);
+    tellScriptsAboutVehicle(*player, state.id, wasFlags, state.flags, wasTrailer, state.trailer);
 
     // Разослан снимок будет в ближайшем такте, связкой вместе с остальными
     // машинами (broadcastVehicleStates), а не отсюда и не немедленно.
@@ -2357,7 +2359,9 @@ void Server::chatLine(shared::PlayerId to, std::string text) {
 }
 
 void Server::tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehicle,
-                                     std::uint16_t before, std::uint16_t after) {
+                                     std::uint16_t before, std::uint16_t after,
+                                     shared::VehicleId trailerBefore,
+                                     shared::VehicleId trailerAfter) {
     const auto tell = [&](script::EventKind kind, bool on, bool withOwner) {
         script::Event event;
         event.kind = kind;
@@ -2388,6 +2392,38 @@ void Server::tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehi
         // включил, там не называют. Мы знаем ведущего, но врать про порядок
         // доводов нельзя — режим читает их по счёту.
         tell(script::EventKind::VehicleSiren, sirenNow, false);
+    }
+
+    // Сцепка и расцепка — по перемене того же поля снимка, из которого о ней
+    // узнают все остальные. Своего сообщения у неё нет и не нужно: сцепку
+    // объявляет тягач, и объявляет он её снимком.
+    if (trailerAfter == trailerBefore) {
+        return;
+    }
+
+    const auto tellHitch = [&](script::EventKind kind, shared::VehicleId other) {
+        script::Event event;
+        event.kind = kind;
+        event.vehicle = script::Vehicle{core_, vehicle};
+        event.killer = script::Player{core_, owner.id};
+
+        // Второй машиной идёт прицеп. Общего поля под вторую машину у события
+        // нет, и заводить его ради двух случаев незачем — номер едет тем же
+        // полем, что и оружие: оно здесь свободно, и названо это прямо у
+        // самого события.
+        event.weapon = other;
+
+        (void)events_.dispatch(event);
+    };
+
+    // Расцепка — первой: машина, сменившая один прицеп на другой, сперва
+    // отпустила прежний. Обратный порядок объявил бы её сцепленной с двумя.
+    if (trailerBefore != shared::kInvalidVehicleId) {
+        tellHitch(script::EventKind::VehicleDetach, trailerBefore);
+    }
+
+    if (trailerAfter != shared::kInvalidVehicleId) {
+        tellHitch(script::EventKind::VehicleAttach, trailerAfter);
     }
 }
 

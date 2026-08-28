@@ -243,7 +243,9 @@ private:
     /// Гудок и сирена приходят признаком, а не сообщением: увидеть нажатие можно
     /// только сравнением снимков — так же, как посадку в машину.
     void tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehicle,
-                                 std::uint16_t before, std::uint16_t after);
+                                 std::uint16_t before, std::uint16_t after,
+                                 shared::VehicleId trailerBefore,
+                                 shared::VehicleId trailerAfter);
 
     void tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
                                  const shared::PlayerState& after);

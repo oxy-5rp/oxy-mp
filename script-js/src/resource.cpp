@@ -76,6 +76,10 @@ namespace {
         return "playerHeal";
     case EventKind::PlayerDimensionChange:
         return "playerDimensionChange";
+    case EventKind::VehicleAttach:
+        return "vehicleAttach";
+    case EventKind::VehicleDetach:
+        return "vehicleDetach";
     case EventKind::ClientEvent:
         // Отдельного имени нет: события от клиента различаются своим именем, и
         // собирается оно в dispatch.
@@ -578,6 +582,15 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(wrapPlayer(*this, context, event.player.id()));
         arguments.push_back(v8::Number::New(isolate, event.dimensionWas));
         arguments.push_back(v8::Number::New(isolate, event.dimension));
+        break;
+
+    case EventKind::VehicleAttach:
+    case EventKind::VehicleDetach:
+        // Порядок доводов — alt:V: тягач, прицеп. Ведущего там не называют, и
+        // называть его здесь нельзя — режим читает доводы по счёту.
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(
+            wrapVehicle(*this, context, static_cast<shared::VehicleId>(event.weapon)));
         break;
 
     case EventKind::ClientEvent:
