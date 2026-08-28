@@ -50,6 +50,19 @@ std::vector<std::string> Console::take() {
 std::vector<std::string> splitCommand(std::string_view line) {
     std::vector<std::string> parts;
 
+    // Метка порядка байтов в начале первой строки обрезается.
+    //
+    // Из живой консоли она не приходит никогда, а из канала — запросто: так
+    // пишет файлы PowerShell, и так же поступают половина запускающих сценариев.
+    // Останься она — первая команда за запуск не совпала бы ни с чем: «﻿look»
+    // это не «look», и увидеть разницу в журнале нельзя, метка невидима.
+    // Замечено ровно так: на живом сервере первая команда пришла с ней.
+    constexpr std::string_view kByteOrderMark = "\xEF\xBB\xBF";
+
+    if (line.starts_with(kByteOrderMark)) {
+        line.remove_prefix(kByteOrderMark.size());
+    }
+
     std::size_t at = 0;
 
     while (at < line.size()) {

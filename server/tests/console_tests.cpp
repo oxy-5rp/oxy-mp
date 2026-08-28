@@ -69,6 +69,23 @@ TEST_CASE("a carriage return from a foreign line ending is cut off",
     CHECK(splitCommand("\r").empty());
 }
 
+TEST_CASE("a byte order mark from a pipe is cut off", "[server][console]") {
+    // Из живой консоли она не приходит никогда, а из канала — запросто: так
+    // пишет файлы PowerShell. Замечено на живом сервере: первая команда за
+    // запуск пришла с ней, и увидеть это в журнале нельзя — метка невидима.
+    const auto parts = splitCommand("\xEF\xBB\xBF" "look");
+
+    REQUIRE(parts.size() == 1);
+    CHECK(parts[0] == "look");
+
+    // Только в начале и только один раз: посреди строки это обычные байты, и
+    // выкусывать их оттуда не наше дело.
+    const auto withArguments = splitCommand("\xEF\xBB\xBF" "give oxy 100");
+
+    REQUIRE(withArguments.size() == 3);
+    CHECK(withArguments[0] == "give");
+}
+
 TEST_CASE("tabs separate arguments just like spaces", "[server][console]") {
     const auto parts = splitCommand("give\toxy\t100");
 

@@ -56,7 +56,8 @@
     const kCursorY = 240;
 
     function screenSize() {
-        const [ширина, высота] = natives.getScreenResolution(0, 0);
+        // Первое место списка — возврат самого натива; у `void` там пусто.
+        const [, ширина, высота] = natives.getScreenResolution(0, 0);
         return new shared.Vector2(ширина, высота);
     }
 

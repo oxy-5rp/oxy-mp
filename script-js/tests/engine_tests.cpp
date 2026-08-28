@@ -32,6 +32,8 @@
 
 namespace {
 
+using oxymp::script::Event;
+using oxymp::script::EventKind;
 using oxymp::script::Events;
 using oxymp::script::js::Engine;
 using oxymp::script::testing::FakeCore;
@@ -85,13 +87,19 @@ private:
     std::filesystem::path root_;
 };
 
+/// Шина событий сессии. Через неё проверки объявляют то, что объявляет сервер.
+Events& bus() {
+    static Events only;
+    return only;
+}
+
 /// Поднятый движок.
 ///
 /// Один на прогон: Node заводится один раз на процесс — это его правило, не
 /// наше, и поднять его заново нельзя.
 Engine* engine() {
     static FakeCore core;
-    static Events events;
+    Events& events = bus();
     static std::string error;
     static const std::unique_ptr<Engine> only = Engine::create(core, events, error);
 
@@ -246,8 +254,104 @@ void aResourceHearsAboutItsNeighbours() {
     engine()->stop("first");
 }
 
+/// Событие сессии с единственным строковым доводом доходит целым.
+///
+/// **Ровно здесь слой однажды промахнулся, и промахнулся молча.** Через одно имя
+/// до него доходят двое: события сессии, у которых доводы готовые, и объявленные
+/// ресурсом, у которых довод один — строка JSON. Различал он их счётом доводов —
+/// «один довод и он строка, значит от ресурса», — и первое же событие сессии,
+/// подошедшее под это описание, разобралось как чужое: `consoleCommand('stop')`
+/// без доводов пришёл обработчику именем `undefined`.
+///
+/// Беда сидела ровно в половине случаев: команда с доводами работала. Поймать её
+/// набором нельзя было ничем — она живёт на стыке ядра и слоя, и видно её только
+/// изнутри поднятого ресурса.
+void aSessionEventWithOneStringArrivesWhole() {
+    // Сырой литерал, а не строка с переносами: JavaScript внутри читается как
+    // JavaScript, а не как лестница из кавычек.
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('consoleCommand', (name, ...args) =>
+    fs.writeFileSync(path.join(__dirname, 'typed.txt'), `${name}|${args.length}`));
+)js"};
+
+    std::string error;
+    expect(engine()->start("console", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event typed;
+    typed.kind = EventKind::ConsoleCommand;
+    typed.name = "stop";
+
+    (void)bus().dispatch(typed);
+
+    expect(wrote(resource.root() / "typed.txt") == "stop|0",
+           "команда без доводов пришла не той: " + wrote(resource.root() / "typed.txt"));
+
+    // И с доводами — тем же путём, чтобы видно было, что починка не сломала
+    // вторую половину.
+    Event withArguments;
+    withArguments.kind = EventKind::ConsoleCommand;
+    withArguments.name = "kick";
+    withArguments.arguments = {"oxy", "за дело"};
+
+    (void)bus().dispatch(withArguments);
+
+    expect(wrote(resource.root() / "typed.txt") == "kick|2",
+           "команда с доводами пришла не той: " + wrote(resource.root() / "typed.txt"));
+
+    engine()->stop("console");
+}
+
+/// Событие, объявленное ресурсом, по-прежнему доходит разобранным.
+///
+/// Пара к предыдущей: разведя два потока по именам, легко было увести не туда
+/// второй. Здесь ресурс объявляет событие сам себе — так же, как это делает
+/// `alt.emit` у alt:V.
+///
+/// Объявляется оно из обработчика, а не из точки входа, и это не прихоть:
+/// разнос объявленного (`onAnnounce`) ставится движком **после** запуска
+/// ресурса, и `alt.emit`, позванный прямо из точки входа, не доходит никуда.
+/// Проверять здесь надо тот путь, которым событиями пользуются на самом деле, —
+/// из обработчика.
+void aResourceStillHearsItsOwnEmit() {
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('своё', (число, слово) =>
+    fs.writeFileSync(path.join(__dirname, 'own.txt'), `${число}|${слово}`));
+
+alt.on('consoleCommand', () => alt.emit('своё', 42, 'привет'));
+)js"};
+
+    std::string error;
+    expect(engine()->start("own", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event typed;
+    typed.kind = EventKind::ConsoleCommand;
+    typed.name = "давай";
+
+    (void)bus().dispatch(typed);
+
+    // Число осталось числом, а строка строкой: доводы объявленного ресурсом
+    // ходят уложенными в JSON, и разбирает их отдельный мостик.
+    expect(wrote(resource.root() / "own.txt") == "42|привет",
+           "объявленное ресурсом пришло не тем: " + wrote(resource.root() / "own.txt"));
+
+    engine()->stop("own");
+}
+
 const std::map<std::string, std::function<void()>>& cases() {
     static const std::map<std::string, std::function<void()>> known{
+        {"a-session-event-with-one-string-arrives-whole",
+         &aSessionEventWithOneStringArrivesWhole},
+        {"a-resource-still-hears-its-own-emit", &aResourceStillHearsItsOwnEmit},
         {"a-resource-hears-its-own-start", &aResourceHearsItsOwnStart},
         {"a-resource-hears-about-its-neighbours", &aResourceHearsAboutItsNeighbours},
         {"broken-entry-is-refused", &brokenEntryIsRefused},

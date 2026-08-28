@@ -536,6 +536,26 @@ TEST_CASE("the client knows every player of the session, not only itself", "[cli
     CHECK(said("я 7"));
 }
 
+TEST_CASE("a native that returns nothing still keeps its place in the answer",
+          "[client][js]") {
+    // **Место возврата занято всегда, даже у натива, который ничего не
+    // возвращает.** У alt:V это объявлено прямо: `[void, number, number]`, и
+    // таких нативов сто восемьдесят два. Прежде `void` своего места не занимал,
+    // и список выходил на единицу короче — доводы разъезжались со своими
+    // местами у всех ста восьмидесяти двух разом.
+    //
+    // Ошибки при этом не было ни одной: список законный, числа настоящие,
+    // только не те. Замечено живой игрой: `getActualScreenResolution` ответил
+    // «1080 на undefined» вместо «1920 на 1080».
+    REQUIRE(run("shape", "const natives = require('natives');\n"
+                          "const alt = require('alt-client');\n"
+                          "const ответ = natives.getScreenResolution(0, 0);\n"
+                          "alt.log('длина ' + ответ.length +\n"
+                          "    ', первое ' + (ответ[0] === undefined ? 'пусто' : ответ[0]));\n"));
+
+    CHECK(said("длина 3, первое пусто"));
+}
+
 TEST_CASE("a body that appeared is announced, and so is one that went",
           "[client][js]") {
     // Событий об этом не было вовсе, и режим на них опирается: над появившимся
