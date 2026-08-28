@@ -396,15 +396,32 @@
     /// Держится не игрой, а нами: у маркера нет дескриптора, его рисуют заново
     /// каждый кадр. Отсюда и устройство — список живых маркеров и один обход по
     /// нему на кадр. Забудь мы про кадр — маркер мигнёт и исчезнет.
+    /// Сколько маркеров заведено. Служит номерами: у alt:V маркер спрашивают
+    /// по номеру (`Marker.getByID`), и номер этот клиентский — сервер о
+    /// маркерах не знает вовсе.
+    let nextMarkerId = 0;
+
     class Marker extends BaseObject {
-        constructor(markerType, pos, color, scale) {
+        #id;
+        #streamingDistance;
+
+        /// Доводы — как у alt:V, и четвёртый здесь **не размер**.
+        ///
+        /// Прежде четвёртым принимался `scale`, а у alt:V там `useStreaming`.
+        /// Ошибка эта молчала вдвойне: `new alt.Marker(t, pos, color, true, 50)`
+        /// давал размер `Vector3(true)`, то есть единицу по всем осям — как раз
+        /// умолчание, — и маркер выглядел правильным, пока режим не заводил
+        /// подгружаемый маркер с размером по умолчанию. Размер ставится
+        /// свойством, как и у alt:V.
+        constructor(markerType, pos, color, useStreaming, streamingDistance) {
             super();
+
+            this.#id = nextMarkerId++;
 
             this.markerType = Number(markerType) || 0;
             this.pos = new shared.Vector3(pos);
             this.color = color === undefined ? shared.RGBA.white : new shared.RGBA(color);
-            this.scale = scale === undefined ? new shared.Vector3(1, 1, 1)
-                                             : new shared.Vector3(scale);
+            this.scale = new shared.Vector3(1, 1, 1);
 
             this.dir = shared.Vector3.zero;
             this.rot = shared.Vector3.zero;
@@ -414,14 +431,55 @@
             this.faceCamera = false;
             this.rotate = false;
 
+            // Ноль означает «рисовать всегда», как у alt:V без подгрузки.
+            this.#streamingDistance = useStreaming ? (Number(streamingDistance) || 0) : 0;
+
             Marker.all.push(this);
         }
 
         static all = [];
 
+        static getByID(id) {
+            return Marker.all.find((marker) => marker.id === id) ?? null;
+        }
+
+        static get count() { return Marker.all.length; }
+
+        get id() { return this.#id; }
+
+        get streamingDistance() { return this.#streamingDistance; }
+
+        /// Всякий заведённый здесь маркер общий: он виден тому, у кого заведён,
+        /// и больше никому. Направленные — те, что сервер показывает одному
+        /// игроку, — сюда не приходят: канала для них нет.
+        get isGlobal() { return true; }
+
+        /// Кому маркер направлен. У общего — никому, и у alt:V тоже `null`.
+        /// Отказывать здесь нельзя: `null` — законный ответ, а не умолчание
+        /// вместо ответа.
+        get target() { return null; }
+
+        /// Виден ли маркер прямо сейчас.
+        ///
+        /// Спрашивается у расстояния, а не помнится: маркер без подгрузки виден
+        /// всегда, а с подгрузкой — пока игрок не ушёл дальше названного.
+        get isStreamedIn() {
+            if (this.#streamingDistance <= 0) {
+                return true;
+            }
+
+            const я = natives.getEntityCoords(natives.playerPedId(), true);
+            const dx = я.x - this.pos.x;
+            const dy = я.y - this.pos.y;
+            const dz = я.z - this.pos.z;
+
+            return dx * dx + dy * dy + dz * dz
+                <= this.#streamingDistance * this.#streamingDistance;
+        }
+
         /// Рисует себя. Зовётся раз в кадр.
         _draw() {
-            if (!this.visible) {
+            if (!this.visible || !this.isStreamedIn) {
                 return;
             }
 
