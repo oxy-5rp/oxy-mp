@@ -13,6 +13,14 @@
     const shared = alt.shared;
     const natives = alt.natives;
 
+    /// Отказ вслух. Тот же, что у сущностей: вопрос без ответа обязан отказать,
+    /// а не промолчать — тишину ресурс примет за правду и унесёт её дальше.
+    function absent(what) {
+        return function () {
+            throw new Error(`${what}: в oxyMP этого ещё нет`);
+        };
+    }
+
     /// Всё, что заведено скриптом и живёт до destroy().
     class BaseObject {
         #alive = true;
@@ -66,6 +74,21 @@
         #route = false;
         #priority = 0;
         #category = 0;
+        #flashes = false;
+        #flashTimer = 0;
+        #flashInterval = 0;
+        #bright = false;
+        #friendly = false;
+        #showCone = false;
+        #display = 2;
+        #highDetail = false;
+        #missionCreator = false;
+        #headingIndicator = false;
+        #tick = false;
+        #shrinked = false;
+        #number = 0;
+        #secondaryColor = null;
+        #gxtName = '';
 
         constructor(handle) {
             super();
@@ -172,6 +195,156 @@
             const point = new shared.Vector3(value);
             natives.setBlipCoords(this.#handle, point.x, point.y, point.z);
         }
+
+        // --- Остальное убранство метки ---------------------------------------
+        //
+        // Всё это у игры только на запись: обратных нативов нет ни у одного из
+        // них, и последнее заданное хранится рядом — как и у цвета со значком
+        // выше. Ошибка тут молчит: метка просто не мигает, и понять, что
+        // распоряжение не дошло, нельзя ничем.
+
+        get flashes() { return this.#flashes; }
+
+        set flashes(value) {
+            this.#flashes = Boolean(value);
+            natives.setBlipFlashes(this.#handle, this.#flashes);
+        }
+
+        get flashTimer() { return this.#flashTimer; }
+
+        set flashTimer(value) {
+            this.#flashTimer = Number(value) || 0;
+            natives.setBlipFlashTimer(this.#handle, this.#flashTimer);
+        }
+
+        get flashInterval() { return this.#flashInterval; }
+
+        set flashInterval(value) {
+            this.#flashInterval = Number(value) || 0;
+            natives.setBlipFlashInterval(this.#handle, this.#flashInterval);
+        }
+
+        get bright() { return this.#bright; }
+
+        set bright(value) {
+            this.#bright = Boolean(value);
+            natives.setBlipBright(this.#handle, this.#bright);
+        }
+
+        get isFriendly() { return this.#friendly; }
+
+        set isFriendly(value) {
+            this.#friendly = Boolean(value);
+            natives.setBlipAsFriendly(this.#handle, this.#friendly);
+        }
+
+        get showCone() { return this.#showCone; }
+
+        set showCone(value) {
+            this.#showCone = Boolean(value);
+            natives.setBlipShowCone(this.#handle, this.#showCone);
+        }
+
+        get display() { return this.#display; }
+
+        set display(value) {
+            this.#display = Number(value) || 0;
+            natives.setBlipDisplay(this.#handle, this.#display);
+        }
+
+        get highDetail() { return this.#highDetail; }
+
+        set highDetail(value) {
+            this.#highDetail = Boolean(value);
+            natives.setBlipHighDetail(this.#handle, this.#highDetail);
+        }
+
+        get asMissionCreator() { return this.#missionCreator; }
+
+        set asMissionCreator(value) {
+            this.#missionCreator = Boolean(value);
+            natives.setBlipAsMissionCreatorBlip(this.#handle, this.#missionCreator);
+        }
+
+        get headingIndicatorVisible() { return this.#headingIndicator; }
+
+        set headingIndicatorVisible(value) {
+            this.#headingIndicator = Boolean(value);
+            natives.showHeadingIndicatorOnBlip(this.#handle, this.#headingIndicator);
+        }
+
+        get tickVisible() { return this.#tick; }
+
+        set tickVisible(value) {
+            this.#tick = Boolean(value);
+            natives.showTickOnBlip(this.#handle, this.#tick);
+        }
+
+        get shrinked() { return this.#shrinked; }
+
+        set shrinked(value) {
+            this.#shrinked = Boolean(value);
+            natives.setBlipShrink(this.#handle, this.#shrinked);
+        }
+
+        get number() { return this.#number; }
+
+        set number(value) {
+            this.#number = Number(value) || 0;
+            natives.showNumberOnBlip(this.#handle, this.#number);
+        }
+
+        get secondaryColor() { return this.#secondaryColor; }
+
+        /// Второй цвет задаётся тремя дробными долями, а не номером из палитры:
+        /// у натива довод именно такой. Ресурс же вправе дать и RGBA, и три
+        /// числа — приводим к тому, что понимает игра.
+        set secondaryColor(value) {
+            const цвет = new shared.RGBA(value);
+
+            this.#secondaryColor = цвет;
+
+            natives.setBlipSecondaryColour(this.#handle, цвет.r / 255, цвет.g / 255,
+                                           цвет.b / 255);
+        }
+
+        get gxtName() { return this.#gxtName; }
+
+        /// Подпись из словаря игры, а не своя строка. Тем и отличается от
+        /// `name`: та собирается сборщиком текста, а эта берётся по имени из
+        /// файла переводов — и переводится вместе с игрой.
+        set gxtName(value) {
+            this.#gxtName = String(value);
+            natives.setBlipNameFromTextFile(this.#handle, this.#gxtName);
+        }
+
+        /// Мигнуть один раз. Метод, а не признак: у alt:V это `pulse()`.
+        pulse() {
+            natives.pulseBlip(this.#handle);
+        }
+
+        /// Растворить метку и вернуть её. Доводы — прозрачность и время.
+        fade(opacity, duration) {
+            natives.setBlipFade(this.#handle, Number(opacity) || 0, Number(duration) || 0);
+        }
+
+        /// Чего у игры нет вовсе.
+        ///
+        /// Нативов на эти четыре нет ни в открытой базе имён, по которой
+        /// переводятся хеши, ни в таблице alt:V. Молчать нельзя: метка без
+        /// значка друга выглядит точно так же, как метка, которой этот значок
+        /// не дошёл.
+        get friendIndicatorVisible() { return absent('blip.friendIndicatorVisible')(); }
+        set friendIndicatorVisible(_value) { absent('blip.friendIndicatorVisible')(); }
+
+        get crewIndicatorVisible() { return absent('blip.crewIndicatorVisible')(); }
+        set crewIndicatorVisible(_value) { absent('blip.crewIndicatorVisible')(); }
+
+        get outlineIndicatorVisible() { return absent('blip.outlineIndicatorVisible')(); }
+        set outlineIndicatorVisible(_value) { absent('blip.outlineIndicatorVisible')(); }
+
+        get isHiddenOnLegend() { return absent('blip.isHiddenOnLegend')(); }
+        set isHiddenOnLegend(_value) { absent('blip.isHiddenOnLegend')(); }
 
         destroy() {
             if (!super.valid) {

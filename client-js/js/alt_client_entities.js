@@ -257,7 +257,16 @@
         }
 
         setMeta(key, value) {
-            ownMetaFor(this.#metaKey).set(key, value);
+            const store = ownMetaFor(this.#metaKey);
+            const было = store.get(key);
+
+            store.set(key, value);
+
+            // Объявляется и своя метаданная: у alt:V `metaChange` есть на обеих
+            // сторонах, и подписываются на него именно там, где живёт то, что
+            // реагирует на перемену. Первым доводом идёт сама сущность, а не
+            // пара «род и номер»: ресурс сравнивает её через `===` со своей.
+            alt.client.emit('metaChange', this, key, value, было);
         }
 
         getMeta(key) {
@@ -269,7 +278,11 @@
         }
 
         deleteMeta(key) {
-            ownMetaFor(this.#metaKey).delete(key);
+            const store = ownMetaFor(this.#metaKey);
+            const было = store.get(key);
+
+            store.delete(key);
+            alt.client.emit('metaChange', this, key, undefined, было);
         }
 
         getMetaKeys() {

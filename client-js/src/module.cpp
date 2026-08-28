@@ -144,6 +144,25 @@ std::int32_t setUp() {
     return client.readResourceFile(client.context, resource, toAbi(file)).data != nullptr;
 }
 
+/// Один довод строкой, уложенный так, как их ждёт слой на JavaScript.
+///
+/// Он разбирает нагрузку как JSON и ждёт набора доводов; строка, посланная как
+/// есть, дошла бы одним доводом только по счастливой случайности разбора.
+[[nodiscard]] std::string asArguments(std::string_view text) {
+    std::string out = "[\"";
+
+    for (const char letter : text) {
+        if (letter == '"' || letter == '\\') {
+            out.push_back('\\');
+        }
+
+        out.push_back(letter);
+    }
+
+    out += "\"]";
+    return out;
+}
+
 std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry) {
     if (!process().ready) {
         return 0;
@@ -190,12 +209,39 @@ std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry
         return 0;
     }
 
+    // О подъёме говорится до того, как ресурс попал в список, и это порядок, а
+    // не случайность: `anyResourceStart` слушают соседи, а сам поднявшийся о
+    // себе узнаёт своим `resourceStart` — и получить его должен только он.
+    for (const auto& [other, living] : resources()) {
+        living->dispatch("anyResourceStart", asArguments(key));
+    }
+
+    // Довод у `resourceStart` — «поднялся ли с ошибкой». Здесь всегда ложь: до
+    // сюда доходит только удавшийся подъём, а неудавшийся сказал о себе выше.
+    resource->dispatch("resourceStart", "[false]");
+    resource->dispatch("anyResourceStart", asArguments(key));
+
     resources().emplace(key, std::move(resource));
     return 1;
 }
 
 void stopResource(OxympJsText name) {
-    resources().erase(fromAbi(name));
+    const std::string key = fromAbi(name);
+
+    const auto known = resources().find(key);
+    if (known == resources().end()) {
+        return;
+    }
+
+    // Своему — до разбора: обработчик вправе прибрать за собой, а у разобранного
+    // ресурса звать уже нечего.
+    known->second->dispatch("resourceStop", asArguments(key));
+
+    resources().erase(known);
+
+    for (const auto& [other, living] : resources()) {
+        living->dispatch("anyResourceStop", asArguments(key));
+    }
 }
 
 void tick() {

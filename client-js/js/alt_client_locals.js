@@ -394,6 +394,28 @@
     /// а то же, что делает alt:V: его клиентские зоны следят за местным игроком,
     /// а зоны, о которых должен знать сервер, заводятся на сервере (там они уже
     /// есть — см. `script/`).
+    /// Объявляет вход и выход двумя именами.
+    ///
+    /// Нынешний alt:V объявляет `entityEnterColshape` и `entityLeaveColshape`;
+    /// `enterColshape` и `leaveColshape` остались от прежних его сборок и от
+    /// RAGE MP. Серверная половина объявляет оба с тех пор, как выяснилось, что
+    /// зоны считались правильно и оповещали пустоту; клиентская объявляла одно
+    /// старое имя ещё долго после этого — та же беда, только на другой стороне.
+    ///
+    /// Имена написаны здесь целиком, а не собраны из кусков, и это нарочно:
+    /// паритет считается сверкой имён с объявлениями alt:V, а спрятанное в
+    /// шаблонной строке имя числится отсутствующим.
+    function announce(shape, entity, entered) {
+        if (entered) {
+            alt.client.emit('entityEnterColshape', shape, entity);
+            alt.client.emit('enterColshape', shape, entity);
+            return;
+        }
+
+        alt.client.emit('entityLeaveColshape', shape, entity);
+        alt.client.emit('leaveColshape', shape, entity);
+    }
+
     class Colshape extends LocalEntity {
         #inside = false;
 
@@ -434,7 +456,7 @@
             }
 
             this.#inside = внутри;
-            alt.client.emit(внутри ? 'enterColshape' : 'leaveColshape', this, player);
+            announce(this, player, внутри);
         }
 
         destroy() {
