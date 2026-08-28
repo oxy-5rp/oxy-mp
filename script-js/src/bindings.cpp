@@ -3223,6 +3223,46 @@ void setWeather(const v8::FunctionCallbackInfo<v8::Value>& info) {
         info.Length() >= 1 ? fromJs(isolate, info[0]) : ""));
 }
 
+/// Чем сервер объявил себя при запуске.
+///
+/// Отдаётся обычным объектом, а не заготовкой класса: у alt:V это тоже простой
+/// `IServerConfig`, и режимы кладут его целиком в свои настройки.
+///
+/// Пароля здесь нет и не будет — только признак того, что он есть. Режим,
+/// положивший его в свой журнал или отправивший в своё окно, раздал бы его
+/// игрокам, а спрашивать пароль у сервера ему незачем: проверяет его сервер.
+void serverConfig(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const script::ServerConfigInfo settings = resourceOf(isolate).core().config();
+    const v8::Local<v8::Object> out = v8::Object::New(isolate);
+
+    (void)out->Set(context, toJs(isolate, std::string{"name"}), toJs(isolate, settings.name));
+
+    putNumber(context, out, "port", settings.port);
+    putNumber(context, out, "players", static_cast<double>(settings.maxPlayers));
+    putNumber(context, out, "tickRate", settings.tickRate);
+    putNumber(context, out, "streamingDistance", settings.streamDistance);
+
+    (void)out->Set(context, toJs(isolate, std::string{"passworded"}),
+                   v8::Boolean::New(isolate, settings.passworded));
+    (void)out->Set(context, toJs(isolate, std::string{"debug"}),
+                   v8::Boolean::New(isolate, settings.verbose));
+
+    const v8::Local<v8::Array> named =
+        v8::Array::New(isolate, static_cast<int>(settings.resources.size()));
+
+    for (std::size_t at = 0; at < settings.resources.size(); ++at) {
+        (void)named->Set(context, static_cast<std::uint32_t>(at),
+                         toJs(isolate, settings.resources[at]));
+    }
+
+    (void)out->Set(context, toJs(isolate, std::string{"resources"}), named);
+
+    info.GetReturnValue().Set(out);
+}
+
 void setTime(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3610,6 +3650,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "removeCheckpoint", removeCheckpoint);
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
+    addFunction(context, oxymp, "serverConfig", serverConfig);
 
     // Классы кладутся туда же: скрипту они нужны не для того, чтобы заводить
     // сущности, а для проверок вида `x instanceof oxymp.Player`.

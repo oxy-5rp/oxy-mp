@@ -1191,6 +1191,25 @@ bool ServerCore::setVehicleDimension(shared::VehicleId id, std::int32_t dimensio
 /// Общее на три рода: у alt:V это одно событие `removeEntity`, а не три, и
 /// различает роды оно самой сущностью. Игрока сюда не заводят — он уходит своим
 /// событием, и считать его уход дважды незачем.
+script::ServerConfigInfo ServerCore::config() const {
+    if (config_ == nullptr) {
+        return {};
+    }
+
+    return script::ServerConfigInfo{
+        .name = config_->name,
+        .port = config_->port,
+        .maxPlayers = config_->maxPlayers,
+        // Признак, а не сам пароль: режим, положивший его в свой журнал или
+        // отправивший в своё окно, раздал бы его игрокам.
+        .passworded = !config_->password.empty(),
+        .tickRate = config_->tickRate,
+        .streamDistance = config_->streamDistance,
+        .verbose = config_->verbose,
+        .resources = config_->resources,
+    };
+}
+
 void ServerCore::tellEntityGone(shared::EntityKind kind, std::uint32_t id) {
     script::Event gone;
     gone.kind = script::EventKind::RemoveEntity;

@@ -2037,7 +2037,15 @@
         restartResource: absent('alt.restartResource'),
         startResource: absent('alt.startResource'),
         stopResource: absent('alt.stopResource'),
-        getServerConfig: absent('alt.getServerConfig'),
+        /// Чем сервер объявил себя при запуске.
+        ///
+        /// Состав — то из `IServerConfig` alt:V, что у нас есть на самом деле.
+        /// Чего нет, того здесь нет и в помине: пустая строка вместо адреса
+        /// сайта выглядела бы как «сайта нет», а его просто никто не спрашивал.
+        ///
+        /// Пароля здесь нет и не будет — только `passworded`. Режим, положивший
+        /// его в свой журнал или отправивший в своё окно, раздал бы его игрокам.
+        getServerConfig: () => native.serverConfig(),
         /// Кто и что стоит рядом с точкой.
         ///
         /// Считается перебором по реестрам, а не по своему указателю: своего

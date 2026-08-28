@@ -258,6 +258,8 @@ public:
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
     bool clearTasks(shared::PlayerId id) override;
     void explode(const script::ExplosionInfo& explosion) override;
+
+    [[nodiscard]] script::ServerConfigInfo config() const override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;

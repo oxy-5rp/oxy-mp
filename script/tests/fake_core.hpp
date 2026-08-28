@@ -306,6 +306,12 @@ public:
                                    explosion.position.y, explosion.position.z));
     }
 
+    /// Настройки подставного сервера. Правятся проверкой напрямую: здесь это
+    /// просто поле, а не файл.
+    ServerConfigInfo settings;
+
+    [[nodiscard]] ServerConfigInfo config() const override { return settings; }
+
     bool clearTasks(shared::PlayerId id) override {
         if (!player(id)) {
             return false;
