@@ -42,7 +42,8 @@ foreach(case
     a-resource-still-hears-its-own-emit
     a-resource-hears-its-own-start
     a-resource-hears-about-its-neighbours
-    a-refused-resource-is-announced-to-neighbours)
+    a-refused-resource-is-announced-to-neighbours
+    object-form-of-setmeta-is-spread-into-pairs)
 
     add_test(NAME "script-js: ${case}"
              COMMAND oxymp_script_js_tests "${case}")

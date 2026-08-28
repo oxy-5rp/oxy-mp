@@ -108,7 +108,10 @@
         // объект и есть сам себе хозяин, он не пересоздаётся на каждое обращение.
         #meta = new Map();
 
-        setMeta(key, value) { this.#meta.set(key, value); }
+        /// Принимает и пару, и объект целиком — обе формы alt:V.
+        setMeta(key, value) {
+            shared._eachMetaPair(key, value, (name, own) => this.#meta.set(name, own));
+        }
         getMeta(key) { return this.#meta.get(key); }
         hasMeta(key) { return this.#meta.has(key); }
         deleteMeta(key) { this.#meta.delete(key); }

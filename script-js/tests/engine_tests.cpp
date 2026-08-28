@@ -409,6 +409,50 @@ alt.on('consoleCommand', () => alt.emit('своё', 42, 'привет'));
     engine()->stop("own");
 }
 
+/// Объектная форма `setMeta` раскладывается на пары.
+///
+/// У alt:V у всякого `set*Meta` две формы: пара «ключ и значение» и объект
+/// целиком. Принимали мы только первую — и `setMeta({счёт: 1})` ложился одним
+/// ключом `[object Object]` со значением `undefined`. Ошибки при этом нет
+/// никакой: ключ законный, вызов прошёл, а данные исчезли.
+///
+/// Проверяется здесь общая метаданная, а не сущностная, и нарочно: сущности
+/// нужен подключённый игрок, а помощник у всех восьми мест один и тот же.
+void objectFormOfSetMetaIsSpreadIntoPairs() {
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('consoleCommand', () => {
+    alt.setMeta({ счёт: 1, имя: 'оксти' });
+    alt.setMeta('порознь', true);
+
+    const ключи = alt.getMetaKeys().sort().join(',');
+
+    fs.writeFileSync(path.join(__dirname, 'meta.txt'),
+                     `${ключи}|${alt.getMeta('счёт')}|${alt.getMeta('имя')}`);
+});
+)js"};
+
+    std::string error;
+    expect(engine()->start("meta", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event typed;
+    typed.kind = EventKind::ConsoleCommand;
+    typed.name = "давай";
+
+    (void)bus().dispatch(typed);
+
+    const std::string got = wrote(resource.root() / "meta.txt");
+
+    expect(got == "имя,порознь,счёт|1|оксти",
+           "объектная форма setMeta разложилась не в пары: " + got);
+
+    engine()->stop("meta");
+}
+
 const std::map<std::string, std::function<void()>>& cases() {
     static const std::map<std::string, std::function<void()>> known{
         {"a-session-event-with-one-string-arrives-whole",
@@ -424,6 +468,8 @@ const std::map<std::string, std::function<void()>>& cases() {
         {"whole-resource-rises-after-broken-one", &wholeResourceRisesAfterBrokenOne},
         {"missing-entry-is-named", &missingEntryIsNamed},
         {"escaping-entry-is-refused", &escapingEntryIsRefused},
+        {"object-form-of-setmeta-is-spread-into-pairs",
+         &objectFormOfSetMetaIsSpreadIntoPairs},
     };
 
     return known;

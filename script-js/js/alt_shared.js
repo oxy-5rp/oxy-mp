@@ -508,6 +508,27 @@
         }
     }
 
+    /// Раскладывает объектную форму `set*Meta` на пары.
+    ///
+    /// У alt:V у всякого `setMeta`, `setSyncedMeta`, `setStreamSyncedMeta` и
+    /// `setLocalMeta` две формы: пара «ключ и значение» и объект целиком.
+    /// Принимали мы только первую — и `player.setMeta({счёт: 1})` ложился одним
+    /// ключом `[object Object]` со значением `undefined`. Молча: ключ этот
+    /// законный, ошибки нет, а данные исчезали.
+    ///
+    /// Живёт в общем файле, потому что мест, где это нужно, восемь и они на
+    /// обеих сторонах.
+    function eachMetaPair(key, value, put) {
+        if (typeof key === 'object' && key !== null) {
+            for (const [name, own] of Object.entries(key)) {
+                put(name, own);
+            }
+            return;
+        }
+
+        put(key, value);
+    }
+
     const shared = {
         Vector3,
         Vector2,
@@ -562,6 +583,10 @@
         // Того, чего ещё нет, — с внятным отказом вместо тишины.
         File: { exists: absent('alt.File'), read: absent('alt.File') },
     };
+
+    // Помощник по объектной форме `set*Meta`. Не часть alt:V — своё имя с
+    // подчёркиванием, чтобы его нельзя было принять за объявленное им.
+    shared._eachMetaPair = eachMetaPair;
 
     Object.assign(shared, enums);
 

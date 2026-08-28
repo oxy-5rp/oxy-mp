@@ -680,12 +680,15 @@
         // Обычным объектом, а не набором дескрипторов: так все свойства выходят
         // переопределяемыми сами собой, и заводить их вручную не приходится.
         Object.assign(target.prototype, {
+            /// Принимает и пару, и объект целиком — обе формы alt:V.
             setMeta(key, value) {
-                const store = metaFor(kind, this.id);
-                const was = store.get(key);
+                shared._eachMetaPair(key, value, (name, own) => {
+                    const store = metaFor(kind, this.id);
+                    const was = store.get(name);
 
-                store.set(key, value);
-                server.fireLocal('metaChange', [this, key, value, was]);
+                    store.set(name, own);
+                    server.fireLocal('metaChange', [this, name, own, was]);
+                });
             },
             getMeta(key) { return metaFor(kind, this.id).get(key); },
             hasMeta(key) { return metaFor(kind, this.id).has(key); },
@@ -699,11 +702,12 @@
             getMetaKeys() { return [...metaFor(kind, this.id).keys()]; },
 
             setSyncedMeta(key, value) {
+              shared._eachMetaPair(key, value, (name, own) => {
                 const store = syncedFor(kind, this.id);
-                const was = store.get(key);
+                const was = store.get(name);
 
-                store.set(key, value);
-                publishSynced(kind, this.id, key, value);
+                store.set(name, own);
+                publishSynced(kind, this.id, name, own);
 
                 // Событие объявляется и на сервере, а не только у клиента.
                 //
@@ -718,7 +722,8 @@
                 // прежнее. Сущностью идёт `this`, а не пара «род и номер»:
                 // ресурс сравнивает её через `===` со своей, и слепок с теми же
                 // числами не сошёлся бы никогда.
-                server.fireLocal('syncedMetaChange', [this, key, value, was]);
+                server.fireLocal('syncedMetaChange', [this, name, own, was]);
+              });
             },
             getSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
             hasSyncedMeta(key) { return syncedFor(kind, this.id).has(key); },
@@ -741,12 +746,14 @@
             /// ожидал, но не меньше. Молчать об этом всё же нельзя — потому и
             /// сказано здесь.
             setStreamSyncedMeta(key, value) {
-                const store = syncedFor(kind, this.id);
-                const was = store.get(key);
+                shared._eachMetaPair(key, value, (name, own) => {
+                    const store = syncedFor(kind, this.id);
+                    const was = store.get(name);
 
-                store.set(key, value);
-                publishSynced(kind, this.id, key, value, true);
-                server.fireLocal('streamSyncedMetaChange', [this, key, value, was]);
+                    store.set(name, own);
+                    publishSynced(kind, this.id, name, own, true);
+                    server.fireLocal('streamSyncedMetaChange', [this, name, own, was]);
+                });
             },
             getStreamSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
             hasStreamSyncedMeta(key) { return syncedFor(kind, this.id).has(key); },
@@ -1573,16 +1580,18 @@
     /// метаданные эти принадлежат не телу, а тому, кто за ним сидит.
     Object.assign(Player.prototype, {
         setLocalMeta(key, value) {
-            const store = localFor(this.id);
-            const было = store.get(key);
+            shared._eachMetaPair(key, value, (name, own) => {
+                const store = localFor(this.id);
+                const было = store.get(name);
 
-            store.set(key, value);
-            publishLocal(this, key, value);
+                store.set(name, own);
+                publishLocal(this, name, own);
 
-            // Объявляется и на сервере: у alt:V `localMetaChange` есть здесь, и
-            // подписываются на него именно тут — там, где живёт то, что
-            // реагирует на перемену.
-            server.fireLocal('localMetaChange', [this, key, value, было]);
+                // Объявляется и на сервере: у alt:V `localMetaChange` есть
+                // здесь, и подписываются на него именно тут — там, где живёт
+                // то, что реагирует на перемену.
+                server.fireLocal('localMetaChange', [this, name, own, было]);
+            });
         },
         getLocalMeta(key) { return localFor(this.id).get(key); },
         hasLocalMeta(key) { return localFor(this.id).has(key); },
@@ -2001,12 +2010,14 @@
         /// Различать их с сущностными обязательно: режим, подписанный на оба,
         /// считал бы всякое изменение дважды.
         setSyncedMeta: (key, value) => {
-            const store = syncedFor('global', 0);
-            const was = store.get(key);
+            shared._eachMetaPair(key, value, (name, own) => {
+                const store = syncedFor('global', 0);
+                const was = store.get(name);
 
-            store.set(key, value);
-            publishSynced('global', 0, key, value);
-            server.fireLocal('globalSyncedMetaChange', [key, value, was]);
+                store.set(name, own);
+                publishSynced('global', 0, name, own);
+                server.fireLocal('globalSyncedMetaChange', [name, own, was]);
+            });
         },
         getSyncedMeta: (key) => syncedFor('global', 0).get(key),
         hasSyncedMeta: (key) => syncedFor('global', 0).has(key),
@@ -2022,11 +2033,13 @@
 
         /// Общие метаданные, не покидающие сервер.
         setMeta: (key, value) => {
-            const store = metaFor('global', 0);
-            const was = store.get(key);
+            shared._eachMetaPair(key, value, (name, own) => {
+                const store = metaFor('global', 0);
+                const was = store.get(name);
 
-            store.set(key, value);
-            server.fireLocal('globalMetaChange', [key, value, was]);
+                store.set(name, own);
+                server.fireLocal('globalMetaChange', [name, own, was]);
+            });
         },
         getMeta: (key) => metaFor('global', 0).get(key),
         hasMeta: (key) => metaFor('global', 0).has(key),
