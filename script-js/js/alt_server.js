@@ -1117,6 +1117,11 @@
     /// Машины уже нет — пустое описание, а не бросок: свойства внешности читают
     /// в перечислениях и в обработчиках, и машина, исчезнувшая между двумя
     /// строками, здесь обычное дело.
+    /// Какого выпуска запись внешности. Поднимать при всякой правке состава:
+    /// запись прежнего выпуска тогда отказывает вслух вместо того, чтобы лечь
+    /// на машину не теми полями.
+    const kAppearanceFormat = 1;
+
     function look(vehicle) {
         return vehicle.appearance ?? { mods: [] };
     }
@@ -1428,10 +1433,48 @@
             get: absent('vehicle.darkness'),
             set: unperformed('vehicle.darkness', 'затемнение особых машин не передаётся'),
         },
-        getAppearanceDataBase64: { value: absent('vehicle.getAppearanceDataBase64') },
+        /// Вся внешность одной строкой — чтобы положить её в базу и достать
+        /// обратно. Ровно для этого её и зовут: сохранить тюнинг машины при
+        /// выходе игрока и вернуть при входе.
+        ///
+        /// Запись **наша по составу, а не alt:V**, и подделываться под его
+        /// раскладку мы не стали: у него внутри слепок его собственной
+        /// структуры, поле в поле, и совпасть с ней можно только случайно. Зато
+        /// запись помечена своим именем и своим числом — и чужая, попавшая сюда
+        /// из базы, оставшейся от alt:V, отказывает вслух, а не ложится на
+        /// машину чем попало. Молчаливо принятая чужая запись дала бы машину со
+        /// случайным цветом и случайными деталями, и виноватой выглядела бы
+        /// машина, а не запись.
+        getAppearanceDataBase64: {
+            value() {
+                const worn = look(this);
+
+                return Buffer.from(JSON.stringify({ oxymp: kAppearanceFormat, worn }),
+                                   'utf8').toString('base64');
+            },
+        },
         setAppearanceDataBase64: {
-            value: unperformed('vehicle.setAppearanceDataBase64',
-                               'внешность у нас своя по составу, чужую запись не разобрать'),
+            value(data) {
+                let record;
+
+                try {
+                    record = JSON.parse(Buffer.from(String(data), 'base64').toString('utf8'));
+                } catch (беда) {
+                    throw new Error('vehicle.setAppearanceDataBase64: запись не разбирается — '
+                                    + беда.message);
+                }
+
+                if (record?.oxymp !== kAppearanceFormat) {
+                    throw new Error('vehicle.setAppearanceDataBase64: запись не наша или от '
+                                    + `другой сборки (ждали ${kAppearanceFormat}, `
+                                    + `в записи ${record?.oxymp})`);
+                }
+
+                // Целиком, а не полями: чего в записи нет, то и не должно
+                // остаться от прежней внешности — иначе восстановленная машина
+                // унесла бы с собой деталь, которой у сохранённой не было.
+                return reshape(this, (worn) => Object.assign(worn, record.worn));
+            },
         },
     });
 
