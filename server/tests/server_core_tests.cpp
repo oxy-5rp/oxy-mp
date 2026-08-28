@@ -170,6 +170,19 @@ public:
                                                                                 : static_cast<int>(to),
                                    text));
     }
+
+    /// Имена ресурсов, которые подставной сервер согласен знать. Пусто —
+    /// согласен на любое.
+    std::vector<std::string> catalogued;
+
+    bool resourceAsked(std::string_view name, script::ResourceAction action) override {
+        if (!catalogued.empty() && std::ranges::find(catalogued, name) == catalogued.end()) {
+            return false;
+        }
+
+        sent.push_back(std::format("resource {} {}", static_cast<int>(action), name));
+        return true;
+    }
 };
 
 /// Слушатель, записывающий события и то, что он успел о них узнать.
@@ -223,6 +236,31 @@ struct Session {
 };
 
 } // namespace
+
+TEST_CASE("a request about a resource is passed on, not performed on the spot",
+          "[server][script]") {
+    // Ядро само ресурсами не распоряжается и распоряжаться не должно: каталог и
+    // машины, которые их поднимают, принадлежат серверу. Проверяется здесь
+    // именно это — что просьба доходит до сервера с тем именем и тем родом, с
+    // какими её подали.
+    Session session;
+
+    CHECK(session.core.askResource("admin", script::ResourceAction::Restart));
+    CHECK(session.core.askResource("amcj", script::ResourceAction::Stop));
+
+    CHECK(session.sink.sent == std::vector<std::string>{"resource 2 admin", "resource 1 amcj"});
+}
+
+TEST_CASE("a request about a resource nobody has refuses at once", "[server][script]") {
+    // Отказ приходит просящему, а не в журнал спустя такт: к ближайшему такту
+    // его обработчик давно кончится, и ответ пришёл бы в пустоту.
+    Session session;
+
+    session.sink.catalogued = {"admin"};
+
+    CHECK(session.core.askResource("admin", script::ResourceAction::Start));
+    CHECK_FALSE(session.core.askResource("такого-нет", script::ResourceAction::Start));
+}
 
 TEST_CASE("the server describes itself to scripts without handing out the password",
           "[server][script]") {

@@ -32,7 +32,7 @@ public:
     [[nodiscard]] std::string_view type() const noexcept override { return "js"; }
 
     bool start(const ScriptResource& resource, std::string& error) override;
-    void stop(const ScriptResource& resource) override;
+    bool stop(const ScriptResource& resource) override;
 
 private:
     explicit JsRuntime(std::unique_ptr<script::js::Engine> engine) noexcept;

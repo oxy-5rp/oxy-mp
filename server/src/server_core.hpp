@@ -180,6 +180,17 @@ public:
     /// Спрашивается у рассылки, потому что знает это транспорт, а он — у
     /// сервера. Ядро своих сокетов не держит и держать не должно: заведи оно
     /// их, проверить его стало бы нельзя.
+    /// Скрипт просит поднять, остановить или перезапустить ресурс.
+    ///
+    /// Ядро этого не умеет и уметь не должно: каталог ресурсов и машины,
+    /// которые их поднимают, принадлежат серверу, а не ядру. false — ресурса с
+    /// таким именем в каталоге нет.
+    ///
+    /// Исполняется просьба не здесь, а перед ближайшим тактом: приходит она
+    /// изнутри изолята одного из ресурсов, а остановка разбирает изолят целиком
+    /// — вместе со стеком, по которому сюда пришли.
+    virtual bool resourceAsked(std::string_view name, script::ResourceAction action) = 0;
+
     [[nodiscard]] virtual std::string addressOf(const Player& player) const = 0;
     [[nodiscard]] virtual std::uint32_t latencyOf(const Player& player) const = 0;
 
@@ -260,6 +271,8 @@ public:
     void explode(const script::ExplosionInfo& explosion) override;
 
     [[nodiscard]] script::ServerConfigInfo config() const override;
+
+    bool askResource(std::string_view name, script::ResourceAction action) override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;

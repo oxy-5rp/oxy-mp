@@ -3263,6 +3263,24 @@ void serverConfig(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(out);
 }
 
+/// Просьба поднять, остановить или перезапустить ресурс.
+///
+/// Шаблоном на все три, потому что отличаются они одним числом: разбор довода,
+/// отказ и ответ у них общие, а три почти одинаковых тела — это три места, где
+/// легко разойтись.
+template<script::ResourceAction Action>
+void askResource(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    if (info.Length() < 1) {
+        fail(isolate, "распоряжение о ресурсе ждёт его имя");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().askResource(fromJs(isolate, info[0]), Action));
+}
+
 void setTime(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3651,6 +3669,10 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
     addFunction(context, oxymp, "serverConfig", serverConfig);
+    addFunction(context, oxymp, "startResource", askResource<script::ResourceAction::Start>);
+    addFunction(context, oxymp, "stopResource", askResource<script::ResourceAction::Stop>);
+    addFunction(context, oxymp, "restartResource",
+                askResource<script::ResourceAction::Restart>);
 
     // Классы кладутся туда же: скрипту они нужны не для того, чтобы заводить
     // сущности, а для проверок вида `x instanceof oxymp.Player`.

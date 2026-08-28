@@ -26,8 +26,8 @@ bool JsRuntime::start(const ScriptResource& resource, std::string& error) {
     return engine_->start(resource.name, resource.root, resource.main, error);
 }
 
-void JsRuntime::stop(const ScriptResource& resource) {
-    engine_->stop(resource.name);
+bool JsRuntime::stop(const ScriptResource& resource) {
+    return engine_->stop(resource.name);
 }
 
 } // namespace oxymp::server

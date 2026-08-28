@@ -312,6 +312,20 @@ public:
 
     [[nodiscard]] ServerConfigInfo config() const override { return settings; }
 
+    /// Имена ресурсов, которые подставное ядро согласно знать. Пусто — согласно
+    /// на любое.
+    std::vector<std::string> catalogued;
+
+    bool askResource(std::string_view name, ResourceAction action) override {
+        if (!catalogued.empty()
+            && std::ranges::find(catalogued, name) == catalogued.end()) {
+            return false;
+        }
+
+        said.push_back(std::format("resource {} {}", static_cast<int>(action), name));
+        return true;
+    }
+
     bool clearTasks(shared::PlayerId id) override {
         if (!player(id)) {
             return false;
@@ -343,7 +357,10 @@ public:
             return false;
         }
 
-        said.push_back(std::format("weapon {} {} {}", id, weapon, ammo));
+        // Признак «вложить в руки» записывается вместе с остальным: проверка,
+        // сверяющая выдачу, обязана видеть и его — иначе выданное запасом и
+        // выданное в руки для неё одно и то же.
+        said.push_back(std::format("weapon {} {} {}{}", id, weapon, ammo, equip ? " held" : ""));
         return true;
     }
 

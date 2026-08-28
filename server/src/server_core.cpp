@@ -1210,6 +1210,10 @@ script::ServerConfigInfo ServerCore::config() const {
     };
 }
 
+bool ServerCore::askResource(std::string_view name, script::ResourceAction action) {
+    return sink_->resourceAsked(name, action);
+}
+
 void ServerCore::tellEntityGone(shared::EntityKind kind, std::uint32_t id) {
     script::Event gone;
     gone.kind = script::EventKind::RemoveEntity;

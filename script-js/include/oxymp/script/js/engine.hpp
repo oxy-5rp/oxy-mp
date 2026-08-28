@@ -51,7 +51,11 @@ public:
                        const std::filesystem::path& main, std::string& error) = 0;
 
     /// Останавливает. Молча, если он и не поднимался.
-    virtual void stop(std::string_view name) = 0;
+    ///
+    /// Отвечает, было ли что останавливать. Ответ нужен не движку, а журналу:
+    /// строка «Resource stopped» уходит наружу, и написанная о ресурсе, который
+    /// и не работал, она врёт — а по журналу разбирают чужие поломки.
+    virtual bool stop(std::string_view name) = 0;
 
     /// Сколько ресурсов поднято прямо сейчас.
     [[nodiscard]] virtual std::size_t running() const noexcept = 0;

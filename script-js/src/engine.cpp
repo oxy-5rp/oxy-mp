@@ -338,12 +338,12 @@ public:
         return true;
     }
 
-    void stop(std::string_view name) override {
+    bool stop(std::string_view name) override {
         const std::string key{name};
         const auto found = resources_.find(key);
 
         if (found == resources_.end()) {
-            return;
+            return false;
         }
 
         // Объявляется до разбора, а не после: обработчик застаёт свой ресурс
@@ -354,6 +354,7 @@ public:
         announce(kAnyResourceStop, std::format("[{}]", asJsonString(key)));
 
         resources_.erase(found);
+        return true;
     }
 
     [[nodiscard]] std::size_t running() const noexcept override { return resources_.size(); }

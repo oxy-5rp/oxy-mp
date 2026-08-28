@@ -2034,9 +2034,21 @@
         HttpClient: absent('alt.HttpClient (он клиентский; на сервере есть fetch)'),
         WebSocketClient: absent('alt.WebSocketClient (он клиентский)'),
         Resource: ScriptResource,
-        restartResource: absent('alt.restartResource'),
-        startResource: absent('alt.startResource'),
-        stopResource: absent('alt.stopResource'),
+        /// Поднять, остановить или перезапустить ресурс по имени.
+        ///
+        /// **Исполняется не сейчас, а перед ближайшим тактом.** Просьба
+        /// приходит изнутри изолята одного из ресурсов, а остановка разбирает
+        /// изолят целиком — вместе со стеком, по которому в просьбу пришли.
+        /// Ресурс, останавливающий сам себя, тем и опасен, что это как раз то,
+        /// чего просит панель управления.
+        ///
+        /// Ответ поэтому означает «просьба принята», а не «сделано»: false —
+        /// ресурса с таким именем нет в каталоге вовсе. У alt:V эти три ничего
+        /// не возвращают; ответ здесь в пользу режима, а не против — соврать
+        /// про несуществующий ресурс мы всё равно не можем.
+        startResource: (name) => native.startResource(String(name)),
+        stopResource: (name) => native.stopResource(String(name)),
+        restartResource: (name) => native.restartResource(String(name)),
         /// Чем сервер объявил себя при запуске.
         ///
         /// Состав — то из `IServerConfig` alt:V, что у нас есть на самом деле.

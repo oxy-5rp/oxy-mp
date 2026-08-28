@@ -214,8 +214,19 @@ private:
     void worldChanged() override;
     void chatLine(shared::PlayerId to, std::string text) override;
 
+    bool resourceAsked(std::string_view name, script::ResourceAction action) override;
+
     [[nodiscard]] std::string addressOf(const Player& player) const override;
     [[nodiscard]] std::uint32_t latencyOf(const Player& player) const override;
+
+    /// Исполняет просьбы скриптов о ресурсах, накопленные с прошлого такта.
+    ///
+    /// Отдельным шагом такта, а не на месте просьбы: просьба приходит изнутри
+    /// изолята одного из ресурсов, а остановка разбирает изолят целиком —
+    /// вместе со стеком, по которому в просьбу пришли. Ресурс, останавливающий
+    /// сам себя, тем и опасен, что это как раз то, чего просит панель
+    /// управления.
+    void serveResourceRequests();
 
     /// Объявляет скриптам событие про игрока.
     ///
@@ -470,6 +481,13 @@ private:
     ///
     /// Пустой список — обычное состояние голого сервера, а не поломка.
     std::vector<std::unique_ptr<Runtime>> runtimes_;
+
+    /// Просьбы скриптов о ресурсах, ждущие ближайшего такта.
+    ///
+    /// Список, а не одна просьба: панель управления вправе попросить о
+    /// нескольких сразу, и потерять все, кроме последней, значило бы сделать
+    /// «перезапусти всё» перезапуском одного.
+    std::vector<std::pair<std::string, script::ResourceAction>> resourceRequests_;
 
     /// Когда в последний раз пересматривали ведущих и раздавали машины по виду.
     ///

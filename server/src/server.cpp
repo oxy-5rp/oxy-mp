@@ -313,6 +313,11 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         reportTraffic();
         runConsole();
 
+        // Просьбы о ресурсах — перед тактом скриптов, а не после: поднявшийся
+        // ресурс должен получить свой первый `tick` в этом же такте, а не
+        // ждать следующего.
+        serveResourceRequests();
+
         // Скрипты — последними в такте, когда сессия уже приведена в порядок.
         // Обработчик увидит мир таким, каким его увидят клиенты, а не застанет
         // его на середине пересдачи машин.
@@ -2698,10 +2703,85 @@ bool Server::goesIntoBundle(std::string_view file, bool described, std::uintmax_
     return std::ranges::find(kMedia, suffix) != kMedia.end();
 }
 
+bool Server::resourceAsked(std::string_view name, script::ResourceAction action) {
+    // Ресурс ищется сейчас, а не при исполнении: сказать «такого нет» нужно
+    // тому, кто просит, — а к ближайшему такту его обработчик давно кончится, и
+    // ответ пришёл бы в пустоту.
+    const auto found = std::ranges::find(catalog_.all(), name, &ScriptResource::name);
+
+    if (found == catalog_.all().end()) {
+        return false;
+    }
+
+    resourceRequests_.emplace_back(std::string{name}, action);
+    return true;
+}
+
+void Server::serveResourceRequests() {
+    if (resourceRequests_.empty()) {
+        return;
+    }
+
+    // Список забирается целиком, а не перебирается на месте: поднявшийся ресурс
+    // вправе попросить о соседе прямо из своей точки входа, и перебор по живому
+    // списку ушёл бы в него в том же такте — то есть до того, как сессия
+    // придёт в порядок.
+    const auto asked = std::move(resourceRequests_);
+    resourceRequests_.clear();
+
+    for (const auto& [name, action] : asked) {
+        const auto found = std::ranges::find(catalog_.all(), name, &ScriptResource::name);
+
+        // Ресурс мог исчезнуть между просьбой и тактом — например, если каталог
+        // перечитали. Молчать нельзя: просивший считает, что просьба принята.
+        if (found == catalog_.all().end()) {
+            spdlog::warn("resource \"{}\" is gone: the request was dropped", name);
+            continue;
+        }
+
+        Runtime* const runtime = runtimeFor(found->type);
+
+        if (runtime == nullptr) {
+            spdlog::error("resource \"{}\": the server has no runtime for type \"{}\"",
+                          name, found->type);
+            continue;
+        }
+
+        // Строка о остановке — только если было что останавливать: «Resource
+        // stopped» о ресурсе, который и не работал, врёт, а по журналу
+        // разбирают чужие поломки. Всплыло это на перезапуске остановленного:
+        // сервер объявлял его остановленным дважды.
+        if (action != script::ResourceAction::Start && runtime->stop(*found)) {
+            spdlog::info("Resource \"{}\" stopped", name);
+        }
+
+        if (action == script::ResourceAction::Stop) {
+            continue;
+        }
+
+        // Точки входа у ресурса может не быть вовсе: так устроены ресурсы с
+        // моделями. Поднимать там нечего, и жаловаться не на что.
+        if (found->main.empty()) {
+            continue;
+        }
+
+        std::string error;
+
+        if (!runtime->start(*found, error)) {
+            spdlog::error("resource \"{}\" did not start: {}", name, error);
+            continue;
+        }
+
+        spdlog::info("Resource \"{}\" started", name);
+    }
+}
+
 void Server::stopResources() {
     for (const ScriptResource& resource : catalog_.all()) {
         if (Runtime* const runtime = runtimeFor(resource.type); runtime != nullptr) {
-            runtime->stop(resource);
+            // Ответ здесь не нужен: останавливаем всё подряд при закрытии
+            // сервера, и не поднимавшийся среди них — обычное дело.
+            (void)runtime->stop(resource);
         }
     }
 }

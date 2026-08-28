@@ -36,7 +36,10 @@ public:
     virtual bool start(const ScriptResource& resource, std::string& error) = 0;
 
     /// Останавливает. Молча, если он и не поднимался.
-    virtual void stop(const ScriptResource& resource) = 0;
+    ///
+    /// Отвечает, было ли что останавливать: строка о остановке уходит в журнал,
+    /// а написанная о ресурсе, который и не работал, она врёт.
+    virtual bool stop(const ScriptResource& resource) = 0;
 
 protected:
     Runtime() = default;
