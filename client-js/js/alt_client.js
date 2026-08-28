@@ -1121,8 +1121,18 @@
         // исключение унесло бы с собой всё, что идёт следом.
         loadModel: unperformed('alt.loadModel',
                                'модель подгружается нативом requestModel'),
-        requestIpl: unperformed('alt.requestIpl',
-                                'куски мира по слову ресурса не подгружаются'),
+        /// Подгружает кусок мира по имени.
+        ///
+        /// Натив у игры есть, и отказ здесь стоял по недосмотру: без него
+        /// режимы со своими помещениями не показывали их вовсе — интерьеры
+        /// GTA V почти все лежат отдельными IPL и без просьбы не грузятся.
+        ///
+        /// Ответа игра не даёт: `REQUEST_IPL` ничего не возвращает, а
+        /// подгрузка занимает кадры. Спросить, вышло ли, можно `isIplActive`
+        /// — тем же путём, каким это делает и alt:V.
+        requestIpl: (name) => alt.natives.requestIpl(String(name)),
+        removeIpl: (name) => alt.natives.removeIpl(String(name)),
+        isIplActive: (name) => alt.natives.isIplActive(String(name)) === true,
         setWeatherCycle: unperformed('alt.setWeatherCycle',
                                      'круг погоды ведёт сервер, а не ресурс'),
 
