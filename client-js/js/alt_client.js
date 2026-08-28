@@ -735,6 +735,7 @@
     /// объявленная «перемена» из ничего в нынешнее была бы ложью.
     let ownInterior = null;
     let ownEntering = null;
+    let ownLeaving = null;
     let ownFocused = null;
     let ownWidth = 0;
     let ownHeight = 0;
@@ -786,7 +787,35 @@
                 ownInterior = внутри;
 
                 if (было !== null) {
-                    fire('playerInteriorChange', [alt.Player.local, было, внутри]);
+                    fire('playerInteriorChange', [entities.local, было, внутри]);
+                }
+            }
+        }
+
+        if (слушают('startLeavingVehicle')) {
+            // Своего вопроса «вылезает ли» у игры нет, и он выводится из трёх
+            // её ответов: «в машине, считая залезающего» — да, «в машине» —
+            // нет, «залезает» — нет. То же правило и в снимке игрока
+            // (`client/src/game/ped_activity.cpp`), и разойтись им нельзя: одно
+            // вылезание, объявленное двумя способами по-разному, — это две
+            // разные правды об одном.
+            //
+            // Проверять это задачей `TASK_LEAVE_VEHICLE` бессмысленно: замерено
+            // покадрово — при выходе по задаче оба ответа держатся истинными до
+            // последнего кадра и разом становятся ложными, промежутка не
+            // возникает. Правило верно для выхода, который затеял человек.
+            const вылезает = alt.natives.isPedInAnyVehicle(тело, true) === true &&
+                             alt.natives.isPedInAnyVehicle(тело, false) !== true &&
+                             alt.natives.isPedGettingIntoAVehicle(тело) !== true;
+
+            if (вылезает !== ownLeaving) {
+                ownLeaving = вылезает;
+
+                if (вылезает) {
+                    const откуда = alt.natives.getVehiclePedIsIn(тело, true);
+
+                    fire('startLeavingVehicle',
+                         [entities.fromScriptID(откуда), -1, entities.local]);
                 }
             }
         }
@@ -795,27 +824,26 @@
             // Машина, в которую человек полез, а не та, в которой он сидит:
             // событие объявляется в начале посадки, а к её концу оно уже не
             // новость.
-            const куда = alt.natives.getVehiclePedIsTryingToEnter(тело);
+            //
+            // Спрашивается двумя нативами, и это не перестраховка.
+            // `GET_VEHICLE_PED_IS_TRYING_TO_ENTER` отвечает только про попытку
+            // сесть на занятое место — проверено живой игрой: при обычной
+            // посадке он молчит. Задача входа при этом видна вторым вопросом, а
+            // машину под ней называет `GET_VEHICLE_PED_IS_IN` со «считать
+            // залезающего».
+            const лезет = alt.natives.isPedGettingIntoAVehicle(тело) === true;
+            const куда = лезет ? alt.natives.getVehiclePedIsIn(тело, true)
+                               : alt.natives.getVehiclePedIsTryingToEnter(тело);
 
             if (куда !== ownEntering) {
                 ownEntering = куда;
 
                 if (куда !== 0) {
-                    const машина = alt.Vehicle.getByScriptID(куда);
-
                     fire('startEnteringVehicle',
-                         [machineOr(машина, куда), -1, alt.Player.local]);
+                         [entities.fromScriptID(куда), -1, entities.local]);
                 }
             }
         }
-    }
-
-    /// Машина сущностью, а если её у слоя нет — хотя бы её номер в игре.
-    ///
-    /// Пустоту сюда отдавать нельзя: обработчик, написанный под alt:V,
-    /// начинается с `vehicle.model`, и `null` уронил бы его на первой же строке.
-    function machineOr(entity, handle) {
-        return entity ?? alt.entities.fromScriptID(handle);
     }
 
     // Кадровая работа слоя: маркеры, курсор, запрет управления.
