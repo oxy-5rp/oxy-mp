@@ -525,6 +525,80 @@
         toString() { return `ColshapeCircle{ id: ${this.id} }`; }
     }
 
+    /// Многоугольник с высотой: границы районов рисуют именно им.
+    ///
+    /// Тот же, что на сервере (`script-js/js/alt_objects.js`), и считает он так
+    /// же — лучевым алгоритмом. Одна и та же зона обязана отвечать одинаково с
+    /// обеих сторон: разойдись они, режим показывал бы игроку «вы в районе»
+    /// там, где сервер этого не признаёт.
+    class ColshapePolygon extends Colshape {
+        #minZ = 0;
+        #maxZ = 0;
+        #points = [];
+
+        constructor(minZ, maxZ, points) {
+            super();
+
+            this.#minZ = Number(minZ) || 0;
+            this.#maxZ = Number(maxZ) || 0;
+            this.#points = (points ?? []).map((each) => new shared.Vector2(each));
+        }
+
+        get minZ() { return this.#minZ; }
+        get maxZ() { return this.#maxZ; }
+        get points() { return this.#points; }
+
+        get pos() {
+            if (this.#points.length === 0) {
+                return shared.Vector3.zero;
+            }
+
+            // Середина по углам, а не по описанной рамке: у alt:V `pos` зоны —
+            // место, вокруг которого она нарисована, и для невыпуклого
+            // многоугольника середина углов ближе к нему, чем угол рамки.
+            let x = 0;
+            let y = 0;
+
+            for (const point of this.#points) {
+                x += point.x;
+                y += point.y;
+            }
+
+            return new shared.Vector3(x / this.#points.length, y / this.#points.length,
+                                      (this.#minZ + this.#maxZ) / 2);
+        }
+
+        /// Лучевой алгоритм: сколько раз луч из точки пересёк границу.
+        ///
+        /// Нечётное число — точка внутри. Способ старый и надёжный, и берётся он
+        /// не из красоты, а из того, что многоугольник здесь может быть и
+        /// невыпуклым: границы районов в режимах рисуют как придётся.
+        isPointIn(point) {
+            const spot = new shared.Vector3(point);
+
+            if (spot.z < this.#minZ || spot.z > this.#maxZ || this.#points.length < 3) {
+                return false;
+            }
+
+            let inside = false;
+
+            for (let i = 0, j = this.#points.length - 1; i < this.#points.length; j = i++) {
+                const a = this.#points[i];
+                const b = this.#points[j];
+
+                const crosses = (a.y > spot.y) !== (b.y > spot.y);
+
+                if (crosses && spot.x < ((b.x - a.x) * (spot.y - a.y)) / (b.y - a.y) + a.x) {
+                    inside = !inside;
+                }
+            }
+
+            return inside;
+        }
+
+        toString() { return `ColshapePolygon{ id: ${this.id} }`; }
+    }
+
     /// Обходит зоны раз в кадр, пока хоть одна заведена.
     ///
     /// Заводится по требованию и снимается, когда зон не осталось: обход
@@ -577,6 +651,7 @@
         ColshapeCuboid,
         ColshapeSphere,
         ColshapeCircle,
+        ColshapePolygon,
 
         /// Зову́т снаружи, заводя зону: см. armWatcher.
         armWatcher,

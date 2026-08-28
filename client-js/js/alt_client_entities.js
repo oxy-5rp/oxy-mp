@@ -140,6 +140,24 @@
     }
 
     /// Всё, что игра считает сущностью: персонаж, машина, предмет.
+    /// Своя метаданная сущностей этой машины.
+    ///
+    /// Одна на весь клиент и по ключу, а не в самих объектах: объект сущности
+    /// здесь собирается заново на всякое обращение, и положенное в него не
+    /// доживает до следующей строки.
+    const ownMeta = new Map();
+
+    function ownMetaFor(key) {
+        let store = ownMeta.get(key);
+
+        if (store === undefined) {
+            store = new Map();
+            ownMeta.set(key, store);
+        }
+
+        return store;
+    }
+
     class Entity extends WorldObject {
         /// Номер сущности в сессии — тот, которым её зовёт сервер.
         ///
@@ -224,10 +242,38 @@
             return this.pos.distanceTo(there);
         }
 
-        setMeta() {
-            // Своя метаданная на клиенте не заведена: у alt:V она принадлежит
-            // сущности, а сущность здесь — отражение чужой, живущее один вызов.
-            throw new Error('entity.setMeta: на клиенте этого ещё нет');
+        /// Своя метаданная — та, что никуда не уходит и живёт на этой машине.
+        ///
+        /// Ключ хранения — не сам объект: сущность здесь отражение, живущее один
+        /// вызов, и записанное в объект пропало бы к следующему обращению.
+        /// Хранится оно по номеру сессии, если он есть, и по номеру в игре, если
+        /// его нет: первый переживает перезаезд сущности, второй — нет, но у
+        /// прохожего и переживать нечего.
+        get #metaKey() {
+            const свой = numbers.get(this);
+
+            return свой === undefined ? `game:${this.scriptID}`
+                                      : `${kMetaName[свой.kind]}:${свой.id}`;
+        }
+
+        setMeta(key, value) {
+            ownMetaFor(this.#metaKey).set(key, value);
+        }
+
+        getMeta(key) {
+            return ownMetaFor(this.#metaKey).get(key);
+        }
+
+        hasMeta(key) {
+            return ownMetaFor(this.#metaKey).has(key);
+        }
+
+        deleteMeta(key) {
+            ownMetaFor(this.#metaKey).delete(key);
+        }
+
+        getMetaKeys() {
+            return [...ownMetaFor(this.#metaKey).keys()];
         }
 
         getSyncedMeta(key) {
@@ -252,6 +298,23 @@
             return this.getSyncedMeta(key) !== undefined;
         }
 
+        /// streamSyncedMeta читается оттуда же, откуда и synced, и это не
+        /// небрежность: на сервере они лежат в одном хранилище — раздачи по
+        /// видимости у oxyMP пока нет, и стриминговая доходит до всех. Читай мы
+        /// её из другого места, режим, положивший её на сервере, не нашёл бы её
+        /// здесь.
+        getStreamSyncedMeta(key) {
+            return this.getSyncedMeta(key);
+        }
+
+        hasStreamSyncedMeta(key) {
+            return this.hasSyncedMeta(key);
+        }
+
+        getStreamSyncedMetaKeys() {
+            return this.getSyncedMetaKeys();
+        }
+
         toString() {
             return `Entity{ scriptID: ${this.scriptID} }`;
         }
@@ -262,6 +325,13 @@
     class Ped extends Entity {
         get armour() {
             return this.valid ? natives.getPedArmour(this.scriptID) : 0;
+        }
+
+        /// Перезаряжается ли сейчас. Спрашивается у игры, а не берётся из
+        /// снимка: снимок описывает игроков сессии, а прохожий по улице
+        /// перезаряжается так же, и ответ ему нужен тот же.
+        get isReloading() {
+            return this.valid ? natives.isPedReloading(this.scriptID) === true : false;
         }
 
         get currentWeapon() {
@@ -438,6 +508,27 @@
 
         get numberPlateText() {
             return this.valid ? natives.getVehicleNumberPlateText(this.scriptID) : '';
+        }
+
+        /// Как машина заперта — числами игры, они же числа alt:V.
+        ///
+        /// Спрашивается у игры, а не помнится по распоряжению сервера: замок
+        /// накладывает каждый, кто машину видит, и наложенное могло не встать.
+        get lockState() {
+            return this.valid ? natives.getVehicleDoorLockStatus(this.scriptID) : 0;
+        }
+
+        /// Передача и обороты у alt:V читаются из памяти самой машины, а не
+        /// нативом: ни того ни другого натива нет ни в открытой базе, ни в
+        /// таблице alt:V. Отказ вслух, а не ноль: ноль означал бы «стоит на
+        /// нейтрали и заглушена», и режим, показывающий тахометр, показал бы
+        /// его неподвижным.
+        get gear() {
+            return absent('vehicle.gear')();
+        }
+
+        get rpm() {
+            return absent('vehicle.rpm')();
         }
 
         toString() {

@@ -712,8 +712,21 @@
         // Сущности: то, что стоит в мире. Собраны поверх нативов, а их номера
         // в сессии — поверх переводчика, который держит клиент.
         WorldObject: entities.WorldObject,
-        Entity: entities.Entity,
-        Ped: entities.Ped,
+        /// `Entity.getByScriptID` отбора не делает: у alt:V он отвечает любой
+        /// сущностью, какая по этому номеру нашлась.
+        Entity: Object.defineProperties(entities.Entity, {
+            getByScriptID: { value: entities.fromScriptID, configurable: true },
+        }),
+        Ped: Object.defineProperties(entities.Ped, {
+            getByScriptID: {
+                value: (handle) => {
+                    const found = entities.fromScriptID(handle);
+
+                    return found instanceof entities.Ped ? found : null;
+                },
+                configurable: true,
+            },
+        }),
         LocalPlayer: entities.LocalPlayer,
 
         /// Игроки сессии — все, о ком сказал сервер.
@@ -734,6 +747,20 @@
             count: { get: () => entities.players().length, configurable: true },
             getByID: { value: (id) => entities.playerById(id), configurable: true },
             getByRemoteID: { value: (id) => entities.playerById(id), configurable: true },
+
+            /// По дескриптору игры — то же, что `alt.fromScriptID`, но с
+            /// отбором по роду: у alt:V `Player.getByScriptID` на машине
+            /// отвечает null, а не машиной. Отдай мы её, режим позвал бы у
+            /// машины `.name` и получил бы невнятную ошибку вместо честного
+            /// «такого игрока нет».
+            getByScriptID: {
+                value: (handle) => {
+                    const found = entities.fromScriptID(handle);
+
+                    return found instanceof entities.Player ? found : null;
+                },
+                configurable: true,
+            },
         }),
 
         /// Машины сессии — тех же правил.
@@ -748,6 +775,14 @@
             count: { get: () => entities.vehicles().length, configurable: true },
             getByID: { value: (id) => entities.vehicleById(id), configurable: true },
             getByRemoteID: { value: (id) => entities.vehicleById(id), configurable: true },
+            getByScriptID: {
+                value: (handle) => {
+                    const found = entities.fromScriptID(handle);
+
+                    return found instanceof entities.Vehicle ? found : null;
+                },
+                configurable: true,
+            },
         }),
 
         /// Сущность по дескриптору игры: нативы отдают именно их.
@@ -802,6 +837,7 @@
         ColshapeCuboid: locals.ColshapeCuboid,
         ColshapeSphere: locals.ColshapeSphere,
         ColshapeCircle: locals.ColshapeCircle,
+        ColshapePolygon: locals.ColshapePolygon,
 
         // Сеть ресурса. Ходит в неё ресурс сервера, а не игрок: своей волей он
         // отсюда ничего не вызовет — ни меню, ни команд, ни клавиш у клиента

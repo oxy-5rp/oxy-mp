@@ -45,6 +45,8 @@
         #name = '';
         #shortRange = false;
         #route = false;
+        #priority = 0;
+        #category = 0;
 
         constructor(handle) {
             super();
@@ -107,6 +109,24 @@
         set route(value) {
             this.#route = Boolean(value);
             natives.setBlipRoute(this.#handle, this.#route);
+        }
+
+        /// Кто рисуется поверх кого, когда метки сошлись в одной точке, и в
+        /// какой раздел списка на карте метка попадёт. Помнятся здесь, а не
+        /// спрашиваются у игры: обратных нативов у неё нет ни для того, ни для
+        /// другого — только запись.
+        get priority() { return this.#priority; }
+
+        set priority(value) {
+            this.#priority = Number(value) || 0;
+            natives.setBlipPriority(this.#handle, this.#priority);
+        }
+
+        get category() { return this.#category; }
+
+        set category(value) {
+            this.#category = Number(value) || 0;
+            natives.setBlipCategory(this.#handle, this.#category);
         }
 
         set routeColor(value) {
