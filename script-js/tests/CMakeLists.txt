@@ -43,7 +43,8 @@ foreach(case
     a-resource-hears-its-own-start
     a-resource-hears-about-its-neighbours
     a-refused-resource-is-announced-to-neighbours
-    object-form-of-setmeta-is-spread-into-pairs)
+    object-form-of-setmeta-is-spread-into-pairs
+    a-handler-error-reaches-the-resource-itself)
 
     add_test(NAME "script-js: ${case}"
              COMMAND oxymp_script_js_tests "${case}")

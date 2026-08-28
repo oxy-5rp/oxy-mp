@@ -142,6 +142,38 @@
         return found;
     }
 
+    /// Место, откуда прилетела ошибка, — по первой строке её стека.
+    ///
+    /// У alt:V `resourceError` называет файл и строку отдельными доводами, а у
+    /// брошенного `Error` они есть только внутри `stack`. Разбирается первая
+    /// строка вида `at что-то (файл:строка:столбец)`; не разобралась — доводы
+    /// остаются пустыми, и это лучше выдуманных: по неверному месту ошибку
+    /// ищут дольше, чем вовсе без места.
+    function whereItBroke(failure) {
+        const stack = typeof failure?.stack === 'string' ? failure.stack : '';
+        const found = stack.match(/\((.*):(\d+):\d+\)/) ?? stack.match(/at (.*):(\d+):\d+/);
+
+        return found === null ? { file: '', line: 0 }
+                              : { file: found[1], line: Number(found[2]) };
+    }
+
+    /// Объявляет ресурсу его же ошибку. У alt:V это `resourceError`, и вешают
+    /// на него отправку в свой сбор ошибок: журнала сервера режиму мало —
+    /// читает его хозяин сервера, а не режим.
+    ///
+    /// Ошибку внутри обработчика ошибки объявлять некому: она ушла бы тому же
+    /// обработчику и по кругу. Такая пишется только в журнал — строкой выше.
+    function tellAboutError(name, failure) {
+        if (name === 'resourceError') {
+            return;
+        }
+
+        const беда = failure instanceof Error ? failure : new Error(String(failure));
+        const { file, line } = whereItBroke(беда);
+
+        fire('resourceError', [беда, file, line, беда.stack ?? '']);
+    }
+
     /// Зовёт подписчиков имени. Возвращает false, если хоть один отменил событие.
     function fire(name, args) {
         // Копия списка нарочно: обработчик волен отписаться прямо отсюда, и
@@ -163,6 +195,7 @@
                 // одна ошибка в одном режиме не повод обрывать сессию всем. Так же
                 // поступает и ядро (см. Resource::call).
                 logError(`ошибка в обработчике «${name}»:`, failure?.stack ?? failure);
+                tellAboutError(name, failure);
                 continue;
             }
 

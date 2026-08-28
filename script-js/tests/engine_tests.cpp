@@ -453,6 +453,52 @@ alt.on('consoleCommand', () => {
     engine()->stop("meta");
 }
 
+/// Ошибка в обработчике доходит до самого ресурса событием.
+///
+/// У alt:V это `resourceError`, и вешают на него отправку в свой сбор ошибок.
+/// Журнала сервера режиму мало: читает его хозяин сервера, а не режим.
+///
+/// Проверяется здесь и охранник от повторного входа: обработчик `resourceError`
+/// сам бросает нарочно. Без охранника разбор ушёл бы в разбор самого себя и
+/// переполнил стек — то есть уронил бы сервер целиком.
+void aHandlerErrorReachesTheResourceItself() {
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('resourceError', (беда, файл, строка) => {
+    fs.writeFileSync(path.join(__dirname, 'error.txt'),
+                     `${беда?.message}|${typeof беда?.stack}|${typeof строка}`);
+
+    // Нарочно: разбор ошибки внутри разбора ошибки обязан кончиться, а не
+    // уйти по кругу.
+    throw new Error('и я тоже ломаюсь');
+});
+
+alt.on('consoleCommand', () => { нетТакого(); });
+)js"};
+
+    std::string error;
+    expect(engine()->start("failing", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event typed;
+    typed.kind = EventKind::ConsoleCommand;
+    typed.name = "давай";
+
+    (void)bus().dispatch(typed);
+
+    const std::string got = wrote(resource.root() / "error.txt");
+
+    // Первым доводом Error, а не строка: режимы сразу берут у него `.message` и
+    // `.stack`, и строка вместо ошибки промолчала бы — `.message` у неё нет.
+    expect(got.starts_with("нетТакого is not defined|string|number"),
+           "ошибка обработчика пришла не тем: " + got);
+
+    engine()->stop("failing");
+}
+
 const std::map<std::string, std::function<void()>>& cases() {
     static const std::map<std::string, std::function<void()>> known{
         {"a-session-event-with-one-string-arrives-whole",
@@ -470,6 +516,8 @@ const std::map<std::string, std::function<void()>>& cases() {
         {"escaping-entry-is-refused", &escapingEntryIsRefused},
         {"object-form-of-setmeta-is-spread-into-pairs",
          &objectFormOfSetMetaIsSpreadIntoPairs},
+        {"a-handler-error-reaches-the-resource-itself",
+         &aHandlerErrorReachesTheResourceItself},
     };
 
     return known;
