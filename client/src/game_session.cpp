@@ -1915,6 +1915,10 @@ void GameSession::showRemotePlayers(int ped) {
         vehicles_.lock(control);
     }
 
+    for (const shared::VehicleDoors& doors : mail_.takeVehicleDoors()) {
+        vehicles_.openDoors(doors);
+    }
+
     for (const shared::VehicleAppearance& appearance : mail_.takeIncomingVehicleAppearances()) {
         vehicles_.applyAppearance(appearance);
     }

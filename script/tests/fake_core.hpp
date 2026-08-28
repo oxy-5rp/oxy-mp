@@ -613,6 +613,18 @@ public:
                }) != 0;
     }
 
+    bool setVehicleDoor(shared::VehicleId id, std::uint8_t door, std::uint8_t level) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+
+        if (it == vehicleList.end() || door >= shared::kVehicleDoorCount ||
+            level > shared::kDoorFullyOpen) {
+            return false;
+        }
+
+        it->doorLevels = shared::withDoorLevel(it->doorLevels, door, level);
+        return true;
+    }
+
     bool setVehicleLock(shared::VehicleId id, std::uint8_t lockState) override {
         const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
         if (it == vehicleList.end()) {

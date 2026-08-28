@@ -19,9 +19,18 @@ using Catch::Approx;
 namespace {
 
 /// Прогоняет сообщение через сборку пакета и обратный разбор.
+///
+/// Заодно спрашивает `peekMessageId` — и это не украшение. Разбор у получателя
+/// начинается именно с него: не узнанный там пакет отбрасывается целиком, ещё
+/// до `decode`, и в журнале остаётся одно «unrecognised packet». Пять сообщений
+/// подряд заводились с проверкой на `decode` и без строки в этом переключателе:
+/// набор был зелёным, а замок, заморозка и двери в игре не делали ничего.
 template<typename Message>
 std::optional<Message> roundTrip(const Message& message) {
     const std::vector<std::uint8_t> packet = encode(message);
+
+    REQUIRE(peekMessageId(ByteView{packet}) == Message::kId);
+
     return decode<Message>(ByteView{packet});
 }
 
@@ -351,7 +360,7 @@ TEST_CASE("everything that happens to a vehicle is worth sending", "[messages]")
         return differs(whole, fresh);
     };
 
-    CHECK(changed([](VehicleState& s) { s.doorsOpen = 1; }));
+    CHECK(changed([](VehicleState& s) { s.doorLevels = 1; }));
     CHECK(changed([](VehicleState& s) { s.doorsBroken = 2; }));
     CHECK(changed([](VehicleState& s) { s.windowsBroken = 4; }));
     CHECK(changed([](VehicleState& s) { s.tyresBurst = 8; }));
@@ -1064,7 +1073,7 @@ TEST_CASE("VehicleState survives a round trip", "[messages]") {
     sent.engineHealth = 300;
     sent.tankHealth = 950;
     sent.flags = VehicleFlag::EngineOn | VehicleFlag::LightsOn;
-    sent.doorsOpen = 0b0000'0101;
+    sent.doorLevels = withDoorLevel(withDoorLevel(0, 0, 7), 2, 3);
     sent.doorsBroken = 0b0000'0010;
     sent.windowsBroken = 0b1000'0001;
     sent.tyresBurst = 0b0000'1000;
@@ -1109,7 +1118,9 @@ TEST_CASE("VehicleState survives a round trip", "[messages]") {
     CHECK(has(received->flags, VehicleFlag::EngineOn));
     CHECK(has(received->flags, VehicleFlag::LightsOn));
     CHECK_FALSE(has(received->flags, VehicleFlag::SirenOn));
-    CHECK(received->doorsOpen == 0b0000'0101);
+    CHECK(doorLevel(received->doorLevels, 0) == 7);
+    CHECK(doorLevel(received->doorLevels, 2) == 3);
+    CHECK(doorLevel(received->doorLevels, 1) == 0);
     CHECK(received->doorsBroken == 0b0000'0010);
     CHECK(received->windowsBroken == 0b1000'0001);
     CHECK(received->tyresBurst == 0b0000'1000);
@@ -1455,13 +1466,42 @@ TEST_CASE("an appearance from the client keeps the face the server knows",
     CHECK(fresh.overlays[1].colour == 4);
 }
 
+TEST_CASE("a door command carries every door at once", "[protocol]") {
+    VehicleDoors doors;
+    doors.id = 7;
+    doors.doorLevels = withDoorLevel(withDoorLevel(0, 0, 7), 5, 2);
+
+    const auto back = roundTrip(doors);
+
+    REQUIRE(back);
+    CHECK(back->id == 7);
+    CHECK(doorLevel(back->doorLevels, 0) == 7);
+    CHECK(doorLevel(back->doorLevels, 5) == 2);
+    CHECK(doorLevel(back->doorLevels, 3) == 0);
+}
+
+TEST_CASE("door levels of the sixth door survive the three written bytes",
+          "[protocol]") {
+    // Шесть дверей по три бита — восемнадцать, и в снимке они идут тремя
+    // байтами. Старшая дверь сидит на самом краю: обрежь мы байт неверно, и
+    // потерялась бы именно она — а заметить это было бы можно только на
+    // машине с багажником.
+    VehicleState state;
+    state.id = 1;
+    state.doorLevels = withDoorLevel(0, 5, 7);
+
+    const auto back = roundTrip(state);
+
+    REQUIRE(back);
+    CHECK(doorLevel(back->doorLevels, 5) == 7);
+}
+
 TEST_CASE("a lock of a vehicle names both the vehicle and the lock", "[protocol]") {
     VehicleControl control;
     control.id = 4242;
     control.lockState = static_cast<std::uint8_t>(VehicleLock::LockPlayerInside);
 
-    const auto packet = encode(control);
-    const auto back = decode<VehicleControl>(ByteView{packet});
+    const auto back = roundTrip(control);
 
     REQUIRE(back);
     CHECK(back->id == 4242);
@@ -1483,7 +1523,7 @@ TEST_CASE("an unlocked vehicle is told apart from one nobody spoke about",
 
     CHECK_FALSE(silent == unlocked);
 
-    const auto back = decode<VehicleControl>(ByteView{encode(unlocked)});
+    const auto back = roundTrip(unlocked);
 
     REQUIRE(back);
     CHECK(back->lockState == 1);
@@ -1494,8 +1534,7 @@ TEST_CASE("a command about the body carries both of its flags", "[protocol]") {
     control.flags = static_cast<std::uint8_t>(PlayerControlFlag::Frozen) |
                     static_cast<std::uint8_t>(PlayerControlFlag::Invincible);
 
-    const auto packet = encode(control);
-    const auto back = decode<PlayerControl>(ByteView{packet});
+    const auto back = roundTrip(control);
 
     REQUIRE(back);
     CHECK(has(back->flags, PlayerControlFlag::Frozen));
@@ -1509,8 +1548,7 @@ TEST_CASE("a command about the body says which flag is off", "[protocol]") {
     PlayerControl control;
     control.flags = static_cast<std::uint8_t>(PlayerControlFlag::Invincible);
 
-    const auto packet = encode(control);
-    const auto back = decode<PlayerControl>(ByteView{packet});
+    const auto back = roundTrip(control);
 
     REQUIRE(back);
     CHECK_FALSE(has(back->flags, PlayerControlFlag::Frozen));

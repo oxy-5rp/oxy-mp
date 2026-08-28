@@ -158,6 +158,7 @@ private:
     void vehicleRepaired(shared::VehicleId id) override;
     void vehicleAppearanceChanged(shared::VehicleId id) override;
     void vehicleControlChanged(shared::VehicleId id) override;
+    void vehicleDoorsChanged(shared::VehicleId id) override;
     void attachmentChanged(AttachmentDirectory::Ref entity) override;
     void controlChanged(const Player& player) override;
     void objectAdded(shared::ObjectId id) override;

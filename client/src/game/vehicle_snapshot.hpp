@@ -70,6 +70,17 @@ public:
     /// Изменившиеся, а не все: разбить стекло можно только один раз, а вот
     /// приказывать разбивать его тридцать раз в секунду игра будет исправно.
     ///
+    /// Ставит одну дверь под нужной степенью: ноль — закрыта, семёрка — настежь.
+    ///
+    /// Своим методом, а не куском наложения снимка, потому что зовут его двое:
+    /// само наложение и распоряжение сервера о дверях. Два одинаковых тела
+    /// разошлись бы на первой же правке.
+    void applyDoor(int vehicle, int door, std::uint32_t level) const;
+
+    /// На какой степени дверь сейчас — по ответу самой игры, а не по памяти о
+    /// том, что мы ей велели. Нужен ведущему: доехавшую дверь больше не ведут.
+    [[nodiscard]] std::uint32_t doorLevelOf(int vehicle, int door) const;
+
     /// Запирает машину так, как велел сервер.
     ///
     /// Накладывается всем, кто машину видит, а не одному ведущему: запертую
@@ -207,7 +218,7 @@ private:
 
     NativeHandler doorAngle_ = nullptr;
     NativeHandler lockDoors_ = nullptr;
-    NativeHandler openDoor_ = nullptr;
+    NativeHandler doorControl_ = nullptr;
     NativeHandler shutDoor_ = nullptr;
     NativeHandler doorDamaged_ = nullptr;
     NativeHandler breakDoor_ = nullptr;

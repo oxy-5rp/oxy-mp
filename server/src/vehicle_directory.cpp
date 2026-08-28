@@ -96,7 +96,7 @@ bool VehicleDirectory::repair(shared::VehicleId id) {
     state.engineHealth = shared::kFullVehicleHealth;
     state.tankHealth = shared::kFullVehicleHealth;
 
-    state.doorsOpen = 0;
+    state.doorLevels = 0;
     state.doorsBroken = 0;
     state.windowsBroken = 0;
     state.tyresBurst = 0;
@@ -122,6 +122,23 @@ bool VehicleDirectory::setLockState(shared::VehicleId id, std::uint8_t lockState
     }
 
     found->second.lockState = lockState;
+    return true;
+}
+
+bool VehicleDirectory::setDoorLevel(shared::VehicleId id, int door, std::uint32_t level) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end() || door < 0 || door >= shared::kVehicleDoorCount) {
+        return false;
+    }
+
+    shared::VehicleState& state = found->second.state;
+    state.doorLevels = shared::withDoorLevel(state.doorLevels, door, level);
+
+    // Состояние изменилось — значит его надо разослать. Без отметки открытая
+    // дверь доезжала бы только до вошедших позже: тем, кто уже смотрит, рассылка
+    // её не показала бы, потому что решает она по этой самой отметке.
+    found->second.stateAt = Clock::now();
+
     return true;
 }
 

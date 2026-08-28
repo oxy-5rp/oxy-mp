@@ -2088,6 +2088,31 @@ void Server::vehicleRemoved(shared::VehicleId id) {
     }
 }
 
+void Server::vehicleDoorsChanged(shared::VehicleId id) {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_.find(id);
+    if (vehicle == nullptr) {
+        return;
+    }
+
+    // Только ведущему: дверь — часть состояния машины, а состояние живёт в его
+    // игре. Остальные узнают о новом положении двери из его же снимка — тем
+    // самым путём, которым узнают обо всём прочем.
+    //
+    // Ведущего может не быть вовсе: брошенная машина стоит и никем не считается.
+    // Тогда распоряжение никуда не уходит, а состояние у сервера всё равно
+    // изменилось — и приедет вошедшим вместе с самой машиной.
+    const net::PeerId peer = ownerPeerOf(id);
+    if (peer == net::kInvalidPeerId) {
+        return;
+    }
+
+    shared::VehicleDoors doors;
+    doors.id = id;
+    doors.doorLevels = vehicle->state.doorLevels;
+
+    sendTo(peer, doors);
+}
+
 void Server::vehicleControlChanged(shared::VehicleId id) {
     const VehicleDirectory::Vehicle* const vehicle = vehicles_.find(id);
     if (vehicle == nullptr) {

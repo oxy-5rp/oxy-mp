@@ -146,6 +146,13 @@ public:
     /// Запирает машину или отпирает её. false — машины уже нет.
     bool setLockState(shared::VehicleId id, std::uint8_t lockState);
 
+    /// Ставит дверь под нужной степенью в состоянии у себя. false — машины нет.
+    ///
+    /// У себя — то есть в том состоянии, которым сервер отвечает вошедшим.
+    /// Ведущему это не указ: у него машина живёт в игре, и распоряжение о двери
+    /// он получает отдельно.
+    bool setDoorLevel(shared::VehicleId id, int door, std::uint32_t level);
+
     /// Переставляет машину в другой слой мира. false — машины уже нет.
     bool setDimension(shared::VehicleId id, std::int32_t dimension);
 

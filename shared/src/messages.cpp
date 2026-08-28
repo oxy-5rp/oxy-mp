@@ -447,7 +447,11 @@ void VehicleState::write(ByteWriter& writer) const {
     writer.writeU16(engineHealth);
     writer.writeU16(tankHealth);
     writer.writeU16(flags);
-    writer.writeU8(doorsOpen);
+    // Три байта, а не четыре: шесть дверей по три бита занимают восемнадцать, и
+    // старшие полтора байта в снимке машины были бы чистой платой за ничто.
+    writer.writeU8(static_cast<std::uint8_t>(doorLevels & 0xFFU));
+    writer.writeU8(static_cast<std::uint8_t>((doorLevels >> 8U) & 0xFFU));
+    writer.writeU8(static_cast<std::uint8_t>((doorLevels >> 16U) & 0x03U));
     writer.writeU8(doorsBroken);
     writer.writeU8(windowsBroken);
     writer.writeU8(tyresBurst);
@@ -478,7 +482,13 @@ VehicleState VehicleState::read(ByteReader& reader) {
     message.engineHealth = reader.readU16();
     message.tankHealth = reader.readU16();
     message.flags = reader.readU16();
-    message.doorsOpen = reader.readU8();
+    {
+        const std::uint32_t low = reader.readU8();
+        const std::uint32_t middle = reader.readU8();
+        const std::uint32_t high = reader.readU8() & 0x03U;
+
+        message.doorLevels = low | (middle << 8U) | (high << 16U);
+    }
     message.doorsBroken = reader.readU8();
     message.windowsBroken = reader.readU8();
     message.tyresBurst = reader.readU8();
@@ -509,7 +519,7 @@ constexpr float kNudgedEnough = 0.01F;
 
 bool differs(const VehicleState& sent, const VehicleState& fresh) noexcept {
     if (sent.id != fresh.id || sent.model != fresh.model || sent.flags != fresh.flags ||
-        sent.doorsOpen != fresh.doorsOpen || sent.doorsBroken != fresh.doorsBroken ||
+        sent.doorLevels != fresh.doorLevels || sent.doorsBroken != fresh.doorsBroken ||
         sent.windowsBroken != fresh.windowsBroken || sent.tyresBurst != fresh.tyresBurst ||
         sent.bodyHealth != fresh.bodyHealth || sent.engineHealth != fresh.engineHealth ||
         sent.tankHealth != fresh.tankHealth || sent.trailer != fresh.trailer) {
@@ -887,6 +897,18 @@ void PlayerTeleport::write(ByteWriter& writer) const {
 PlayerTeleport PlayerTeleport::read(ByteReader& reader) {
     PlayerTeleport message;
     message.position = reader.readVec3();
+    return message;
+}
+
+void VehicleDoors::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeU32(doorLevels);
+}
+
+VehicleDoors VehicleDoors::read(ByteReader& reader) {
+    VehicleDoors message;
+    message.id = reader.readU32();
+    message.doorLevels = reader.readU32();
     return message;
 }
 
@@ -1464,6 +1486,11 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::Explosion:
     case MessageId::WeaponFired:
     case MessageId::PlayerWeapon:
+    case MessageId::VehicleDamageReport:
+    case MessageId::VehicleDamaged:
+    case MessageId::PlayerControl:
+    case MessageId::VehicleControl:
+    case MessageId::VehicleDoors:
         return static_cast<MessageId>(packet.front());
     }
 

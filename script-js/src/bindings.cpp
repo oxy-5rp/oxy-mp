@@ -1083,6 +1083,53 @@ extern const char kLeaderOwnsIt[] =
     "машина живёт в игре у своего ведущего, и это назначает он, а не сервер; "
     "починить её целиком умеет vehicle.repair()";
 
+/// Насколько открыта дверь. Числа — те же, что у alt:V: ноль закрыта, семёрка
+/// настежь.
+void vehicleDoorState(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    const std::optional<std::int64_t> door = argAt(info, 0);
+
+    if (!id || !door) {
+        fail(isolate, "getDoorState ждёт номер двери числом");
+        return;
+    }
+
+    const std::optional<VehicleInfo> vehicle = resourceOf(isolate).core().vehicle(*id);
+
+    if (!vehicle || *door < 0 || *door >= shared::kVehicleDoorCount) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(
+        shared::doorLevel(vehicle->doorLevels, static_cast<int>(*door))));
+}
+
+/// Открывает дверь на заданную степень или закрывает её.
+void vehicleSetDoorState(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    const std::optional<std::int64_t> door = argAt(info, 0);
+    const std::optional<std::int64_t> level = argAt(info, 1);
+
+    if (!id || !door || !level) {
+        fail(isolate, "setDoorState ждёт номер двери и её состояние числами");
+        return;
+    }
+
+    if (*door < 0 || *door >= shared::kVehicleDoorCount || *level < 0 ||
+        *level > static_cast<std::int64_t>(shared::kDoorFullyOpen)) {
+        fail(isolate, "setDoorState: дверей шесть, состояний восемь — от 0 до 7");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setVehicleDoor(
+        *id, static_cast<std::uint8_t>(*door), static_cast<std::uint8_t>(*level)));
+}
+
 /// Запирает машину или отпирает её.
 void setVehicleLock(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                     const v8::PropertyCallbackInfo<void>& info) {
@@ -3046,6 +3093,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "passengers", vehiclePassengers);
     addGetter(isolate, shape, "lockState", vehicleField<&VehicleInfo::lockState>,
               setVehicleLock);
+    addMethod(isolate, shape, "getDoorState", vehicleDoorState);
+    addMethod(isolate, shape, "setDoorState", vehicleSetDoorState);
 
     addGetter(isolate, shape, "appearance", vehicleAppearance);
 

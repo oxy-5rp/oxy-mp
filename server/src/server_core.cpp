@@ -62,9 +62,10 @@ namespace {
         .rotation = vehicle.state.rotation,
         .owner = vehicle.owner,
 
-        // Скорость, прочность и признаки берутся из последнего снимка. Ехали
-        // они в нём с самого начала — недоставало дороги наружу, ровно как у
-        // признаков состояния игрока.
+        // Двери, скорость, прочность и признаки берутся из последнего снимка.
+        // Ехали они в нём с самого начала — недоставало дороги наружу, ровно
+        // как у признаков состояния игрока.
+        .doorLevels = vehicle.state.doorLevels,
         .velocity = vehicle.state.velocity,
         .bodyHealth = vehicle.state.bodyHealth,
         .engineHealth = vehicle.state.engineHealth,
@@ -1226,6 +1227,19 @@ shared::ObjectId ServerCore::createObject(std::uint32_t model, const shared::Vec
 
     sink_->objectAdded(id);
     return id;
+}
+
+bool ServerCore::setVehicleDoor(shared::VehicleId id, std::uint8_t door, std::uint8_t level) {
+    if (door >= shared::kVehicleDoorCount || level > shared::kDoorFullyOpen) {
+        return false;
+    }
+
+    if (!vehicles_->setDoorLevel(id, door, level)) {
+        return false;
+    }
+
+    sink_->vehicleDoorsChanged(id);
+    return true;
 }
 
 bool ServerCore::setVehicleLock(shared::VehicleId id, std::uint8_t lockState) {

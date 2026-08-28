@@ -18,6 +18,14 @@ namespace {
 /// десяток мегабайт, а ждать дольше значит держать человека в неведении.
 constexpr auto kModelPatience = std::chrono::seconds{5};
 
+/// Сколько доводить двери до объявленного угла.
+///
+/// Дверь доезжает за доли секунды, и полторы секунды здесь — запас, а не срок
+/// ожидания. Нужен он ради дверей, которых у модели нет вовсе: у `adder` нет
+/// багажника, и его угол остаётся нулевым, сколько бы его ни вели. Без срока
+/// такую дверь вели бы каждый кадр до конца сессии.
+constexpr auto kDoorPatience = std::chrono::milliseconds{1500};
+
 /// Сколько пассажирских мест перебирается в поисках персонажа, если спросить у
 /// самой машины не удалось.
 ///
@@ -485,6 +493,75 @@ void Vehicles::lock(const shared::VehicleControl& control) {
     known->second.wantedLock = control.lockState;
 }
 
+void Vehicles::openDoors(const shared::VehicleDoors& doors) {
+    const auto known = vehicles_.find(doors.id);
+
+    // Машины здесь может не быть: распоряжение приходит ведущему, а ведущим
+    // назначают того, кто её видит, — но между назначением и её появлением у
+    // нас проходит кадр-другой. Терять распоряжение нельзя: своё состояние
+    // сервер помнит и пришлёт его вместе с машиной, а вот открыть дверь у себя
+    // некому.
+    if (known == vehicles_.end()) {
+        pendingDoors_[doors.id] = doors.doorLevels;
+        return;
+    }
+
+    wantDoors(known->second, doors.doorLevels);
+}
+
+void Vehicles::wantDoors(Entry& entry, std::uint32_t levels) {
+    entry.wantedDoors = levels;
+    entry.doorsUntil = std::chrono::steady_clock::now() + kDoorPatience;
+
+    // Закрыть можно и разом: `SET_VEHICLE_DOOR_SHUT` защёлкивает дверь с
+    // первого раза и вести себя каждый кадр не просит.
+    for (int door = 0; door < shared::kVehicleDoorCount; ++door) {
+        if (shared::doorLevel(levels, door) == 0) {
+            snapshot_.applyDoor(entry.vehicle, door, 0);
+        }
+    }
+}
+
+void Vehicles::driveDoors(Entry& entry) {
+    if (entry.wantedDoors == 0) {
+        return;
+    }
+
+    // Отведённый срок нужен не для того, чтобы бросить работу, а чтобы отличить
+    // дверь, которой у модели нет вовсе, от той, что ещё едет. Не сдвинувшаяся
+    // за полторы секунды не сдвинется никогда: у `adder` нет багажника, и
+    // объявленную ему степень пришлось бы вести до конца сессии.
+    if (entry.doorsUntil != std::chrono::steady_clock::time_point{} &&
+        std::chrono::steady_clock::now() >= entry.doorsUntil) {
+        for (int door = 0; door < shared::kVehicleDoorCount; ++door) {
+            if (shared::doorLevel(entry.wantedDoors, door) != 0 &&
+                snapshot_.doorLevelOf(entry.vehicle, door) == 0) {
+                spdlog::debug("door {} of vehicle {} never moved, giving up on it", door,
+                              entry.vehicle);
+
+                entry.wantedDoors = shared::withDoorLevel(entry.wantedDoors, door, 0);
+            }
+        }
+
+        entry.doorsUntil = {};
+    }
+
+    // Дальше натив зовётся каждый кадр и не перестаёт. Он дверь именно держит:
+    // до упора распахнутая защёлкивается сама, а приоткрытая — нет, и брошенная
+    // закрывается своим же весом за пару секунд. Объявленная на три ступени из
+    // семи так и оседала до нуля, стоило перестать её вести.
+    //
+    // Это не «звать не сработавший натив заново», а поддержание состояния — то
+    // же, что заморозка игрока: игра сбрасывает его сама, и накладывать его
+    // приходится кадром, а не изменением.
+    for (int door = 0; door < shared::kVehicleDoorCount; ++door) {
+        if (const std::uint32_t level = shared::doorLevel(entry.wantedDoors, door);
+            level != 0) {
+            snapshot_.applyDoor(entry.vehicle, door, level);
+        }
+    }
+}
+
 void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, int localPed) {
     if (!ready()) {
         return;
@@ -557,6 +634,13 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
                 pendingLocks_.erase(waiting);
             }
 
+            // Двери — оттуда же и по той же причине.
+            if (const auto waiting = pendingDoors_.find(state.id);
+                waiting != pendingDoors_.end()) {
+                wantDoors(known->second, waiting->second);
+                pendingDoors_.erase(waiting);
+            }
+
             answerTo(known->second, view.owner, ours, towed_.contains(state.id));
             dress(state.id, known->second);
             continue;
@@ -582,6 +666,12 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
         // физикой — и проиграть ей, потому что физика считается каждый кадр, а
         // снимки приходят каждый такт сервера.
         if (ours) {
+            // Двери — единственное, что мы делаем со своей машиной: их объявил
+            // сервер, а довести до угла их может только тот, у кого машина
+            // считается. Ведутся они каждый кадр, потому что натив держит дверь
+            // ровно пока его зовут.
+            driveDoors(entry);
+
             entry.applied = state;
             continue;
         }

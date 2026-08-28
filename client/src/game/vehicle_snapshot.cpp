@@ -198,7 +198,7 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       setBrakeLights_(table.handlerFor(natives::kSetVehicleBrakeLights)),
       doorAngle_(table.handlerFor(natives::kGetVehicleDoorAngleRatio)),
       lockDoors_(table.handlerFor(natives::kSetVehicleDoorsLocked)),
-      openDoor_(table.handlerFor(natives::kSetVehicleDoorOpen)),
+      doorControl_(table.handlerFor(natives::kSetVehicleDoorControl)),
       shutDoor_(table.handlerFor(natives::kSetVehicleDoorShut)),
       doorDamaged_(table.handlerFor(natives::kIsVehicleDoorDamaged)),
       breakDoor_(table.handlerFor(natives::kSetVehicleDoorBroken)),
@@ -372,9 +372,10 @@ shared::VehicleState VehicleSnapshot::read(int vehicle, bool driving) const {
     for (int door = 0; door < shared::kVehicleDoorCount; ++door) {
         const auto bit = static_cast<std::uint8_t>(1U << door);
 
-        if (doorAngle_ != nullptr &&
-            invokeNative<float>(doorAngle_, vehicle, door) > kDoorOpenAngle) {
-            state.doorsOpen |= bit;
+        // Угол от нуля до единицы раскладывается на восемь ступеней — те самые,
+        // которыми дверь описывает alt:V.
+        if (const std::uint32_t level = doorLevelOf(vehicle, door); level != 0) {
+            state.doorLevels = shared::withDoorLevel(state.doorLevels, door, level);
         }
         if (doorDamaged_ != nullptr && invokeNative<bool>(doorDamaged_, vehicle, door)) {
             state.doorsBroken |= bit;
@@ -959,6 +960,58 @@ shared::VehicleHarm VehicleSnapshot::settleHealth(int vehicle, const shared::Veh
     return harm;
 }
 
+void VehicleSnapshot::applyDoor(int vehicle, int door, std::uint32_t level) const {
+    if (vehicle == 0 || door < 0 || door >= shared::kVehicleDoorCount) {
+        return;
+    }
+
+    if (level == 0) {
+        if (shutDoor_ != nullptr) {
+            invokeNative<void>(shutDoor_, vehicle, door, false);
+        }
+
+        return;
+    }
+
+    if (doorControl_ == nullptr) {
+        return;
+    }
+
+    // Открывается дверь одним нативом на все степени, включая крайнюю. Своего
+    // «распахни» здесь нет нарочно: `SET_VEHICLE_DOOR_OPEN` доводит дверь до
+    // упора, и объявленная приоткрытой расходилась бы с той, что у ведущего, —
+    // а держать два пути ради одной степени значит держать непроверенный.
+    //
+    // Скорость целая, а не дробная, и это стоило захода. Отданная числом с
+    // точкой, она приезжает в игру своим двоичным видом: единица становится
+    // миллиардом с лишним, дверь не трогается вовсе, а угол читается обратно
+    // нулём — со стороны неотличимо от «натив не работает». Тот же довод у
+    // alt:V объявлен целым (`iiif`).
+    constexpr int kDoorSpeed = 1;
+
+    invokeNative<void>(doorControl_, vehicle, door, kDoorSpeed,
+                       static_cast<float>(level) /
+                           static_cast<float>(shared::kDoorFullyOpen));
+}
+
+std::uint32_t VehicleSnapshot::doorLevelOf(int vehicle, int door) const {
+    if (doorAngle_ == nullptr || vehicle == 0 || door < 0 ||
+        door >= shared::kVehicleDoorCount) {
+        return 0;
+    }
+
+    const float ratio = invokeNative<float>(doorAngle_, vehicle, door);
+
+    if (ratio <= kDoorOpenAngle) {
+        return 0;
+    }
+
+    const auto steps = static_cast<std::uint32_t>(
+        (ratio * static_cast<float>(shared::kDoorFullyOpen)) + 0.5F);
+
+    return std::min(steps, shared::kDoorFullyOpen);
+}
+
 void VehicleSnapshot::applyLock(int vehicle, std::uint8_t lockState) const {
     if (lockDoors_ == nullptr || vehicle == 0) {
         return;
@@ -991,19 +1044,13 @@ void VehicleSnapshot::applyDamage(int vehicle, const shared::VehicleState& state
             continue;
         }
 
-        const bool open = (state.doorsOpen & bit) != 0;
+        const std::uint32_t level = shared::doorLevel(state.doorLevels, door);
 
-        if (open == ((previous.doorsOpen & bit) != 0)) {
+        if (level == shared::doorLevel(previous.doorLevels, door)) {
             continue;
         }
 
-        if (open && openDoor_ != nullptr) {
-            // Признаки: не болтается на петлях и открывается не мгновенно —
-            // дверь должна распахнуться на глазах, а не оказаться открытой.
-            invokeNative<void>(openDoor_, vehicle, door, false, false);
-        } else if (!open && shutDoor_ != nullptr) {
-            invokeNative<void>(shutDoor_, vehicle, door, false);
-        }
+        applyDoor(vehicle, door, level);
     }
 
     for (int window = 0; window < shared::kVehicleWindowCount; ++window) {

@@ -1975,6 +1975,7 @@ void run() {
         mail.deliverTeleports(connection->takeTeleports());
         mail.deliverControl(connection->control());
         mail.deliverVehicleControls(connection->takeVehicleControls());
+        mail.deliverVehicleDoors(connection->takeVehicleDoors());
         mail.deliverVehicleTeleports(connection->takeVehicleTeleports());
         mail.deliverVehicleRepairs(connection->takeVehicleRepairs());
         mail.deliverVehicleDamage(connection->takeVehicleDamage());

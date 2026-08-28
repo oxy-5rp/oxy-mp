@@ -239,6 +239,14 @@ public:
         return std::exchange(vehicleControls_, {});
     }
 
+    void deliverVehicleDoors(std::vector<shared::VehicleDoors> doors) {
+        vehicleDoors_.insert(vehicleDoors_.end(), doors.begin(), doors.end());
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleDoors> takeVehicleDoors() {
+        return std::exchange(vehicleDoors_, {});
+    }
+
     /// Чем сервер распорядился о теле. Спрашивается каждый кадр и потому не
     /// забирается: наложить признаки однажды нельзя — их сбрасывает подъём из
     /// мёртвых.
@@ -763,6 +771,7 @@ private:
 
     /// Замки машин, о которых сказал сервер и о которых ещё не рассказали игре.
     std::vector<shared::VehicleControl> vehicleControls_;
+    std::vector<shared::VehicleDoors> vehicleDoors_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;

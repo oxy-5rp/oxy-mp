@@ -85,6 +85,10 @@ public:
         sent.push_back(std::format("vehicle- {}", id));
     }
 
+    void vehicleDoorsChanged(shared::VehicleId id) override {
+        sent.push_back(std::format("vehicle doors {}", id));
+    }
+
     void vehicleControlChanged(shared::VehicleId id) override {
         sent.push_back(std::format("vehicle lock {}", id));
     }
@@ -982,6 +986,45 @@ script::EntityRef entity(shared::EntityKind kind, std::uint32_t id) {
 }
 
 } // namespace
+
+TEST_CASE("a door opens to the level it was told", "[server][script]") {
+    Session session;
+    session.join(1, "игрок");
+
+    const shared::VehicleId car = session.core.createVehicle(0xDEADBEEF, {}, 0.0F);
+    REQUIRE(car != shared::kInvalidVehicleId);
+
+    // Приоткрытая, а не настежь: восемь ступеней у alt:V заведены ровно затем,
+    // чтобы отличать одно от другого.
+    REQUIRE(session.core.setVehicleDoor(car, 4, 3));
+    CHECK(std::ranges::count(session.sink.sent, std::format("vehicle doors {}", car)) == 1);
+
+    auto shown = session.core.vehicle(car);
+    REQUIRE(shown.has_value());
+    CHECK(shared::doorLevel(shown->doorLevels, 4) == 3);
+
+    // Соседние двери не тронуты: степени лежат в одном числе, и запись одной не
+    // вправе стереть остальные.
+    CHECK(shared::doorLevel(shown->doorLevels, 0) == 0);
+    CHECK(shared::doorLevel(shown->doorLevels, 5) == 0);
+
+    REQUIRE(session.core.setVehicleDoor(car, 0, shared::kDoorFullyOpen));
+
+    shown = session.core.vehicle(car);
+    REQUIRE(shown.has_value());
+    CHECK(shared::doorLevel(shown->doorLevels, 0) == shared::kDoorFullyOpen);
+    CHECK(shared::doorLevel(shown->doorLevels, 4) == 3);
+}
+
+TEST_CASE("a door that does not exist is refused", "[server][script]") {
+    Session session;
+    const shared::VehicleId car = session.core.createVehicle(0xDEADBEEF, {}, 0.0F);
+
+    // Молча проглоченные, они выглядели бы как сделанное и невидимое.
+    CHECK_FALSE(session.core.setVehicleDoor(car, 6, 1));
+    CHECK_FALSE(session.core.setVehicleDoor(car, 0, 8));
+    CHECK_FALSE(session.core.setVehicleDoor(99, 0, 1));
+}
 
 TEST_CASE("a locked vehicle stays locked and says so once", "[server][script]") {
     Session session;

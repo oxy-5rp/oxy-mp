@@ -1173,6 +1173,12 @@ inline constexpr std::uint64_t kClearPedDecorations = 0XA781062E77B54775;
 /// от минус единицы до единицы.
 inline constexpr std::uint64_t kSetPedFaceFeature = 0XAAF9B08B469F707F;
 
+/// SET_VEHICLE_DOOR_CONTROL, канонический хеш 0XF2BFA0430F0A0FCB.
+///
+/// Ставит дверь под заданным углом, а не распахивает до упора. Доводы: машина,
+/// номер двери, скорость и угол от нуля до единицы.
+inline constexpr std::uint64_t kSetVehicleDoorControl = 0X3E13A302AA0F06BF;
+
 /// SET_VEHICLE_DOORS_LOCKED, канонический хеш 0XB664292EAECF7FA6.
 inline constexpr std::uint64_t kSetVehicleDoorsLocked = 0X0B74F181ADFC39BF;
 

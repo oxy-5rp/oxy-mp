@@ -810,7 +810,18 @@ struct VehicleState {
     std::uint16_t flags = 0;
 
     /// Какие двери открыты и какие оторваны, по биту на дверь.
-    std::uint8_t doorsOpen = 0;
+    /// Насколько открыта каждая дверь: по три бита на дверь, шесть дверей.
+    ///
+    /// **Признаком «открыта» здесь было мало.** У alt:V дверь различает восемь
+    /// степеней (`VehicleDoorState`), и ответить на вопрос о степени
+    /// двузначным «закрыта или настежь» значило бы соврать про приоткрытую. Три
+    /// бита на дверь стоят двух лишних байт на снимок машины — снимок этот
+    /// уходит не каждому и не каждый такт, и цена того стоит.
+    ///
+    /// Ноль — закрыта, семёрка — настежь. Читается это из угла, который отдаёт
+    /// игра, а накладывается обратно тем же углом: у неё есть и «распахни», и
+    /// «поставь под таким углом».
+    std::uint32_t doorLevels = 0;
     std::uint8_t doorsBroken = 0;
 
     /// Какие стёкла выбиты и какие колёса пробиты, по биту на каждое.
@@ -1282,6 +1293,26 @@ struct PlayerTeleport {
     [[nodiscard]] static PlayerTeleport read(ByteReader& reader);
 };
 
+/// Сколько ступеней у открытой двери. Ноль — закрыта, семёрка — настежь.
+///
+/// Столько же, сколько у alt:V: его `VehicleDoorState` от `Closed` до
+/// `OpenedLevel7`. Три бита на дверь ровно под них и отведены.
+inline constexpr std::uint32_t kDoorFullyOpen = 7;
+
+/// Достаёт степень одной двери из упакованного числа.
+[[nodiscard]] constexpr std::uint32_t doorLevel(std::uint32_t levels, int door) noexcept {
+    return (levels >> (door * 3)) & kDoorFullyOpen;
+}
+
+/// Кладёт степень одной двери в упакованное число.
+[[nodiscard]] constexpr std::uint32_t withDoorLevel(std::uint32_t levels, int door,
+                                                    std::uint32_t level) noexcept {
+    const std::uint32_t shift = static_cast<std::uint32_t>(door) * 3U;
+    const std::uint32_t cleared = levels & ~(kDoorFullyOpen << shift);
+
+    return cleared | ((level & kDoorFullyOpen) << shift);
+}
+
 /// Как заперта машина. Числа те же, что у игры и у alt:V.
 enum class VehicleLock : std::uint8_t {
     None = 0,
@@ -1314,6 +1345,25 @@ struct VehicleControl {
 
     void write(ByteWriter& writer) const;
     [[nodiscard]] static VehicleControl read(ByteReader& reader);
+};
+
+/// Распоряжение о дверях машины. Только её ведущему.
+///
+/// Степени те же, что и в снимке: по три бита на дверь. Ведущий их применит, а
+/// остальные узнают о новом состоянии из его же снимка — тем самым путём,
+/// которым узнают обо всём прочем.
+struct VehicleDoors {
+    static constexpr MessageId kId = MessageId::VehicleDoors;
+
+    VehicleId id = kInvalidVehicleId;
+
+    /// Упакованные степени, как в VehicleState::doorLevels.
+    std::uint32_t doorLevels = 0;
+
+    [[nodiscard]] friend bool operator==(const VehicleDoors&, const VehicleDoors&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleDoors read(ByteReader& reader);
 };
 
 /// Чем сервер распоряжается о теле игрока.
