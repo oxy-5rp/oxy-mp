@@ -814,6 +814,60 @@ TEST_CASE("a blip is handed a number by the server, not by the script", "[server
     CHECK(session.sink.sent.back() == std::format("blip {}", id));
 }
 
+TEST_CASE("a blip remembers who it was meant for", "[server][script]") {
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.name = "Только своим";
+    wanted.targets = {7, 9};
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->targets == std::vector<shared::PlayerId>{7, 9});
+}
+
+TEST_CASE("a blip without targets is meant for everyone", "[server][script]") {
+    // Пустой список означает «всем», а не «никому»: так же читает его alt:V, и
+    // метка, поставленная без списка, обязана быть видна всей сессии.
+    Session session;
+
+    const shared::BlipId id = session.core.createBlip(script::BlipInfo{});
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->targets.empty());
+}
+
+TEST_CASE("editing a blip carries its targets, not just its looks",
+          "[server][script]") {
+    // Правка метки идёт целиком, и список тех, кому она видна, — её часть.
+    // Не наложи мы его при правке, `addTarget` не сделал бы ничего: список
+    // менялся бы у ресурса и не доезжал до сервера ни разу.
+    Session session;
+
+    script::BlipInfo wanted;
+    wanted.targets = {4};
+
+    const shared::BlipId id = session.core.createBlip(wanted);
+    REQUIRE(id != shared::kInvalidBlipId);
+
+    script::BlipInfo changed = wanted;
+    changed.targets = {4, 5};
+
+    REQUIRE(session.core.updateBlip(id, changed));
+
+    const auto got = session.core.blip(id);
+
+    REQUIRE(got);
+    CHECK(got->targets == std::vector<shared::PlayerId>{4, 5});
+}
+
 TEST_CASE("a blip is edited whole, and the clients hear about it", "[server][script]") {
     Session session;
 

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 #include <utility>
 
 namespace oxymp::server {
@@ -32,7 +33,10 @@ namespace oxymp::server {
 /// Id — номер картинки, State — её описание из протокола. Ноль в номере
 /// означает «такой картинки нет» у всех трёх родов, и счётчик поэтому
 /// начинается с единицы.
-template<typename IdType, typename StateType>
+/// Ничего сверх общего: у маркера и у контрольной точки своего нет.
+struct NoExtras {};
+
+template<typename IdType, typename StateType, typename Extras = NoExtras>
 class DrawnDirectory {
 public:
     /// Наружу — затем, что рассылает картинки один общий на все три рода код, и
@@ -40,7 +44,7 @@ public:
     using Id = IdType;
     using State = StateType;
 
-    struct Entry {
+    struct Entry : Extras {
         State state;
 
         /// В каком слое мира картинка видна. См. script/dimension.hpp.
@@ -61,7 +65,7 @@ public:
         const Id id = ++nextId_;
 
         state.id = id;
-        entries_.emplace(id, Entry{.state = std::move(state)});
+        entries_.emplace(id, Entry{{}, std::move(state)});
 
         return id;
     }
@@ -94,6 +98,22 @@ public:
         return true;
     }
 
+    /// Называет тех, кому картинка видна. false — картинки уже нет.
+    ///
+    /// Есть только там, где Extras это позволяет: у метки список есть, у
+    /// маркера и точки его нет вовсе, и звать это для них не собирается.
+    bool setTargets(Id id, std::vector<shared::PlayerId> targets)
+        requires requires(Entry entry) { entry.targets; }
+    {
+        const auto found = entries_.find(id);
+        if (found == entries_.end()) {
+            return false;
+        }
+
+        found->second.targets = std::move(targets);
+        return true;
+    }
+
     /// Убирает картинку. false — картинки с таким номером не было.
     bool remove(Id id) { return entries_.erase(id) != 0; }
 
@@ -115,12 +135,24 @@ private:
     Id nextId_ = 0;
 };
 
+/// Кому метка видна.
+///
+/// Своё у метки и больше ни у кого: маркер и точку отбирает у себя тот, кто их
+/// рисует, а метка нарисована на карте и видна оттуда, откуда бы на карту ни
+/// смотрели, — отобрать её может только отправитель.
+///
+/// По сети список не едет: метка просто не уходит тем, кого в нём нет. Пустой
+/// означает «всем» — так же, как `isGlobal` у alt:V.
+struct BlipTargets {
+    std::vector<shared::PlayerId> targets;
+};
+
 /// Метки на карте, поставленные сессией.
 ///
 /// Устроены проще предметов, и это опять следствие того, чем они являются.
 /// Предмет стоит в мире, и до него нужно дойти; метка нарисована на карте и
 /// видна оттуда, откуда бы на карту ни смотрели.
-using BlipDirectory = DrawnDirectory<shared::BlipId, shared::BlipState>;
+using BlipDirectory = DrawnDirectory<shared::BlipId, shared::BlipState, BlipTargets>;
 
 /// Маркеры: фигуры, нарисованные в мире.
 using MarkerDirectory = DrawnDirectory<shared::MarkerId, shared::MarkerState>;

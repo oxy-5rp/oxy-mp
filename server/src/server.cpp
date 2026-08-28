@@ -708,32 +708,65 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     (void)player;
 }
 
+namespace {
+
+/// Видна ли нарисованная картинка этому игроку.
+///
+/// Слой мира спрашивается у всех троих, а список тех, кому картинка
+/// предназначена, — только у метки: он есть в её записи и его нет ни у маркера,
+/// ни у точки. Спрашивается при этом наличие поля, а не род картинки: заведись
+/// такой список у маркеров, править здесь будет нечего.
+template<typename Entry>
+[[nodiscard]] bool shownTo(const Entry& entry, std::int32_t dimension, shared::PlayerId player) {
+    if (!script::dimensionsMeet(dimension, entry.dimension)) {
+        return false;
+    }
+
+    if constexpr (requires { entry.targets; }) {
+        return entry.targets.empty() ||
+               std::ranges::find(entry.targets, player) != entry.targets.end();
+    } else {
+        return true;
+    }
+}
+
+} // namespace
+
 template<typename Directory>
-void Server::sendKindTo(const Directory& directory, net::PeerId peer, std::int32_t dimension) {
+void Server::sendKindTo(const Directory& directory, const Player& player) {
     for (const auto& [id, entry] : directory.all()) {
-        if (script::dimensionsMeet(dimension, entry.dimension)) {
-            sendTo(peer, entry.state);
+        if (shownTo(entry, player.dimension, player.id)) {
+            sendTo(player.peer, entry.state);
         }
     }
 }
 
-template<typename Directory>
+template<typename Directory, typename Removed>
 void Server::broadcastDrawn(const Directory& directory, typename Directory::Id id) {
     const auto* const entry = directory.find(id);
     if (entry == nullptr) {
         return;
     }
 
-    // Всем, кто в том же слое мира, и без оглядки на расстояние. Метка на то и
-    // метка, что видна на карте целиком; маркер и точку отбирает у себя тот,
-    // кто их рисует, — по их собственному полю видимости.
+    // Всем, кому она видна, и без оглядки на расстояние. Метка на то и метка,
+    // что видна на карте целиком; маркер и точку отбирает у себя тот, кто их
+    // рисует, — по их собственному полю видимости.
     //
     // Надёжным каналом: потерянная картинка не заменится следующей — она больше
     // не изменится и останется несуществующей до конца сессии.
+    //
+    // Тем, кому она видна перестала, посылается «её нет». Правка меняет и слой
+    // мира, и список тех, кому метка предназначена, — а сама по себе перемена
+    // не шлёт им ничего, и убранный из списка остался бы с меткой навсегда.
     for (const auto& [peer, player] : players_) {
-        if (script::dimensionsMeet(player.dimension, entry->dimension)) {
+        if (shownTo(*entry, player.dimension, player.id)) {
             sendTo(peer, entry->state);
+            continue;
         }
+
+        Removed removed;
+        removed.id = id;
+        sendTo(peer, removed);
     }
 }
 
@@ -742,10 +775,10 @@ void Server::broadcastDrawn(const Directory& directory, typename Directory::Id i
 /// Раздачей, как машины и предметы, картинки не ходят: они не отбираются
 /// расстоянием на сервере, и рассказывать о них по мере приближения не о чем.
 /// Поэтому — один раз, целиком, при входе.
-void Server::sendDrawnTo(net::PeerId peer, std::int32_t dimension) {
-    sendKindTo(blips_, peer, dimension);
-    sendKindTo(markers_, peer, dimension);
-    sendKindTo(checkpoints_, peer, dimension);
+void Server::sendDrawnTo(const Player& player) {
+    sendKindTo(blips_, player);
+    sendKindTo(markers_, player);
+    sendKindTo(checkpoints_, player);
 }
 
 void Server::sendAttachmentsTo(net::PeerId peer) {
@@ -784,7 +817,7 @@ void Server::announcePlayerReady(Player& player) {
     // Нарисованное — раньше обработчиков входа: те вправе поставить своё, и
     // поставленное ими должно лечь поверх уже имеющегося, а не быть перекрыто
     // рассылкой старого.
-    sendDrawnTo(player.peer, player.dimension);
+    sendDrawnTo(player);
 
     // Привязки — по той же причине и в том же месте: они тоже состояние, а не
     // событие, и вошедший обязан застать мир таким, каким его видят остальные.
@@ -2183,7 +2216,7 @@ void Server::objectRemoved(shared::ObjectId id) {
 }
 
 void Server::blipChanged(shared::BlipId id) {
-    broadcastDrawn(blips_, id);
+    broadcastDrawn<BlipDirectory, shared::BlipRemoved>(blips_, id);
 }
 
 void Server::blipRemoved(shared::BlipId id) {
@@ -2197,7 +2230,7 @@ void Server::blipRemoved(shared::BlipId id) {
 }
 
 void Server::markerChanged(shared::MarkerId id) {
-    broadcastDrawn(markers_, id);
+    broadcastDrawn<MarkerDirectory, shared::MarkerRemoved>(markers_, id);
 }
 
 void Server::markerRemoved(shared::MarkerId id) {
@@ -2207,7 +2240,7 @@ void Server::markerRemoved(shared::MarkerId id) {
 }
 
 void Server::checkpointChanged(shared::CheckpointId id) {
-    broadcastDrawn(checkpoints_, id);
+    broadcastDrawn<CheckpointDirectory, shared::CheckpointRemoved>(checkpoints_, id);
 }
 
 void Server::checkpointRemoved(shared::CheckpointId id) {
@@ -2220,8 +2253,8 @@ template<typename Directory, typename Removed>
 void Server::redrawKindFor(const Directory& directory, const Player& player,
                            std::int32_t previous) {
     for (const auto& [id, entry] : directory.all()) {
-        const bool saw = script::dimensionsMeet(previous, entry.dimension);
-        const bool sees = script::dimensionsMeet(player.dimension, entry.dimension);
+        const bool saw = shownTo(entry, previous, player.id);
+        const bool sees = shownTo(entry, player.dimension, player.id);
 
         if (saw == sees) {
             continue;

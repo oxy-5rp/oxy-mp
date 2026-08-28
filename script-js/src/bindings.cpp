@@ -2313,7 +2313,15 @@ void detachEntity(const v8::FunctionCallbackInfo<v8::Value>& info) {
     blip.scale = static_cast<float>(fields->number("scale", 1.0));
     blip.dimension = static_cast<std::int32_t>(fields->number("dimension", 0));
     blip.shortRange = fields->flag("shortRange");
+    blip.priority = fields->byte("priority", 0);
     blip.name = fields->text("name");
+
+    // Кому метка видна — списком номеров, а не сущностей: слой alt:V держит
+    // игроков объектами, а сюда доезжают их номера. Пустой список означает
+    // «всем», как `isGlobal` у alt:V.
+    for (const double target : fields->numbers("targets")) {
+        blip.targets.push_back(static_cast<shared::PlayerId>(target));
+    }
 
     return blip;
 }

@@ -17,6 +17,7 @@ Blips::Blips(const NativeTable& table) noexcept
       setScale_(table.handlerFor(natives::kSetBlipScale)),
       setDisplay_(table.handlerFor(natives::kSetBlipDisplay)),
       setShortRange_(table.handlerFor(natives::kSetBlipAsShortRange)),
+      setPriority_(table.handlerFor(natives::kSetBlipPriority)),
       beginName_(table.handlerFor(natives::kBeginTextCommandSetBlipName)),
       addNamePart_(table.handlerFor(natives::kAddTextComponentSubstringPlayerName)),
       endName_(table.handlerFor(natives::kEndTextCommandSetBlipName)) {}
@@ -82,6 +83,9 @@ void Blips::apply(const shared::BlipState& state) {
     }
     if (setShortRange_ != nullptr) {
         invokeNative<void>(setShortRange_, blip, state.shortRange);
+    }
+    if (setPriority_ != nullptr) {
+        invokeNative<void>(setPriority_, blip, static_cast<int>(state.priority));
     }
 
     // Пустую подпись не ставим вовсе: игра подпишет метку сама по её значку, и

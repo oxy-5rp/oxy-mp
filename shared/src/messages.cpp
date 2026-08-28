@@ -1111,6 +1111,7 @@ void BlipState::write(ByteWriter& writer) const {
     writer.writeU8(display);
     writer.writeU8(shortRange ? 1 : 0);
     writer.writeFloat(scale);
+    writer.writeU8(priority);
     writer.writeString(name);
 }
 
@@ -1124,6 +1125,7 @@ BlipState BlipState::read(ByteReader& reader) {
     message.display = reader.readU8();
     message.shortRange = reader.readU8() != 0;
     message.scale = reader.readFloat();
+    message.priority = reader.readU8();
     message.name = reader.readString();
     return message;
 }

@@ -171,7 +171,7 @@ private:
     void streamPeds();
     /// Рассказывает вошедшему обо всём нарисованном, что ему видно: о метках
     /// на карте, о маркерах и о контрольных точках.
-    void sendDrawnTo(net::PeerId peer, std::int32_t dimension);
+    void sendDrawnTo(const Player& player);
 
     /// Рассказывает вошедшему обо всех привязках сессии.
     ///
@@ -183,14 +183,14 @@ private:
 
     /// Всё из одного реестра картинок — одному игроку.
     template<typename Directory>
-    void sendKindTo(const Directory& directory, net::PeerId peer, std::int32_t dimension);
+    void sendKindTo(const Directory& directory, const Player& player);
 
     /// Одну картинку — всем, кто с ней в одном слое мира.
     ///
     /// Общее на три рода, потому что рассылаются они совершенно одинаково:
     /// найти в реестре, обойти игроков, сверить слой, отправить. Разным их
     /// делает только тип сообщения, а его выводит сам реестр.
-    template<typename Directory>
+    template<typename Directory, typename Removed>
     void broadcastDrawn(const Directory& directory, typename Directory::Id id);
 
     void blipChanged(shared::BlipId id) override;

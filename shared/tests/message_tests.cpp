@@ -1707,6 +1707,20 @@ TEST_CASE("three kinds of vehicle harm are told apart, not summed", "[messages]"
     CHECK(encode(first) != encode(second));
 }
 
+TEST_CASE("a blip carries the priority that decides who is drawn on top",
+          "[messages]") {
+    // Ноль здесь — умолчание игры, а не «не задано»: у alt:V поле тоже число,
+    // и отличать «не сказали» от «сказали ноль» ни ему, ни игре нечем.
+    BlipState sent;
+    sent.id = 3;
+    sent.priority = 12;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->priority == 12);
+}
+
 TEST_CASE("a blip survives the round trip", "[messages]") {
     BlipState sent;
     sent.id = 7;

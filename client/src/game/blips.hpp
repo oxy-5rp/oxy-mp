@@ -55,6 +55,7 @@ private:
     NativeHandler setScale_ = nullptr;
     NativeHandler setDisplay_ = nullptr;
     NativeHandler setShortRange_ = nullptr;
+    NativeHandler setPriority_ = nullptr;
     NativeHandler beginName_ = nullptr;
     NativeHandler addNamePart_ = nullptr;
     NativeHandler endName_ = nullptr;

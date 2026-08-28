@@ -711,6 +711,7 @@ inline constexpr std::uint64_t kSetBlipDisplay = 0XF55F62DA99DB0C2F;
 
 /// SET_BLIP_AS_SHORT_RANGE, канонический хеш 0XBE8BE4FE60E27B72.
 inline constexpr std::uint64_t kSetBlipAsShortRange = 0X360B279488A775FC;
+inline constexpr std::uint64_t kSetBlipPriority = 0X1456FD5C0C438B19;
 
 /// BEGIN_TEXT_COMMAND_SET_BLIP_NAME, канонический хеш 0XF9113A30DE5C6670.
 inline constexpr std::uint64_t kBeginTextCommandSetBlipName = 0XF3D182B81172EAB6;

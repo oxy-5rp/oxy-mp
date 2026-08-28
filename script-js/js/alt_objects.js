@@ -472,6 +472,48 @@
             this.route = false;
             this.routeColor = 0;
             this.display = 2;
+            this.priority = 0;
+        }
+
+        /// Кому метка видна. Пустой список — всем, как `isGlobal` у alt:V.
+        ///
+        /// Список хранится номерами игроков, а наружу отдаётся сущностями: у
+        /// alt:V это `readonly Player[]`, и режим, получивший оттуда числа,
+        /// споткнулся бы на первом же `.name`. Вышедшего игрока в списке уже
+        /// нет, и он молча выпадает — так же, как выпадает он из `Player.all`.
+        #targets = [];
+
+        get targets() {
+            return this.#targets
+                .map((id) => native.players().find((one) => one.id === id))
+                .filter((one) => one !== undefined);
+        }
+
+        get isGlobal() {
+            return this.#targets.length === 0;
+        }
+
+        addTarget(player) {
+            const id = typeof player === 'number' ? player : player?.id;
+
+            if (typeof id !== 'number' || this.#targets.includes(id)) {
+                return;
+            }
+
+            this.#targets.push(id);
+            this.#send();
+        }
+
+        removeTarget(player) {
+            const id = typeof player === 'number' ? player : player?.id;
+            const at = this.#targets.indexOf(id);
+
+            if (at === -1) {
+                return;
+            }
+
+            this.#targets.splice(at, 1);
+            this.#send();
         }
 
         /// Отдаёт метку серверу: заводит или поправляет.
@@ -499,8 +541,10 @@
                 display: this.display,
                 scale: this.scale,
                 shortRange: this.shortRange,
+                priority: this.priority,
                 name: this.name,
                 dimension: this.dimension,
+                targets: this.#targets,
             };
         }
 
