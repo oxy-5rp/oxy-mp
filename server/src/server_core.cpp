@@ -19,6 +19,7 @@ namespace {
         .socialName = player.socialName,
         .position = player.position,
         .heading = player.heading,
+        .velocity = player.state.velocity,
         .health = player.health,
         .armour = player.armour,
         .maxArmour = player.maxArmour,
@@ -70,6 +71,7 @@ namespace {
         // Ехали они в нём с самого начала — недоставало дороги наружу, ровно
         // как у признаков состояния игрока.
         .doorLevels = vehicle.state.doorLevels,
+        .steer = vehicle.state.steer,
         .velocity = vehicle.state.velocity,
         .bodyHealth = vehicle.state.bodyHealth,
         .engineHealth = vehicle.state.engineHealth,

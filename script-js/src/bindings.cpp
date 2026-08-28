@@ -137,6 +137,56 @@ void playerBigNumber(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Val
         toJs(isolate, value == 0 ? std::string{} : std::to_string(value)));
 }
 
+/// Скорость игрока: полная, вперёд и вбок.
+///
+/// Считается из той же скорости, что едет в снимке, а не спрашивается отдельно:
+/// второго источника у неё нет, и заводить его значило бы завести второй ответ
+/// на один вопрос.
+///
+/// Вперёд и вбок — это та же скорость, повёрнутая в сторону взгляда: у alt:V
+/// `forwardSpeed` и `strafeSpeed` именно таковы. Знак у `forwardSpeed`
+/// отрицателен, когда человек пятится, — иначе идущий назад был бы неотличим от
+/// идущего вперёд.
+enum class SpeedKind : std::uint8_t { Total, Forward, Strafe };
+
+template<SpeedKind Kind>
+void playerSpeed(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const shared::Vec3& speed = player->velocity;
+
+    if constexpr (Kind == SpeedKind::Total) {
+        info.GetReturnValue().Set(
+            std::sqrt((speed.x * speed.x) + (speed.y * speed.y) + (speed.z * speed.z)));
+        return;
+    }
+
+    // Направление взгляда у игры считается от севера по часовой стрелке, а
+    // синус с косинусом — от востока против неё. Отсюда и перестановка осей:
+    // «вперёд» это (-sin, cos), а не (cos, sin).
+    const float radians = player->heading * shared::kRadians;
+    const float forwardX = -std::sin(radians);
+    const float forwardY = std::cos(radians);
+
+    if constexpr (Kind == SpeedKind::Forward) {
+        info.GetReturnValue().Set((speed.x * forwardX) + (speed.y * forwardY));
+    } else {
+        // Вбок — та же скорость, спроецированная на перпендикуляр к взгляду.
+        info.GetReturnValue().Set((speed.x * forwardY) - (speed.y * forwardX));
+    }
+}
+
 /// Стоит ли у игрока этот признак состояния.
 ///
 /// Отдельным обработчиком на признак, а не одним числом наружу: у alt:V это
@@ -3202,6 +3252,10 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "maxArmour", playerField<&PlayerInfo::maxArmour>, setPlayerMaxArmour);
     addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
     addGetter(isolate, shape, "seat", playerSeat);
+    addGetter(isolate, shape, "velocity", playerField<&PlayerInfo::velocity>);
+    addGetter(isolate, shape, "moveSpeed", playerSpeed<SpeedKind::Total>);
+    addGetter(isolate, shape, "forwardSpeed", playerSpeed<SpeedKind::Forward>);
+    addGetter(isolate, shape, "strafeSpeed", playerSpeed<SpeedKind::Strafe>);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
 
     // Кем игрок назвался при входе. Строками, как у alt:V, и по той же
@@ -3348,6 +3402,10 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     // присваивание из строгого модуля бросило бы TypeError посреди чужого
     // обработчика.
     addGetter(isolate, shape, "velocity", vehicleField<&VehicleInfo::velocity>);
+
+    // Руль — тот же ввод водителя, что едет в снимке, и в тех же долях, что у
+    // alt:V. Углом в градусах он не становится нигде, кроме самой игры.
+    addGetter(isolate, shape, "steeringAngle", vehicleField<&VehicleInfo::steer>);
     addGetter(isolate, shape, "bodyHealth", vehicleField<&VehicleInfo::bodyHealth>,
               refuseAssignment<kBodyHealthWhat, kLeaderOwnsIt>);
     addGetter(isolate, shape, "engineHealth", vehicleField<&VehicleInfo::engineHealth>,

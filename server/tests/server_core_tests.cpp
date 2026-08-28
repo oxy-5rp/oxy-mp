@@ -838,6 +838,30 @@ TEST_CASE("clearing one clothing slot leaves the rest on", "[server][script]") {
     CHECK(look->components[4].drawable == 7);
 }
 
+TEST_CASE("a vehicle tells the scripts how far its wheel is turned", "[server][script]") {
+    // Руль ехал в каждом снимке машины и не был виден скрипту — ровно как
+    // прочность до него. Это ввод водителя, а не угол колёс в градусах: у alt:V
+    // `steeringAngle` тех же долей.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    // Заводит машину сам игрок — ведущим она достаётся ему сразу, и снимок от
+    // него будет принят. Чужой снимок реестр отбрасывает целиком.
+    const shared::VehicleId id = session.vehicles.add(0xDEADBEEF, {}, 0.0F, player.id, 64);
+    REQUIRE(id != shared::kInvalidVehicleId);
+
+    shared::VehicleState state;
+    state.id = id;
+    state.steer = -0.75F;
+
+    REQUIRE(session.vehicles.applyState(player.id, state));
+
+    const auto got = session.core.vehicle(id);
+
+    REQUIRE(got);
+    CHECK(got->steer == -0.75F);
+}
+
 TEST_CASE("armour is capped by the limit the script set, not the game default",
           "[server][script]") {
     // Тяжёлый бронежилет в режимах — это поднятый предел, а не броня сверх
