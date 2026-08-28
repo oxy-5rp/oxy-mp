@@ -85,6 +85,10 @@ public:
         sent.push_back(std::format("vehicle- {}", id));
     }
 
+    void vehicleControlChanged(shared::VehicleId id) override {
+        sent.push_back(std::format("vehicle lock {}", id));
+    }
+
     void controlChanged(const Player& player) override {
         sent.push_back(std::format("control {} {}", player.id, player.control));
     }
@@ -978,6 +982,28 @@ script::EntityRef entity(shared::EntityKind kind, std::uint32_t id) {
 }
 
 } // namespace
+
+TEST_CASE("a locked vehicle stays locked and says so once", "[server][script]") {
+    Session session;
+    session.join(1, "игрок");
+
+    const shared::VehicleId car = session.core.createVehicle(0xDEADBEEF, {}, 0.0F);
+    REQUIRE(car != shared::kInvalidVehicleId);
+
+    REQUIRE(session.core.setVehicleLock(car, 2));
+    CHECK(std::ranges::count(session.sink.sent, std::format("vehicle lock {}", car)) == 1);
+
+    // Замок помнит сервер: без этого запертая машина открывалась бы всякому,
+    // кто подошёл к ней позже, — он о замке не слышал.
+    const auto shown = session.core.vehicle(car);
+    REQUIRE(shown.has_value());
+    CHECK(shown->lockState == 2);
+}
+
+TEST_CASE("locking a vehicle that is gone is refused", "[server][script]") {
+    Session session;
+    CHECK_FALSE(session.core.setVehicleLock(99, 2));
+}
 
 TEST_CASE("freezing a player is told once, not every time", "[server][script]") {
     Session session;

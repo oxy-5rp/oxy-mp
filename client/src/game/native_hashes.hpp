@@ -1156,6 +1156,9 @@ inline constexpr std::uint64_t kClearVehicleCustomPrimaryColour = 0X963D9A7202C0
 /// CLEAR_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X5FFBDEEC3E8E2009.
 inline constexpr std::uint64_t kClearVehicleCustomSecondaryColour = 0X588D8FDC61F7CFAD;
 
+/// SET_VEHICLE_DOORS_LOCKED, канонический хеш 0XB664292EAECF7FA6.
+inline constexpr std::uint64_t kSetVehicleDoorsLocked = 0X0B74F181ADFC39BF;
+
 // --- Взгляд -------------------------------------------------------------------
 //
 // Голова у персонажа поворачивается отдельно от тела, и задача взгляда —

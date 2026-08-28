@@ -471,6 +471,20 @@ void Vehicles::harm(shared::VehicleId id, const shared::VehicleHarm& harm) const
     snapshot_.takeHealth(known->second.vehicle, harm);
 }
 
+void Vehicles::lock(const shared::VehicleControl& control) {
+    const auto known = vehicles_.find(control.id);
+
+    // Машины здесь может не быть вовсе: замок приходит и о той, что ещё не
+    // доехала. Терять его нельзя — сервер помнит замок и пришлёт его снова
+    // вместе с машиной, но до того мгновения запомнить его должны мы.
+    if (known == vehicles_.end()) {
+        pendingLocks_[control.id] = control.lockState;
+        return;
+    }
+
+    known->second.wantedLock = control.lockState;
+}
+
 void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, int localPed) {
     if (!ready()) {
         return;
@@ -534,6 +548,15 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
             known = vehicles_.emplace(state.id, Entry{.vehicle = vehicle, .model = state.model})
                         .first;
 
+            // Замок, пришедший до самой машины, достаётся ей здесь. Порядок
+            // между распоряжением о замке и раздачей машины не обещан ничем:
+            // первое уходит всем и сразу, вторая — по расстоянию.
+            if (const auto waiting = pendingLocks_.find(state.id);
+                waiting != pendingLocks_.end()) {
+                known->second.wantedLock = waiting->second;
+                pendingLocks_.erase(waiting);
+            }
+
             answerTo(known->second, view.owner, ours, towed_.contains(state.id));
             dress(state.id, known->second);
             continue;
@@ -596,6 +619,16 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
 
         entry.applied = state;
 
+        // Замок накладывается здесь же и только на изменение: он переключатель,
+        // а не состояние, которое нужно поддерживать. Заводское значение
+        // (`None`) означает «сервер о замке не говорил» — и трогать замок тогда
+        // не надо вовсе: игра выставила его сама, как ей положено для этой
+        // модели.
+        if (entry.lockState != entry.wantedLock && entry.wantedLock != 0) {
+            snapshot_.applyLock(entry.vehicle, entry.wantedLock);
+            entry.lockState = entry.wantedLock;
+        }
+
         // Починенная машина вышла из-под ремонта заводской, и вместе с вмятинами
         // с неё снялось всё, что мы накладывали когда-то: свет, сирена,
         // зажигание, крыша. Накладывается это только на изменение, а изменения
@@ -606,6 +639,11 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
         // машина и выходит из-под SET_VEHICLE_FIXED.
         if (repaired) {
             entry.applied = shared::VehicleState{};
+
+            // Замок с неё снялся вместе с вмятинами: заводская машина
+            // незапертая. Объявляем наложенное забытым — следующий кадр наложит
+            // его заново.
+            entry.lockState = 0;
         }
     }
 }

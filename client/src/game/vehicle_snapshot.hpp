@@ -70,6 +70,13 @@ public:
     /// Изменившиеся, а не все: разбить стекло можно только один раз, а вот
     /// приказывать разбивать его тридцать раз в секунду игра будет исправно.
     ///
+    /// Запирает машину так, как велел сервер.
+    ///
+    /// Накладывается всем, кто машину видит, а не одному ведущему: запертую
+    /// дверь игра проверяет у того, кто в неё лезет, а лезут в чужую машину как
+    /// раз не ведущие.
+    void applyLock(int vehicle, std::uint8_t lockState) const;
+
     void applyDamage(int vehicle, const shared::VehicleState& state,
                      const shared::VehicleState& previous) const;
 
@@ -199,6 +206,7 @@ private:
     NativeHandler setBrakeLights_ = nullptr;
 
     NativeHandler doorAngle_ = nullptr;
+    NativeHandler lockDoors_ = nullptr;
     NativeHandler openDoor_ = nullptr;
     NativeHandler shutDoor_ = nullptr;
     NativeHandler doorDamaged_ = nullptr;

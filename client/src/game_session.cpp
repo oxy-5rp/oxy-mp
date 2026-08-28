@@ -1911,6 +1911,10 @@ void GameSession::showRemotePlayers(int ped) {
 
     // Внешность — раньше самих машин: она может прийти до первого снимка, и
     // машина, созданная в этом же кадре, должна оказаться уже покрашенной.
+    for (const shared::VehicleControl& control : mail_.takeVehicleControls()) {
+        vehicles_.lock(control);
+    }
+
     for (const shared::VehicleAppearance& appearance : mail_.takeIncomingVehicleAppearances()) {
         vehicles_.applyAppearance(appearance);
     }

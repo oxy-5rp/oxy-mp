@@ -1191,12 +1191,20 @@ void Server::handleVehicleState(net::PeerId peer, shared::VehicleState state) {
         return;
     }
 
+    // Признаки берутся до подмены: после неё сравнивать будет не с чем. Гудок и
+    // сирена приходят признаком, а не сообщением, и увидеть их нажатие можно
+    // только сравнением — так же, как посадку в машину.
+    const VehicleDirectory::Vehicle* const before = vehicles_.find(state.id);
+    const std::uint16_t wasFlags = before == nullptr ? 0 : before->state.flags;
+
     // Снимок принимается только от ведущего. Всё остальное — отставший снимок
     // того, у кого машину уже забрали, или ошибка в клиенте; и то и другое
     // дёрнуло бы машину назад, будь оно принято.
     if (!vehicles_.applyState(player->id, state)) {
         return;
     }
+
+    tellScriptsAboutVehicle(*player, state.id, wasFlags, state.flags);
 
     // Разослан снимок будет в ближайшем такте, связкой вместе с остальными
     // машинами (broadcastVehicleStates), а не отсюда и не немедленно.
@@ -1471,6 +1479,19 @@ void Server::reassignVehicles() {
         authority.owner = change.owner;
         broadcast(authority);
 
+        // Скриптам — тем же поводом. Ведущий у машины и есть тот, кого alt:V
+        // зовёт `netOwner`: он считает её физику, и режим, раздающий права по
+        // ведущему, ждёт именно этого события.
+        {
+            script::Event handed;
+            handed.kind = script::EventKind::NetOwnerChange;
+            handed.vehicle = script::Vehicle{core_, change.id};
+            handed.player = script::Player{core_, change.owner};
+            handed.killer = script::Player{core_, change.was};
+
+            (void)events_.dispatch(handed);
+        }
+
         spdlog::debug("машину {} отныне ведёт {}", change.id,
                       change.owner == shared::kInvalidPlayerId ? -1
                                                               : static_cast<int>(change.owner));
@@ -1488,6 +1509,16 @@ void Server::sendVehicleTo(net::PeerId peer, const VehicleDirectory::Vehicle& ve
     // это мгновение ещё нет.
     if (vehicle.appearance) {
         sendTo(peer, *vehicle.appearance);
+    }
+
+    // И замки — по той же причине и в том же порядке. Без этого запертая машина
+    // открывалась бы всякому, кто подошёл к ней позже: он о замке не слышал.
+    if (vehicle.lockState != 0) {
+        shared::VehicleControl control;
+        control.id = vehicle.state.id;
+        control.lockState = vehicle.lockState;
+
+        sendTo(peer, control);
     }
 }
 
@@ -2047,6 +2078,21 @@ void Server::vehicleRemoved(shared::VehicleId id) {
     }
 }
 
+void Server::vehicleControlChanged(shared::VehicleId id) {
+    const VehicleDirectory::Vehicle* const vehicle = vehicles_.find(id);
+    if (vehicle == nullptr) {
+        return;
+    }
+
+    shared::VehicleControl control;
+    control.id = id;
+    control.lockState = vehicle->lockState;
+
+    // Всем без разбора: у тех, кто машину не видит, её и так нет, а выяснять,
+    // кто видел, значило бы помнить это на каждого. То же и у меток.
+    broadcast(control);
+}
+
 void Server::controlChanged(const Player& player) {
     sendControl(player);
 }
@@ -2218,6 +2264,41 @@ void Server::chatLine(shared::PlayerId to, std::string text) {
     }
 
     sendTo(target->peer, line);
+}
+
+void Server::tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehicle,
+                                     std::uint16_t before, std::uint16_t after) {
+    const auto tell = [&](script::EventKind kind, bool on, bool withOwner) {
+        script::Event event;
+        event.kind = kind;
+        event.vehicle = script::Vehicle{core_, vehicle};
+        event.on = on;
+
+        if (withOwner) {
+            event.player = script::Player{core_, owner.id};
+        }
+
+        (void)events_.dispatch(event);
+    };
+
+    // Только на переходе, а не пока признак стоит: гудят секундами, и событие
+    // на каждый снимок ушло бы тридцать раз в секунду.
+    const bool hornWas = shared::has(before, shared::VehicleFlag::HornOn);
+    const bool hornNow = shared::has(after, shared::VehicleFlag::HornOn);
+
+    if (hornNow != hornWas) {
+        tell(script::EventKind::VehicleHorn, hornNow, true);
+    }
+
+    const bool sirenWas = shared::has(before, shared::VehicleFlag::SirenOn);
+    const bool sirenNow = shared::has(after, shared::VehicleFlag::SirenOn);
+
+    if (sirenNow != sirenWas) {
+        // Сирена без игрока: у alt:V её доводы — машина и признак, а кто её
+        // включил, там не называют. Мы знаем ведущего, но врать про порядок
+        // доводов нельзя — режим читает их по счёту.
+        tell(script::EventKind::VehicleSiren, sirenNow, false);
+    }
 }
 
 void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,

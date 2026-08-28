@@ -930,6 +930,32 @@ extern const char kLeaderOwnsIt[] =
     "машина живёт в игре у своего ведущего, и это назначает он, а не сервер; "
     "починить её целиком умеет vehicle.repair()";
 
+/// Запирает машину или отпирает её.
+void setVehicleLock(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                    const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> state = intFromJs(isolate->GetCurrentContext(), value);
+    if (!state) {
+        return;
+    }
+
+    // Числа замка — от нуля до семи, и все они значащие. Восьмёрка и дальше не
+    // значат ничего: игра истолковала бы их по-своему, а по-своему — значит
+    // непредсказуемо.
+    if (*state < 0 || *state > 7) {
+        fail(isolate, "lockState: у замка машины восемь значений, от 0 до 7");
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setVehicleLock(*id, static_cast<std::uint8_t>(*state));
+}
+
 /// Стоит ли у машины этот признак. Пара к playerFlag, и по той же причине.
 template<shared::VehicleFlag Flag>
 void vehicleFlag(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
@@ -2859,6 +2885,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "hornActive", vehicleFlag<shared::VehicleFlag::HornOn>);
     addGetter(isolate, shape, "destroyed", vehicleFlag<shared::VehicleFlag::Destroyed>);
     addGetter(isolate, shape, "passengers", vehiclePassengers);
+    addGetter(isolate, shape, "lockState", vehicleField<&VehicleInfo::lockState>,
+              setVehicleLock);
 
     addGetter(isolate, shape, "appearance", vehicleAppearance);
 

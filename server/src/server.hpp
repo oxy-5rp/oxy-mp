@@ -157,6 +157,7 @@ private:
                            float heading) override;
     void vehicleRepaired(shared::VehicleId id) override;
     void vehicleAppearanceChanged(shared::VehicleId id) override;
+    void vehicleControlChanged(shared::VehicleId id) override;
     void attachmentChanged(AttachmentDirectory::Ref entity) override;
     void controlChanged(const Player& player) override;
     void objectAdded(shared::ObjectId id) override;
@@ -236,6 +237,13 @@ private:
     /// Зовётся до того, как свежий снимок ляжет в реестр: обработчику нужен
     /// игрок таким, каким он стал, — то есть после `player.state = state`, — но
     /// разница считается по тому, что было. Отсюда и два довода.
+    /// Объявляет скриптам то, что видно из разницы признаков машины.
+    ///
+    /// Гудок и сирена приходят признаком, а не сообщением: увидеть нажатие можно
+    /// только сравнением снимков — так же, как посадку в машину.
+    void tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehicle,
+                                 std::uint16_t before, std::uint16_t after);
+
     void tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
                                  const shared::PlayerState& after);
 

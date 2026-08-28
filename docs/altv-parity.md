@@ -593,9 +593,17 @@ alt:V копирует `GTA5.exe` в `backup/` и запускает копию 
 - [x] **снаряжение спрашивается и отбирается** — `weapons`, `hasWeapon`,
       `getWeaponAmmo`, `removeWeapon`, `removeAllWeapons`
 - [x] **`stringToSHA256`, `time` / `timeEnd`, `hasResource`, `getAllResources`**
-- [ ] остальные события: `explosion`, `startProjectile`, `netOwnerChange`,
-      `vehicleHorn`, `vehicleSiren`, `playerConnectDenied`, `baseObjectCreate` /
-      `Remove`, `playerWeaponShoot` на клиенте
+- [x] **`vehicleHorn`, `vehicleSiren`, `netOwnerChange`** — первые два выводятся
+      из признаков снимка машины сравнением, третий приходит из пересдачи
+      ведущих. Прежний ведущий доезжает вместе с новым: у alt:V событие называет
+      обоих
+- [x] **`vehicle.lockState`** — своё сообщение (`VehicleControl`, версия
+      протокола 35), рассылается всем, кто машину видит
+- [ ] остальные события: `explosion`, `startProjectile`, `playerConnectDenied`,
+      `baseObjectCreate` / `Remove`, `playerWeaponShoot` на клиенте
+- [ ] `getDoorState` / `setDoorState` — снимок несёт двери признаком «открыта»,
+      а alt:V различает восемь степеней. Честно ответить об уровне нечем, пока
+      снимок его не несёт; поле обойдётся в три байта на снимок машины
 - [x] **`player.frozen` и `player.invincible`** — своё сообщение
       (`PlayerControl`, версия протокола 34). Накладывается каждым кадром и
       уживается с заморозкой на подгрузке: держим, пока просит хоть кто-то

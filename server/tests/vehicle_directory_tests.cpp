@@ -194,6 +194,35 @@ TEST_CASE("an abandoned vehicle goes to the nearest player", "[vehicles]") {
     CHECK(directory.find(id)->owner == 6);
 }
 
+TEST_CASE("a handover remembers who led the vehicle before", "[vehicles]") {
+    // Понадобилось скриптам: у alt:V `netOwnerChange` называет обоих, и режим,
+    // снимающий права с прежнего ведущего, без этого не знал бы, с кого снимать.
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+
+    REQUIRE(directory.find(id)->owner == 1);
+
+    // Первый ушёл, машина досталась второму.
+    directory.forgetPlayer(1);
+
+    const std::vector players{at(2, 10.0F)};
+    const auto changes = directory.reassign(players);
+
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == 2);
+
+    // Прежним здесь числится «никто»: ведущего забыли вместе с игроком.
+    CHECK(changes.front().was == shared::kInvalidPlayerId);
+
+    // А теперь передача от живого к живому: второй отошёл, третий подошёл ближе.
+    const std::vector moved{at(2, 200.0F), at(3, 5.0F)};
+    const auto again = directory.reassign(moved);
+
+    REQUIRE(again.size() == 1);
+    CHECK(again.front().owner == 3);
+    CHECK(again.front().was == 2);
+}
+
 TEST_CASE("a vehicle beyond reach is led by nobody", "[vehicles]") {
     VehicleDirectory directory;
     const shared::VehicleId id = spawn(directory, 1, 0.0F);

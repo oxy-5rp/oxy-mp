@@ -97,6 +97,9 @@ public:
     /// перекрашенную увидел бы он один.
     virtual void vehicleAppearanceChanged(shared::VehicleId id) = 0;
 
+    /// У машины сменились замки. Всем, кто её видит.
+    virtual void vehicleControlChanged(shared::VehicleId id) = 0;
+
     /// Машины больше нет. Об этом, в отличие от появления, нужно сказать сразу и
     /// всем: клиент, у которого она заведена, иначе оставит её стоять навсегда.
     virtual void vehicleRemoved(shared::VehicleId id) = 0;
@@ -295,6 +298,7 @@ public:
                                                 const shared::Vec3& rotation) override;
 
     bool removeObject(shared::ObjectId id) override;
+    bool setVehicleLock(shared::VehicleId id, std::uint8_t lockState) override;
     bool moveObject(shared::ObjectId id, const shared::Vec3& position,
                     const shared::Vec3& rotation) override;
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;

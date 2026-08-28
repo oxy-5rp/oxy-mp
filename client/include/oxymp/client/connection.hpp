@@ -322,6 +322,9 @@ public:
     /// накладывать это нужно каждый кадр.
     [[nodiscard]] std::uint8_t control() const noexcept { return control_; }
 
+    /// Замки машин, о которых сказал сервер с прошлого раза.
+    [[nodiscard]] std::vector<shared::VehicleControl> takeVehicleControls();
+
     /// Распоряжения о машинах: переставить и починить.
     ///
     /// Приходят только ведущему: машина живёт в игре у него, и сделать с ней
@@ -520,6 +523,13 @@ private:
     std::vector<shared::ChatLine> chatLines_;
     std::vector<shared::DamageTaken> damage_;
     std::vector<shared::Vec3> teleports_;
+
+    /// Замки машин, о которых сказал сервер. Ключ — номер машины.
+    ///
+    /// Списком, а не очередью, и по той же причине, что и у распоряжения о теле:
+    /// замок приходит целиком и заменяет прежний. Копи мы их очередью,
+    /// запертая и тут же отпертая машина осталась бы запертой.
+    std::vector<shared::VehicleControl> vehicleControls_;
 
     /// Чем сервер распорядился о нашем теле: набор shared::PlayerControlFlag.
     ///

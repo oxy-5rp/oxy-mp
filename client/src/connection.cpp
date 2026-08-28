@@ -552,6 +552,21 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::VehicleControl:
+        if (const auto control = shared::decode<shared::VehicleControl>(packet)) {
+            // Прежнее распоряжение о той же машине заменяется, а не копится:
+            // важно последнее, а не все по очереди.
+            const auto known = std::ranges::find(vehicleControls_, control->id,
+                                                 &shared::VehicleControl::id);
+
+            if (known == vehicleControls_.end()) {
+                vehicleControls_.push_back(*control);
+            } else {
+                *known = *control;
+            }
+        }
+        return;
+
     case shared::MessageId::PlayerControl:
         if (const auto control = shared::decode<shared::PlayerControl>(packet)) {
             control_ = control->flags;
@@ -1092,6 +1107,10 @@ std::vector<shared::Vec3> Connection::takeTeleports() {
     return std::exchange(teleports_, {});
 }
 
+std::vector<shared::VehicleControl> Connection::takeVehicleControls() {
+    return std::exchange(vehicleControls_, {});
+}
+
 std::vector<shared::VehicleTeleport> Connection::takeVehicleTeleports() {
     return std::exchange(vehicleTeleports_, {});
 }
@@ -1338,6 +1357,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     sentAppearances_.clear();
     teleports_.clear();
     control_ = 0;
+    vehicleControls_.clear();
     serverEvents_.clear();
 
     // Предметы и снаряжение забываются вместе с соединением: их список

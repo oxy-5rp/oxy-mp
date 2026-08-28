@@ -64,6 +64,12 @@ namespace {
         return "weaponDamage";
     case EventKind::ConsoleCommand:
         return "consoleCommand";
+    case EventKind::VehicleHorn:
+        return "vehicleHorn";
+    case EventKind::VehicleSiren:
+        return "vehicleSiren";
+    case EventKind::NetOwnerChange:
+        return "netOwnerChange";
     case EventKind::ClientEvent:
         // Отдельного имени нет: события от клиента различаются своим именем, и
         // собирается оно в dispatch.
@@ -428,6 +434,18 @@ bool Resource::dispatch(const Event& event) {
     const v8::Local<v8::Context> context = setup_->context();
     const v8::Context::Scope contextScope{context};
 
+    // Признак доводом.
+    //
+    // Через `v8::True`/`v8::False`, а не `v8::Boolean::New`, и это не вкусовщина:
+    // второй объявлен и в заголовке V8, и в самой `libnode.dll`, и линковщик
+    // сервера натыкается на оба разом — LNK2005 о многократно определённом
+    // символе. Первые же берут значение из внутренностей изолята и в библиотеку
+    // не ходят.
+    const auto asFlag = [isolate](bool value) {
+        return value ? v8::Local<v8::Value>{v8::True(isolate)}
+                     : v8::Local<v8::Value>{v8::False(isolate)};
+    };
+
     // Ловушка на всё, что здесь происходит, включая сборку доводов.
     //
     // Заведена не для порядка: исключение, брошенное вне ловушки, Node считает
@@ -577,6 +595,33 @@ bool Resource::dispatch(const Event& event) {
         for (const std::string& word : event.arguments) {
             arguments.push_back(toJs(isolate, word));
         }
+        break;
+
+    case EventKind::VehicleHorn:
+        // Порядок доводов — alt:V: машина, игрок, признак.
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(event.player.valid()
+                                ? wrapPlayer(*this, context, event.player.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(asFlag(event.on));
+        break;
+
+    case EventKind::VehicleSiren:
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(asFlag(event.on));
+        break;
+
+    case EventKind::NetOwnerChange:
+        // У alt:V доводы зовутся `entity, owner, oldOwner`. Ведущего может не
+        // быть с любой стороны, и тогда на его месте пустота: машина без
+        // ведущего просто стоит.
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(event.player.valid()
+                                ? wrapPlayer(*this, context, event.player.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(event.killer.valid()
+                                ? wrapPlayer(*this, context, event.killer.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
         break;
 
     case EventKind::ServerStarted:

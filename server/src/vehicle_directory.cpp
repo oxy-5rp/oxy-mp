@@ -115,6 +115,16 @@ bool VehicleDirectory::repair(shared::VehicleId id) {
     return true;
 }
 
+bool VehicleDirectory::setLockState(shared::VehicleId id, std::uint8_t lockState) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    found->second.lockState = lockState;
+    return true;
+}
+
 bool VehicleDirectory::setDimension(shared::VehicleId id, std::int32_t dimension) {
     const auto found = vehicles_.find(id);
     if (found == vehicles_.end()) {
@@ -345,8 +355,8 @@ std::vector<VehicleDirectory::OwnerChange> VehicleDirectory::reassign(
             continue;
         }
 
+        changes.push_back(OwnerChange{.id = id, .owner = owner, .was = vehicle.owner});
         vehicle.owner = owner;
-        changes.push_back(OwnerChange{.id = id, .owner = owner});
     }
 
     return changes;

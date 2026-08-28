@@ -70,6 +70,10 @@ namespace {
         .engineHealth = vehicle.state.engineHealth,
         .tankHealth = vehicle.state.tankHealth,
         .flags = vehicle.state.flags,
+
+        // Замки помнит сервер, а не снимок: ведущий о них не рассказывает — он
+        // их исполняет, как и всякий, кто машину видит.
+        .lockState = vehicle.lockState,
         .passengers = vehicles.seatedIn(id),
 
         .dimension = vehicle.dimension,
@@ -1140,6 +1144,15 @@ shared::ObjectId ServerCore::createObject(std::uint32_t model, const shared::Vec
 
     sink_->objectAdded(id);
     return id;
+}
+
+bool ServerCore::setVehicleLock(shared::VehicleId id, std::uint8_t lockState) {
+    if (!vehicles_->setLockState(id, lockState)) {
+        return false;
+    }
+
+    sink_->vehicleControlChanged(id);
+    return true;
 }
 
 bool ServerCore::moveObject(shared::ObjectId id, const shared::Vec3& position,

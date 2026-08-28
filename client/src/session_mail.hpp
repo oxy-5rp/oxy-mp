@@ -231,6 +231,14 @@ public:
     /// Кладёт распоряжение о теле. Заменяет прежнее целиком.
     void deliverControl(std::uint8_t flags) { control_ = flags; }
 
+    void deliverVehicleControls(std::vector<shared::VehicleControl> controls) {
+        vehicleControls_.insert(vehicleControls_.end(), controls.begin(), controls.end());
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleControl> takeVehicleControls() {
+        return std::exchange(vehicleControls_, {});
+    }
+
     /// Чем сервер распорядился о теле. Спрашивается каждый кадр и потому не
     /// забирается: наложить признаки однажды нельзя — их сбрасывает подъём из
     /// мёртвых.
@@ -752,6 +760,9 @@ private:
 
     /// Чем сервер распорядился о нашем теле. Состояние, а не очередь.
     std::uint8_t control_ = 0;
+
+    /// Замки машин, о которых сказал сервер и о которых ещё не рассказали игре.
+    std::vector<shared::VehicleControl> vehicleControls_;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;

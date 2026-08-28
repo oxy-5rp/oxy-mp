@@ -1209,6 +1209,40 @@ struct PlayerTeleport {
     [[nodiscard]] static PlayerTeleport read(ByteReader& reader);
 };
 
+/// Как заперта машина. Числа те же, что у игры и у alt:V.
+enum class VehicleLock : std::uint8_t {
+    None = 0,
+    Unlocked = 1,
+    Locked = 2,
+    LockoutPlayerOnly = 3,
+    LockPlayerInside = 4,
+    InitiallyLocked = 5,
+    ForceDoorsShut = 6,
+    LockedCanBeDamaged = 7,
+};
+
+/// Замки машины.
+///
+/// Отдельным сообщением, а не полем снимка, и это следует из того, кто ими
+/// распоряжается. Снимок приходит от ведущего и описывает то, что игра
+/// насчитала сама; замки же назначает сервер, и попади они в снимок — ведущий
+/// пересказывал бы серверу его же распоряжение, а на первом же расхождении они
+/// принялись бы спорить.
+struct VehicleControl {
+    static constexpr MessageId kId = MessageId::VehicleControl;
+
+    VehicleId id = kInvalidVehicleId;
+
+    /// Значение VehicleLock. Числом, а не перечислением: по сети идёт байт, а
+    /// толковать его выше — дело слоя alt:V.
+    std::uint8_t lockState = 0;
+
+    [[nodiscard]] friend bool operator==(const VehicleControl&, const VehicleControl&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleControl read(ByteReader& reader);
+};
+
 /// Чем сервер распоряжается о теле игрока.
 enum class PlayerControlFlag : std::uint8_t {
     /// Персонаж стоит на месте и не двигается ни своей волей, ни физикой.

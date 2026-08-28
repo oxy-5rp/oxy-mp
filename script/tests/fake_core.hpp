@@ -572,6 +572,16 @@ public:
                }) != 0;
     }
 
+    bool setVehicleLock(shared::VehicleId id, std::uint8_t lockState) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+        if (it == vehicleList.end()) {
+            return false;
+        }
+
+        it->lockState = lockState;
+        return true;
+    }
+
     bool moveObject(shared::ObjectId id, const shared::Vec3& position,
                     const shared::Vec3& rotation) override {
         const auto it = std::ranges::find(objectList, id, &ObjectInfo::id);

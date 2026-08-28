@@ -660,8 +660,18 @@
         }
 
         const car = me.vehicle;
-        const handle = car === null ? 0 : car.scriptID;
         const seat = car === null ? kNowhere : me.seat;
+
+        // Места нет — значит и в машине его нет, чем бы ни отвечала игра.
+        //
+        // **Это стоило неверного события, и нашла его живая игра.** Пока идёт
+        // высадка, игра ещё числит персонажа при машине
+        // (`GET_VEHICLE_PED_IS_IN` отвечает ею), а места он уже не занимает —
+        // перебор сидений не находит его нигде. Выходило, что машина та же, а
+        // место сменилось с первого на «нигде», и слой объявлял `changedVehicleSeat`
+        // с местом ноль вместо `leftVehicle`. Режим, слушающий выход, не узнавал
+        // о нём вовсе.
+        const handle = car === null || seat === kNowhere ? 0 : car.scriptID;
 
         if (handle === riding.handle && seat === riding.seat) {
             return;

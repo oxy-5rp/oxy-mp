@@ -70,6 +70,13 @@ public:
         /// Последняя объявленная внешность. Пусто — её ещё не объявляли.
         std::optional<shared::VehicleAppearance> appearance;
 
+        /// Как она заперта. Значение shared::VehicleLock.
+        ///
+        /// Помнится сервером и пересказывается вошедшим позже — как и внешность:
+        /// запертая машина обязана быть запертой и для того, кто подошёл к ней
+        /// через час.
+        std::uint8_t lockState = 0;
+
         /// Назначена ли внешность сервером.
         ///
         /// Назначенную объявления ведущего больше не перебивают — см.
@@ -103,6 +110,13 @@ public:
     struct OwnerChange {
         shared::VehicleId id = shared::kInvalidVehicleId;
         shared::PlayerId owner = shared::kInvalidPlayerId;
+
+        /// Кто вёл её до этого. Недействительный — не вёл никто.
+        ///
+        /// Понадобился скриптам: у alt:V `netOwnerChange` называет обоих, и
+        /// режим, снимающий права с прежнего ведущего, без него не знал бы, с
+        /// кого снимать.
+        shared::PlayerId was = shared::kInvalidPlayerId;
     };
 
     /// Насколько близко нужно быть к машине, чтобы её вести, в метрах.
@@ -128,6 +142,9 @@ public:
     /// сотне машин и ни у кого не идёт игра.
     [[nodiscard]] shared::VehicleId add(std::uint32_t model, const shared::Vec3& position,
                                         float heading, shared::PlayerId owner, std::size_t limit);
+
+    /// Запирает машину или отпирает её. false — машины уже нет.
+    bool setLockState(shared::VehicleId id, std::uint8_t lockState);
 
     /// Переставляет машину в другой слой мира. false — машины уже нет.
     bool setDimension(shared::VehicleId id, std::int32_t dimension);

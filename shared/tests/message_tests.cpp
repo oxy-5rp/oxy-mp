@@ -1397,6 +1397,40 @@ TEST_CASE("a teleport carries only where to", "[protocol]") {
     CHECK(back->position.y == -2.5F);
 }
 
+TEST_CASE("a lock of a vehicle names both the vehicle and the lock", "[protocol]") {
+    VehicleControl control;
+    control.id = 4242;
+    control.lockState = static_cast<std::uint8_t>(VehicleLock::LockPlayerInside);
+
+    const auto packet = encode(control);
+    const auto back = decode<VehicleControl>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK(back->id == 4242);
+    CHECK(back->lockState == static_cast<std::uint8_t>(VehicleLock::LockPlayerInside));
+}
+
+TEST_CASE("an unlocked vehicle is told apart from one nobody spoke about",
+          "[protocol]") {
+    // Ноль означает «сервер о замке не говорил», а единица — «отперта нарочно».
+    // Спутать их нельзя: по первому клиент замок не трогает вовсе, оставляя
+    // машине то, что выставила ей игра.
+    VehicleControl silent;
+    silent.id = 1;
+    silent.lockState = static_cast<std::uint8_t>(VehicleLock::None);
+
+    VehicleControl unlocked;
+    unlocked.id = 1;
+    unlocked.lockState = static_cast<std::uint8_t>(VehicleLock::Unlocked);
+
+    CHECK_FALSE(silent == unlocked);
+
+    const auto back = decode<VehicleControl>(ByteView{encode(unlocked)});
+
+    REQUIRE(back);
+    CHECK(back->lockState == 1);
+}
+
 TEST_CASE("a command about the body carries both of its flags", "[protocol]") {
     PlayerControl control;
     control.flags = static_cast<std::uint8_t>(PlayerControlFlag::Frozen) |

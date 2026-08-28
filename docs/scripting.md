@@ -577,6 +577,8 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `alt.getEntitiesInRange` и родня | Плюс `getClosestEntities`, `getEntitiesInDimension`, `getClosestPlayer`, `getClosestVehicle` — перебором по реестрам |
 | `alt.hasResource`, `getAllResources` | Из того же списка, что и `alt.Resource` |
 | `player.frozen`, `player.invincible` | Распоряжение о теле: помнит сервер, накладывает игра хозяина каждым кадром |
+| `vehicle.lockState` | Замки: помнит сервер, накладывают все, кто машину видит |
+| `vehicleHorn`, `vehicleSiren`, `netOwnerChange` | Выводятся из снимка машины и из пересдачи ведущих |
 | `alt.stringToSHA256`, `alt.time` / `timeEnd` | В общей части; отпечаток через `crypto` из Node |
 | Снаряжение: `weapons`, `hasWeapon`, `getWeaponAmmo`, `removeWeapon`, `removeAllWeapons` | Список сервера, а не то, что в руках сию секунду |
 | Машина: прочность и признаки | `bodyHealth`, `engineHealth`, `petrolTankHealth`, `velocity`, `engineOn`, `handbrakeActive`, `daylightOn`, `nightlightOn`, `sirenActive`, `hornActive`, `destroyed`, `passengers` |

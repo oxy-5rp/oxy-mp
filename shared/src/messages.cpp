@@ -858,6 +858,18 @@ PlayerTeleport PlayerTeleport::read(ByteReader& reader) {
     return message;
 }
 
+void VehicleControl::write(ByteWriter& writer) const {
+    writer.writeU32(id);
+    writer.writeU8(lockState);
+}
+
+VehicleControl VehicleControl::read(ByteReader& reader) {
+    VehicleControl message;
+    message.id = reader.readU32();
+    message.lockState = reader.readU8();
+    return message;
+}
+
 void PlayerControl::write(ByteWriter& writer) const {
     writer.writeU8(flags);
 }

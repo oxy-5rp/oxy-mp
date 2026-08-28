@@ -197,6 +197,7 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       setHandbrake_(table.handlerFor(natives::kSetVehicleHandbrake)),
       setBrakeLights_(table.handlerFor(natives::kSetVehicleBrakeLights)),
       doorAngle_(table.handlerFor(natives::kGetVehicleDoorAngleRatio)),
+      lockDoors_(table.handlerFor(natives::kSetVehicleDoorsLocked)),
       openDoor_(table.handlerFor(natives::kSetVehicleDoorOpen)),
       shutDoor_(table.handlerFor(natives::kSetVehicleDoorShut)),
       doorDamaged_(table.handlerFor(natives::kIsVehicleDoorDamaged)),
@@ -956,6 +957,14 @@ shared::VehicleHarm VehicleSnapshot::settleHealth(int vehicle, const shared::Veh
     }
 
     return harm;
+}
+
+void VehicleSnapshot::applyLock(int vehicle, std::uint8_t lockState) const {
+    if (lockDoors_ == nullptr || vehicle == 0) {
+        return;
+    }
+
+    invokeNative<void>(lockDoors_, vehicle, static_cast<int>(lockState));
 }
 
 void VehicleSnapshot::applyDamage(int vehicle, const shared::VehicleState& state,
