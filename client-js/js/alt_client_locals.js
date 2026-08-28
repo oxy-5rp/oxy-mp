@@ -321,6 +321,10 @@
         #radius = 0;
         #height = 0;
 
+        /// Какой это чекпоинт. Помнится, а не спрашивается: у игры на вид
+        /// чекпоинта только запись — обратного натива нет.
+        #type = 0;
+
         constructor(type, pos, nextPos, radius, height, color, iconColor, streamingDistance) {
             const точка = new shared.Vector3(pos);
             const следующая = nextPos === undefined ? точка : new shared.Vector3(nextPos);
@@ -340,6 +344,7 @@
 
             super(дескриптор);
 
+            this.#type = Number(type) || 0;
             this.#radius = шириной;
             this.#height = Number(height) || 0;
 
@@ -362,6 +367,7 @@
         static getByID(id) { return LocalEntity.byId(id, Checkpoint); }
         static get all() { return LocalEntity.allOf(Checkpoint); }
         static get count() { return Checkpoint.all.length; }
+        get checkpointType() { return this.#type; }
 
         get radius() { return this.#radius; }
         get height() { return this.#height; }
@@ -419,9 +425,24 @@
     class Colshape extends LocalEntity {
         #inside = false;
 
+        /// Какая это зона. Числами alt:V (`shared.ColShapeType`): наследник
+        /// называет свой род сам, потому что общего вопроса «какая ты» у зоны
+        /// нет — есть только её собственный класс.
+        #type = 0;
+
+        get colshapeType() { return this.#type; }
+
+        /// Считать ли только игроков. У нас зона и так сверяется с одним
+        /// игроком — своим, — и признак этот пока ничего не меняет; хранится он
+        /// затем, чтобы `zone.playersOnly` отвечал тем, что в него положили, а
+        /// не пустотой.
+        playersOnly = false;
+
         /// Заводится без тела: зона — это правило, а не предмет в мире.
-        constructor() {
+        constructor(type) {
             super(0);
+
+            this.#type = Number(type) || 0;
             shapes.add(this);
         }
 
@@ -473,7 +494,7 @@
         #x = 0; #y = 0; #z = 0; #radius = 0; #height = 0;
 
         constructor(x, y, z, radius, height) {
-            super();
+            super(shared.ColShapeType.Cylinder);
 
             this.#x = Number(x) || 0;
             this.#y = Number(y) || 0;
@@ -508,7 +529,7 @@
         #to = null;
 
         constructor(x1, y1, z1, x2, y2, z2) {
-            super();
+            super(shared.ColShapeType.Cuboid);
 
             // Углы приводятся к «меньший — больший»: режим вправе назвать их в
             // любом порядке, и ящик от этого не должен становиться пустым.
@@ -537,7 +558,7 @@
         #radius = 0;
 
         constructor(x, y, z, radius) {
-            super();
+            super(shared.ColShapeType.Sphere);
 
             this.#center = new shared.Vector3(x, y, z);
             this.#radius = Number(radius) || 0;
@@ -558,7 +579,7 @@
         #x = 0; #y = 0; #radius = 0;
 
         constructor(x, y, radius) {
-            super();
+            super(shared.ColShapeType.Circle);
 
             this.#x = Number(x) || 0;
             this.#y = Number(y) || 0;
@@ -589,7 +610,7 @@
         #points = [];
 
         constructor(minZ, maxZ, points) {
-            super();
+            super(shared.ColShapeType.Polygon);
 
             this.#minZ = Number(minZ) || 0;
             this.#maxZ = Number(maxZ) || 0;
