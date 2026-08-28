@@ -403,7 +403,20 @@
             shapes.add(this);
         }
 
-        get isEntityIn() { return this.#inside; }
+        /// Внутри ли зоны названная сущность.
+        ///
+        /// Вопрос про неё, а не признак «внутри ли хоть кто-то»: так объявлено у
+        /// alt:V (`isEntityIn(entity)`), и так же считает наша серверная
+        /// половина. Признаком это здесь и было — и `zone.isEntityIn(машина)`
+        /// падало бы на «true не функция», потому что читалось свойство, а не
+        /// звался метод.
+        isEntityIn(entity) {
+            if (entity === null || entity === undefined || entity.valid !== true) {
+                return false;
+            }
+
+            return this.isPointIn(entity.pos);
+        }
 
         /// Внутри ли точка. Переопределяется каждой формой.
         isPointIn(_point) { return false; }
