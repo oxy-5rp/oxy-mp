@@ -94,6 +94,37 @@
         return JSON.stringify(args);
     }
 
+    /// Место, откуда прилетела ошибка, — по первой строке её стека.
+    ///
+    /// У alt:V `resourceError` называет файл и строку отдельными доводами, а у
+    /// брошенного `Error` они есть только внутри `stack`. Не разобралось —
+    /// доводы остаются пустыми: по неверному месту ошибку ищут дольше, чем
+    /// вовсе без места.
+    function whereItBroke(failure) {
+        const stack = typeof failure?.stack === 'string' ? failure.stack : '';
+        const found = stack.match(/\((.*):(\d+):\d+\)/) ?? stack.match(/at (.*):(\d+):\d+/);
+
+        return found === null ? { file: '', line: 0 }
+                              : { file: found[1], line: Number(found[2]) };
+    }
+
+    /// Объявляет ресурсу его же ошибку. У alt:V это `resourceError` на обеих
+    /// сторонах, и здесь оно нужнее: клиентский журнал лежит у игрока на диске,
+    /// а не у того, кто режим писал.
+    ///
+    /// Ошибку внутри обработчика ошибки объявлять некому: она ушла бы тому же
+    /// обработчику и по кругу.
+    function tellAboutError(name, failure) {
+        if (name === 'resourceError') {
+            return;
+        }
+
+        const беда = failure instanceof Error ? failure : new Error(String(failure));
+        const { file, line } = whereItBroke(беда);
+
+        fire('resourceError', [беда, file, line, беда.stack ?? '']);
+    }
+
     function fire(name, args) {
         // Копия списка нарочно: обработчик волен отписаться прямо отсюда.
         const called = listenersFor(name).slice();
@@ -108,6 +139,7 @@
             } catch (failure) {
                 // Упавший обработчик не уносит ни остальных, ни игру.
                 logError(`ошибка в обработчике «${name}»:`, failure?.stack ?? failure);
+                tellAboutError(name, failure);
             }
         }
     }
