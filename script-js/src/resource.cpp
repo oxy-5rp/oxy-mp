@@ -76,6 +76,8 @@ namespace {
         return "playerHeal";
     case EventKind::PlayerDimensionChange:
         return "playerDimensionChange";
+    case EventKind::RemoveEntity:
+        return "removeEntity";
     case EventKind::PedHeal:
         return "pedHeal";
     case EventKind::PedDeath:
@@ -615,6 +617,32 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(v8::Local<v8::Value>{v8::Null(isolate)});
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
         break;
+
+    case EventKind::RemoveEntity: {
+        // Довод один — сама сущность. Какого она рода, сказано в `reason`:
+        // общего предка у наших сущностей нет, и обернуть их одним способом
+        // нечем.
+        const auto id = static_cast<std::uint32_t>(event.weapon);
+
+        switch (static_cast<shared::EntityKind>(event.reason)) {
+        case shared::EntityKind::Vehicle:
+            arguments.push_back(wrapVehicle(*this, context, id));
+            break;
+        case shared::EntityKind::Object:
+            arguments.push_back(wrapObject(*this, context, id));
+            break;
+        case shared::EntityKind::Ped:
+            arguments.push_back(wrapPed(*this, context, id));
+            break;
+        case shared::EntityKind::Player:
+        case shared::EntityKind::None:
+            // Игрок уходит своим событием (`playerDisconnect`), и объявлять его
+            // ещё и здесь значило бы считать один уход дважды.
+            return true;
+        }
+
+        break;
+    }
 
     case EventKind::ClientEvent:
         arguments.push_back(wrapPlayer(*this, context, event.player.id()));

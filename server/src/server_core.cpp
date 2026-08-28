@@ -1185,6 +1185,20 @@ bool ServerCore::setVehicleDimension(shared::VehicleId id, std::int32_t dimensio
     return vehicles_->setDimension(id, dimension);
 }
 
+/// Объявляет уход сущности — до того, как её уберут.
+///
+/// Общее на три рода: у alt:V это одно событие `removeEntity`, а не три, и
+/// различает роды оно самой сущностью. Игрока сюда не заводят — он уходит своим
+/// событием, и считать его уход дважды незачем.
+void ServerCore::tellEntityGone(shared::EntityKind kind, std::uint32_t id) {
+    script::Event gone;
+    gone.kind = script::EventKind::RemoveEntity;
+    gone.reason = static_cast<std::uint8_t>(kind);
+    gone.weapon = id;
+
+    events_->dispatch(gone);
+}
+
 bool ServerCore::removeVehicle(shared::VehicleId id) {
     if (vehicles_->find(id) == nullptr) {
         return false;
@@ -1198,6 +1212,7 @@ bool ServerCore::removeVehicle(shared::VehicleId id) {
     destroyed.vehicle = script::Vehicle{*this, id};
 
     events_->dispatch(destroyed);
+    tellEntityGone(shared::EntityKind::Vehicle, id);
 
     // Обработчик мог убрать её сам — тогда убирать нечего, и это не ошибка.
     if (!vehicles_->remove(id)) {
@@ -1349,6 +1364,12 @@ bool ServerCore::setObjectDimension(shared::ObjectId id, std::int32_t dimension)
 }
 
 bool ServerCore::removeObject(shared::ObjectId id) {
+    if (objects_->find(id) == nullptr) {
+        return false;
+    }
+
+    tellEntityGone(shared::EntityKind::Object, id);
+
     if (!objects_->remove(id)) {
         return false;
     }
@@ -1442,6 +1463,12 @@ bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
 }
 
 bool ServerCore::removePed(shared::PedId id) {
+    if (peds_->find(id) == nullptr) {
+        return false;
+    }
+
+    tellEntityGone(shared::EntityKind::Ped, id);
+
     if (!peds_->remove(id)) {
         return false;
     }

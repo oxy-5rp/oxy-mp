@@ -420,13 +420,18 @@ TEST_CASE("a vehicle is still there while its removal is announced", "[server][s
     const shared::VehicleId id = session.core.createVehicle(0xDEADBEEF, {}, 0.0F);
     REQUIRE(session.core.removeVehicle(id));
 
-    REQUIRE(recorder.seen.size() == 2);
-    CHECK(recorder.seen.back().kind == script::EventKind::VehicleDestroy);
+    // Три события: завели, убрали своим именем и убрали общим. Своё имя идёт
+    // первым, общее вторым — у alt:V `removeEntity` объявляется на всякую
+    // сущность, а `vehicleDestroy` только на машину, и подписаны на них разные
+    // места.
+    REQUIRE(recorder.seen.size() == 3);
+    CHECK(recorder.seen[1].kind == script::EventKind::VehicleDestroy);
+    CHECK(recorder.seen[2].kind == script::EventKind::RemoveEntity);
 
     // Обработчик застаёт машину живой: он вправе спросить у неё модель — записать
     // в журнал, поставить на её место другую, — а после уборки ссылка на неё уже
     // ничего не расскажет.
-    CHECK(recorder.seen.back().vehicleModel == 0xDEADBEEF);
+    CHECK(recorder.seen[1].vehicleModel == 0xDEADBEEF);
 
     CHECK_FALSE(session.core.vehicle(id));
     CHECK(session.sink.sent.back() == std::format("vehicle- {}", id));
@@ -1690,6 +1695,24 @@ script::PedInfo standing(std::uint32_t model) {
 }
 
 } // namespace
+
+TEST_CASE("a ped taken away is announced as gone before it is gone",
+          "[server][script]") {
+    // До уборки, а не после: обработчик вправе спросить у уходящего модель или
+    // положение, а после уборки ссылка на него уже ничего не расскажет.
+    Session session;
+    Recorder recorder;
+
+    const shared::PedId id = session.core.createPed(standing(0x9C9EFFD8));
+    REQUIRE(id != shared::kInvalidPedId);
+
+    session.events.subscribe(&recorder);
+
+    REQUIRE(session.core.removePed(id));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::RemoveEntity);
+}
 
 TEST_CASE("a ped that ran out of health is announced dead", "[server][script]") {
     Session session;

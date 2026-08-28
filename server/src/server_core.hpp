@@ -272,6 +272,11 @@ public:
                                                   const shared::Vec3& position,
                                                   float heading) override;
 
+    /// Объявляет уход сущности — до того, как её уберут. Общее на три рода.
+
+    void tellEntityGone(shared::EntityKind kind, std::uint32_t id);
+
+
     bool removeVehicle(shared::VehicleId id) override;
     bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override;
     bool teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
