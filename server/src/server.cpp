@@ -1885,6 +1885,7 @@ void Server::sendHealth(const Player& player, shared::PlayerId attacker) {
     shared::HealthChanged changed;
     changed.health = player.health;
     changed.armour = player.armour;
+    changed.maxArmour = player.maxArmour;
     changed.attacker = attacker;
 
     sendTo(player.peer, changed);

@@ -124,7 +124,8 @@ public:
     /// больше не свидетельствует — он о нём узнаёт. Урон при этом остаётся
     /// отдельным сообщением, но меняет он только картинку: вспышку на экране да
     /// строку о том, кто попал.
-    void applyHealth(int ped, std::uint16_t health, std::uint16_t armour) const;
+    void applyHealth(int ped, std::uint16_t health, std::uint16_t armour,
+                     std::uint16_t maxArmour) const;
 
     /// Выдаёт персонажу оружие, назначенное сервером.
     ///
@@ -183,6 +184,7 @@ private:
     NativeHandler playerId_ = nullptr;
     NativeHandler getPlayerName_ = nullptr;
     NativeHandler equipWeapon_ = nullptr;
+    NativeHandler setMaxArmour_ = nullptr;
     NativeHandler playerPedId_ = nullptr;
     NativeHandler isPlaying_ = nullptr;
     NativeHandler getCoords_ = nullptr;

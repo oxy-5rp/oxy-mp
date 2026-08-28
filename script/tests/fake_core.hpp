@@ -95,6 +95,9 @@ public:
     /// Чем игроки вооружены.
     std::unordered_map<shared::PlayerId, std::vector<shared::WeaponSlot>> carried;
 
+    /// Предел брони, поставленный скриптом.
+    std::unordered_map<shared::PlayerId, std::uint16_t> armourLimits;
+
     shared::VehicleId nextVehicleId = 1;
     shared::ObjectId nextObjectId = 1;
     shared::PedId nextPedId = 1;
@@ -160,6 +163,18 @@ public:
         return std::erase_if(carried[id], [weapon](const shared::WeaponSlot& slot) {
                    return slot.weapon == weapon;
                }) != 0;
+    }
+
+    bool setWeaponAmmo(shared::PlayerId id, std::uint32_t weapon,
+                       std::uint16_t ammo) override {
+        for (shared::WeaponSlot& slot : carried[id]) {
+            if (slot.weapon == weapon) {
+                slot.ammo = ammo;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [[nodiscard]] std::vector<shared::WeaponSlot> loadout(
@@ -308,6 +323,11 @@ public:
 
         it->health = health;
         it->armour = armour;
+        return true;
+    }
+
+    bool setMaxArmour(shared::PlayerId id, std::uint16_t maxArmour) override {
+        armourLimits[id] = maxArmour;
         return true;
     }
 

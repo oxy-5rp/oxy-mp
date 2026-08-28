@@ -36,6 +36,7 @@ Player::Player(const NativeTable& table) noexcept
     : playerId_(table.handlerFor(natives::kPlayerId)),
       getPlayerName_(table.handlerFor(natives::kGetPlayerName)),
       equipWeapon_(table.handlerFor(natives::kSetCurrentPedWeapon)),
+      setMaxArmour_(table.handlerFor(natives::kSetPlayerMaxArmour)),
       playerPedId_(table.handlerFor(natives::kPlayerPedId)),
       isPlaying_(table.handlerFor(natives::kIsPlayerPlaying)),
       getCoords_(table.handlerFor(natives::kGetEntityCoords)),
@@ -373,9 +374,18 @@ void Player::applyDamage(int ped, std::uint16_t amount) const {
     invokeNative<void>(applyDamage_, ped, static_cast<int>(amount), false, 0);
 }
 
-void Player::applyHealth(int ped, std::uint16_t health, std::uint16_t armour) const {
+void Player::applyHealth(int ped, std::uint16_t health, std::uint16_t armour,
+                         std::uint16_t maxArmour) const {
     if (ped == 0) {
         return;
+    }
+
+    // Предел — раньше самой брони, и порядок этот важен: игра обрезает
+    // назначаемую броню по нынешнему пределу, и выданная сверх него потерялась
+    // бы молча. Спрашивается он у игрока, а не у персонажа: у натива довод
+    // именно игрок.
+    if (setMaxArmour_ != nullptr) {
+        invokeNative<void>(setMaxArmour_, id(), static_cast<int>(maxArmour));
     }
 
     if (setHealth_ != nullptr) {

@@ -311,8 +311,38 @@ void setPlayerArmour(v8::Local<v8::Name>, v8::Local<v8::Value> value,
         return;
     }
 
-    (void)core.setHealth(*id, player->health,
-                         static_cast<std::uint16_t>(std::clamp<std::int64_t>(*armour, 0, 100)));
+    // Обрезается по пределу самого игрока, а не по сотне: тяжёлый бронежилет в
+    // режимах — это поднятый предел, и обрезка по общей сотне обращала бы его в
+    // украшение. Сотня же обрезала здесь раньше, и `maxArmour = 200` не значил
+    // ничего: броня всё равно вставала на сто.
+    //
+    // Само ядро обрежет ещё раз, и это не лишнее: сюда попадает не всякое
+    // изменение брони.
+    (void)core.setHealth(
+        *id, player->health,
+        static_cast<std::uint16_t>(std::clamp<std::int64_t>(*armour, 0, player->maxArmour)));
+}
+
+/// Ставит предел брони.
+///
+/// Отдельно от самой брони, как и у alt:V: поднявший предел не обязан тут же
+/// выдавать бронежилет. Уже надетая при этом обрезается по новому пределу.
+void setPlayerMaxArmour(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                        const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = idOf<shared::PlayerId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> limit = intFromJs(isolate->GetCurrentContext(), value);
+    if (!limit) {
+        return;
+    }
+
+    (void)resourceOf(isolate).core().setMaxArmour(
+        *id, static_cast<std::uint16_t>(std::clamp<std::int64_t>(*limit, 0, 0xFFFF)));
 }
 
 /// Число из довода по месту. Пусто — довода нет или он не число.
@@ -425,6 +455,75 @@ void playerHasWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
 /// Именно выдал, а не сколько осталось в магазине сию секунду: тратит их игра у
 /// владельца, и сервер узнаёт остаток из снимков. Число здесь — то, что уйдёт
 /// игроку, если вернуть ему снаряжение.
+/// Состав и расцветка того ствола, что сейчас в руках.
+///
+/// Ствол в руках называет снимок, а его подробности лежат в снаряжении: это
+/// два разных источника, и сводятся они здесь. Пустота означает «в руках
+/// ничего, о чём мы знаем» — кулаки в снаряжении не числятся.
+template<bool Components>
+void playerHeldWeaponDetail(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    const std::optional<PlayerInfo> player = core.player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const std::vector<shared::WeaponSlot> carried = core.loadout(*id);
+    const auto found = std::ranges::find(carried, player->weapon, &shared::WeaponSlot::weapon);
+
+    if (found == carried.end()) {
+        if constexpr (Components) {
+            info.GetReturnValue().Set(v8::Array::New(isolate, 0));
+        } else {
+            info.GetReturnValue().Set(0);
+        }
+
+        return;
+    }
+
+    if constexpr (Components) {
+        const v8::Local<v8::Array> list =
+            v8::Array::New(isolate, static_cast<int>(found->components.size()));
+
+        std::uint32_t at = 0;
+        for (const std::uint32_t component : found->components) {
+            (void)list->Set(context, at++, v8::Number::New(isolate, component));
+        }
+
+        info.GetReturnValue().Set(list);
+    } else {
+        info.GetReturnValue().Set(static_cast<double>(found->tint));
+    }
+}
+
+/// Меняет боезапас у оружия, которое у игрока уже есть.
+void playerSetWeaponAmmo(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> weapon = argAt(info, 0);
+    const std::optional<std::int64_t> ammo = argAt(info, 1);
+
+    if (!id || !weapon || !ammo) {
+        fail(isolate, "setWeaponAmmo ждёт хеш оружия и число патронов");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setWeaponAmmo(
+        *id, static_cast<std::uint32_t>(*weapon),
+        static_cast<std::uint16_t>(std::clamp<std::int64_t>(*ammo, 0, 0xFFFF))));
+}
+
 void playerWeaponAmmo(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
 
@@ -1475,6 +1574,26 @@ void playerGiveWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
 
     return std::pair{static_cast<std::uint32_t>(*weapon), static_cast<std::uint32_t>(*second)};
+}
+
+/// Стоит ли на этом стволе эта насадка.
+void playerHasWeaponComponent(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const auto named = weaponPairFromJs(info);
+
+    if (!id || !named) {
+        fail(isolate, "hasWeaponComponent ждёт хеши оружия и насадки");
+        return;
+    }
+
+    const std::vector<shared::WeaponSlot> carried = resourceOf(isolate).core().loadout(*id);
+    const auto found = std::ranges::find(carried, named->first, &shared::WeaponSlot::weapon);
+
+    info.GetReturnValue().Set(found != carried.end() &&
+                              std::ranges::find(found->components, named->second) !=
+                                  found->components.end());
 }
 
 void playerAddWeaponComponent(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -3019,6 +3138,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "heading", playerField<&PlayerInfo::heading>);
     addGetter(isolate, shape, "health", playerField<&PlayerInfo::health>, setPlayerHealth);
     addGetter(isolate, shape, "armour", playerField<&PlayerInfo::armour>, setPlayerArmour);
+    addGetter(isolate, shape, "maxArmour", playerField<&PlayerInfo::maxArmour>, setPlayerMaxArmour);
     addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
     addGetter(isolate, shape, "seat", playerSeat);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
@@ -3081,6 +3201,10 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "getWeaponAmmo", playerWeaponAmmo);
     addMethod(isolate, shape, "removeWeapon", playerRemoveWeapon);
     addMethod(isolate, shape, "removeAllWeapons", playerClearWeapons);
+    addMethod(isolate, shape, "setWeaponAmmo", playerSetWeaponAmmo);
+    addMethod(isolate, shape, "hasWeaponComponent", playerHasWeaponComponent);
+    addGetter(isolate, shape, "currentWeaponComponents", playerHeldWeaponDetail<true>);
+    addGetter(isolate, shape, "currentWeaponTintIndex", playerHeldWeaponDetail<false>);
     addMethod(isolate, shape, "addWeaponComponent", playerAddWeaponComponent);
     addMethod(isolate, shape, "removeWeaponComponent", playerRemoveWeaponComponent);
     addMethod(isolate, shape, "setWeaponTintIndex", playerSetWeaponTint);

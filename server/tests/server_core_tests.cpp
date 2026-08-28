@@ -838,6 +838,60 @@ TEST_CASE("clearing one clothing slot leaves the rest on", "[server][script]") {
     CHECK(look->components[4].drawable == 7);
 }
 
+TEST_CASE("armour is capped by the limit the script set, not the game default",
+          "[server][script]") {
+    // Тяжёлый бронежилет в режимах — это поднятый предел, а не броня сверх
+    // него. Обрезай мы по общей сотне, поднятый предел не значил бы ничего.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.setMaxArmour(player.id, 200));
+    REQUIRE(session.core.setHealth(player.id, 200, 200));
+
+    CHECK(player.armour == 200);
+}
+
+TEST_CASE("lowering the armour limit takes off what is above it", "[server][script]") {
+    // Иначе игрок остался бы в броне выше собственного предела, и снять её было
+    // бы нечем: следующая же выдача обрезалась бы по новому пределу, а нынешняя
+    // так и стояла бы.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.setMaxArmour(player.id, 200));
+    REQUIRE(session.core.setHealth(player.id, 200, 200));
+    REQUIRE(session.core.setMaxArmour(player.id, 50));
+
+    CHECK(player.armour == 50);
+}
+
+TEST_CASE("ammo of a weapon already carried can be changed without giving it again",
+          "[server][script]") {
+    // Без замены списка: замена отобрала бы у игрока оружие из рук на
+    // мгновение — игра выдаёт его заново, — и держащий ствол опустил бы руки
+    // посреди перестрелки.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 100, false));
+    REQUIRE(session.core.setWeaponAmmo(player.id, 0x1B06D571, 7));
+
+    const std::vector<shared::WeaponSlot> carried = session.core.loadout(player.id);
+
+    REQUIRE(carried.size() == 1);
+    CHECK(carried.front().ammo == 7);
+}
+
+TEST_CASE("ammo of a weapon nobody carries is refused", "[server][script]") {
+    // Отказ, а не молчаливая выдача: режим, доложивший патроны в
+    // несуществующее оружие, узнает об этом сразу, а не когда игрок полезет
+    // стрелять.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    CHECK_FALSE(session.core.setWeaponAmmo(player.id, 0x1B06D571, 7));
+}
+
 TEST_CASE("a weapon given to be held says so to the client", "[server][script]") {
     // Просьба вложить в руки уезжает вместе со списком, а не отдельным
     // распоряжением: список и так придёт, и второе сообщение о том же оружии

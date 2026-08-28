@@ -1831,7 +1831,7 @@ void GameSession::applyServerState(int ped) {
     // нём узнаёт. Ставится оно прямо, а не отниманием урона: урон мог потеряться
     // по дороге, а число, пришедшее от сервера, верно само по себе.
     if (const auto health = mail_.takeIncomingHealth()) {
-        player_.applyHealth(ped, health->health, health->armour);
+        player_.applyHealth(ped, health->health, health->armour, health->maxArmour);
     }
 
     // Снаряжение приходит редко — при входе, при выдаче и после смерти. Игра при

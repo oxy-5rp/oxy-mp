@@ -145,6 +145,7 @@ inline constexpr std::uint64_t kGetFrameCount = 0X8034325BF6D6E41F;
 /// PLAYER_ID, канонический хеш 0X4F8644AF03D0E0D6.
 inline constexpr std::uint64_t kPlayerId = 0X259BE71D8A81D4FA;
 inline constexpr std::uint64_t kGetPlayerName = 0XBD6CA019F46AB947;
+inline constexpr std::uint64_t kSetPlayerMaxArmour = 0X776D5F57819A1E41;
 inline constexpr std::uint64_t kNetworkPlayerGetUserId = 0X4DE98A9A01197527;
 
 /// PLAYER_PED_ID, канонический хеш 0XD80958FC74E988A6.

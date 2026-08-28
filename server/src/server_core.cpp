@@ -21,6 +21,7 @@ namespace {
         .heading = player.heading,
         .health = player.health,
         .armour = player.armour,
+        .maxArmour = player.maxArmour,
         .model = player.appearance ? player.appearance->model : 0,
         .vehicle = seat.vehicle,
         .seat = seat.index,
@@ -392,6 +393,22 @@ std::optional<script::PlayerInfo> ServerCore::player(shared::PlayerId id) const 
                             : std::optional{describe(*found, *vehicles_, *config_, *sink_)};
 }
 
+bool ServerCore::setMaxArmour(shared::PlayerId id, std::uint16_t maxArmour) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    player->maxArmour = maxArmour;
+
+    // Уже надетая броня обрезается по новому пределу: опустивший его увидел бы
+    // иначе игрока в броне выше собственного предела, и снять её было бы нечем.
+    player->armour = std::min(player->armour, maxArmour);
+
+    sink_->healthChanged(*player);
+    return true;
+}
+
 bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) {
     Player* player = players_->findById(id);
     if (player == nullptr) {
@@ -405,7 +422,7 @@ bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint1
     // шестьюдесятью тысячами выглядит здоровым ровно так же, как целый, — просто
     // не умирает.
     player->health = std::min(health, kFullHealth);
-    player->armour = std::min(armour, kFullArmour);
+    player->armour = std::min(armour, player->maxArmour);
 
     sink_->healthChanged(*player);
 
@@ -493,6 +510,26 @@ namespace {
 }
 
 } // namespace
+
+bool ServerCore::setWeaponAmmo(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::WeaponSlot* const slot = weaponOf(*player, weapon);
+    if (slot == nullptr) {
+        return false;
+    }
+
+    slot->ammo = ammo;
+
+    // Без замены: список тот же, поменялось одно число. Замена отобрала бы у
+    // игрока оружие из рук на мгновение — игра выдаёт его заново, и держащий
+    // ствол опустил бы руки посреди перестрелки.
+    sink_->loadoutChanged(*player, false, 0);
+    return true;
+}
 
 bool ServerCore::addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
                                     std::uint32_t component) {

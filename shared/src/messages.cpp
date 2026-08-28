@@ -807,6 +807,7 @@ PlayerLoadout PlayerLoadout::read(ByteReader& reader) {
 void HealthChanged::write(ByteWriter& writer) const {
     writer.writeU16(health);
     writer.writeU16(armour);
+    writer.writeU16(maxArmour);
     writer.writeU32(attacker);
 }
 
@@ -814,6 +815,7 @@ HealthChanged HealthChanged::read(ByteReader& reader) {
     HealthChanged message;
     message.health = reader.readU16();
     message.armour = reader.readU16();
+    message.maxArmour = reader.readU16();
     message.attacker = reader.readU32();
     return message;
 }

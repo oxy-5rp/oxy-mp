@@ -210,6 +210,7 @@ public:
     [[nodiscard]] std::optional<script::PlayerInfo> player(shared::PlayerId id) const override;
 
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
+    bool setMaxArmour(shared::PlayerId id, std::uint16_t maxArmour) override;
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo,
                     bool equip) override;
     bool clearWeapons(shared::PlayerId id) override;
@@ -222,6 +223,7 @@ public:
     /// одинаковым телам значило бы завести два места, где легко разойтись.
     bool setControl(shared::PlayerId id, shared::PlayerControlFlag flag, bool on);
     bool removeWeapon(shared::PlayerId id, std::uint32_t weapon) override;
+    bool setWeaponAmmo(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     [[nodiscard]] std::vector<shared::WeaponSlot> loadout(shared::PlayerId id) const override;
     bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
                             std::uint32_t component) override;

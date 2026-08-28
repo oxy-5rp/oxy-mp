@@ -892,6 +892,22 @@ TEST_CASE("an overlong loadout is refused rather than trusted", "[messages]") {
     CHECK_FALSE(received.has_value());
 }
 
+TEST_CASE("health carries the armour limit along with the armour", "[messages]") {
+    // Вместе, а не двумя сообщениями: меняют их вместе — «выдать тяжёлый
+    // бронежилет» это и есть новый предел и новая броня, — а два сообщения об
+    // одном разъехались бы по дороге.
+    HealthChanged sent;
+    sent.health = 150;
+    sent.armour = 175;
+    sent.maxArmour = 200;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->armour == 175);
+    CHECK(received->maxArmour == 200);
+}
+
 TEST_CASE("HealthChanged survives a round trip", "[messages]") {
     HealthChanged sent;
     sent.health = 0;
