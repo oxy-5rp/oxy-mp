@@ -60,7 +60,7 @@ public:
     virtual void kicked(const Player& player, std::string_view reason) = 0;
 
     /// Снаряжение игрока изменилось. replace — прежнее отобрать.
-    virtual void loadoutChanged(const Player& player, bool replace) = 0;
+    virtual void loadoutChanged(const Player& player, bool replace, std::uint32_t equip) = 0;
 
     /// Машина заведена.
     ///
@@ -210,7 +210,8 @@ public:
     [[nodiscard]] std::optional<script::PlayerInfo> player(shared::PlayerId id) const override;
 
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
-    bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
+    bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo,
+                    bool equip) override;
     bool clearWeapons(shared::PlayerId id) override;
     bool setFrozen(shared::PlayerId id, bool frozen) override;
     bool setInvincible(shared::PlayerId id, bool invincible) override;

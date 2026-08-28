@@ -49,7 +49,8 @@ public:
 
     /// Меняет модель его персонажа. Ноль означает «оставить как есть».
     bool setModel(std::uint32_t model) const;
-    bool giveWeapon(std::uint32_t weapon, std::uint16_t ammo) const;
+    /// equip — вложить ли выданное в руки. См. Core::giveWeapon.
+    bool giveWeapon(std::uint32_t weapon, std::uint16_t ammo, bool equip) const;
     bool clearWeapons() const;
 
     /// Переносит его в точку.

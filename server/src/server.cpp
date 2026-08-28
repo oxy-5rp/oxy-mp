@@ -1504,7 +1504,7 @@ void Server::reviveDead() {
 
         // Снаряжение возвращается вместе с жизнью: игра при смерти отбирает
         // оружие, и без этого воскресший поднимался бы с пустыми руками.
-        sendLoadout(player, true);
+        sendLoadout(player, true, 0);
 
         revived.push_back(player.id);
     }
@@ -1936,10 +1936,11 @@ void Server::announceWeapon(Player& player) {
     broadcast(look);
 }
 
-void Server::sendLoadout(const Player& player, bool replace) {
+void Server::sendLoadout(const Player& player, bool replace, std::uint32_t equip) {
     shared::PlayerLoadout loadout;
     loadout.weapons = player.loadout;
     loadout.replace = replace;
+    loadout.equip = equip;
 
     sendTo(player.peer, loadout);
 }
@@ -1988,8 +1989,8 @@ void Server::healthChanged(const Player& player) {
     sendHealth(player, shared::kInvalidPlayerId);
 }
 
-void Server::loadoutChanged(const Player& player, bool replace) {
-    sendLoadout(player, replace);
+void Server::loadoutChanged(const Player& player, bool replace, std::uint32_t equip) {
+    sendLoadout(player, replace, equip);
 
     // Заодно и остальным: скрипт мог навинтить глушитель на то самое оружие,
     // которое игрок сейчас держит.

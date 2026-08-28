@@ -492,7 +492,14 @@ public:
     virtual bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) = 0;
 
     /// Выдаёт оружие с боезапасом.
-    virtual bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) = 0;
+    ///
+    /// equip — вложить ли его игроку в руки сразу. У alt:V это третий довод
+    /// `giveWeapon`, и без него выданное в руки не берётся: подменять человеку
+    /// оружие посреди перестрелки оттого, что сервер прислал список, было бы
+    /// издевательством. Просьба относится к этому вызову, а не к оружию
+    /// навсегда.
+    virtual bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo,
+                            bool equip) = 0;
 
     /// Отбирает всё оружие.
     virtual bool clearWeapons(shared::PlayerId id) = 0;

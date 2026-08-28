@@ -60,7 +60,7 @@ TEST_CASE("a default reference is harmless", "[script]") {
     CHECK_FALSE(nobody.valid());
     CHECK(nobody.id() == shared::kInvalidPlayerId);
     CHECK(nobody.nickname().empty());
-    CHECK_FALSE(nobody.giveWeapon(0x1B06D571, 100));
+    CHECK_FALSE(nobody.giveWeapon(0x1B06D571, 100, false));
 
     const Vehicle nothing;
 

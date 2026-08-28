@@ -830,6 +830,32 @@ TEST_CASE("a player climbing out of a vehicle says so apart from sitting in it",
     CHECK_FALSE(has(received->flags, PlayerFlag::EnteringVehicle));
 }
 
+TEST_CASE("a loadout says which weapon goes into the hands", "[messages]") {
+    // Просьба вложить оружие в руки относится к одной выдаче, а не к оружию
+    // навсегда: тот же список приходит и при входе, и после смерти, и там
+    // вкладывать нечего. Ноль означает «не трогать того, что он держит».
+    PlayerLoadout sent;
+    sent.weapons.push_back(WeaponSlot{.weapon = 0x1B06D571, .ammo = 250});
+    sent.equip = 0x1B06D571;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->equip == 0x1B06D571);
+    REQUIRE(received->weapons.size() == 1);
+    CHECK(received->weapons.front().weapon == 0x1B06D571);
+}
+
+TEST_CASE("a loadout that changes nothing in the hands says zero", "[messages]") {
+    PlayerLoadout sent;
+    sent.weapons.push_back(WeaponSlot{.weapon = 0x1B06D571, .ammo = 250});
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->equip == 0);
+}
+
 TEST_CASE("PlayerLoadout survives a round trip", "[messages]") {
     PlayerLoadout sent;
     sent.replace = true;

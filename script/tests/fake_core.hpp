@@ -311,7 +311,8 @@ public:
         return true;
     }
 
-    bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override {
+    bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo,
+                    bool equip) override {
         if (!player(id)) {
             return false;
         }

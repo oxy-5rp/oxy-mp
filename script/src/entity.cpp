@@ -53,8 +53,8 @@ bool Player::setHealth(std::uint16_t health, std::uint16_t armour) const {
     return core_ != nullptr && core_->setHealth(id_, health, armour);
 }
 
-bool Player::giveWeapon(std::uint32_t weapon, std::uint16_t ammo) const {
-    return core_ != nullptr && core_->giveWeapon(id_, weapon, ammo);
+bool Player::giveWeapon(std::uint32_t weapon, std::uint16_t ammo, bool equip) const {
+    return core_ != nullptr && core_->giveWeapon(id_, weapon, ammo, equip);
 }
 
 bool Player::clearWeapons() const {

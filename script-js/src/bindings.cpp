@@ -1423,9 +1423,14 @@ void playerGiveWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
     const std::optional<std::int64_t> ammo =
         info.Length() >= 2 ? intFromJs(context, info[1]) : std::nullopt;
 
+    // Третий довод — вложить ли выданное в руки. Он есть у alt:V, и терялся
+    // здесь молча: режим просил вооружить человека, получал `true` и видел его
+    // с пустыми руками.
+    const bool equip = info.Length() >= 3 && info[2]->BooleanValue(isolate);
+
     info.GetReturnValue().Set(resourceOf(isolate).core().giveWeapon(
         *id, static_cast<std::uint32_t>(*weapon),
-        static_cast<std::uint16_t>(std::clamp<std::int64_t>(ammo.value_or(0), 0, 0xFFFF))));
+        static_cast<std::uint16_t>(std::clamp<std::int64_t>(ammo.value_or(0), 0, 0xFFFF)), equip));
 }
 
 /// Читает у вызова хеш ствола и второе число: хеш насадки либо номер расцветки.

@@ -123,7 +123,7 @@ private:
     void sendHealth(const Player& player, shared::PlayerId attacker);
 
     /// Выдаёт игроку его снаряжение.
-    void sendLoadout(const Player& player, bool replace);
+    void sendLoadout(const Player& player, bool replace, std::uint32_t equip);
 
     /// Рассказывает остальным, как выглядит оружие в руках у игрока.
     ///
@@ -147,7 +147,7 @@ private:
                 std::int8_t seat) override;
     void kicked(const Player& player, std::string_view reason) override;
     void emitted(const Player& player, std::string_view name, std::string_view payload) override;
-    void loadoutChanged(const Player& player, bool replace) override;
+    void loadoutChanged(const Player& player, bool replace, std::uint32_t equip) override;
     void vehicleAdded(shared::VehicleId id) override;
     void vehicleRemoved(shared::VehicleId id) override;
     /// Соединение ведущего машины. kInvalidPeerId — вести её некому.

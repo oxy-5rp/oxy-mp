@@ -739,6 +739,7 @@ void PlayerLoadout::write(ByteWriter& writer) const {
         std::min<std::size_t>(weapons.size(), kMaxWeaponSlots));
 
     writer.writeU8(static_cast<std::uint8_t>(replace));
+    writer.writeU32(equip);
     writer.writeU16(count);
 
     for (std::uint16_t index = 0; index < count; ++index) {
@@ -762,6 +763,7 @@ void PlayerLoadout::write(ByteWriter& writer) const {
 PlayerLoadout PlayerLoadout::read(ByteReader& reader) {
     PlayerLoadout message;
     message.replace = reader.readU8() != 0;
+    message.equip = reader.readU32();
 
     const std::uint16_t count = reader.readU16();
 

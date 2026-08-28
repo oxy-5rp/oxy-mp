@@ -452,11 +452,12 @@ bool ServerCore::removeWeapon(shared::PlayerId id, std::uint32_t weapon) {
 
     // Снаряжение уходит игроку заменой, а не добавкой: иначе игра оставила бы у
     // него отобранный ствол — она о нём не забывала.
-    sink_->loadoutChanged(*player, true);
+    sink_->loadoutChanged(*player, true, 0);
     return true;
 }
 
-bool ServerCore::giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) {
+bool ServerCore::giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo,
+                            bool equip) {
     if (weapon == 0) {
         return false;
     }
@@ -479,7 +480,7 @@ bool ServerCore::giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint
         return false;
     }
 
-    sink_->loadoutChanged(*player, false);
+    sink_->loadoutChanged(*player, false, equip ? weapon : 0);
     return true;
 }
 
@@ -524,7 +525,7 @@ bool ServerCore::addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
 
     // Снаряжение уходит целиком и без отбора имеющегося: список полный, и
     // отбирать нечего — то же оружие вернётся с той же насадкой.
-    sink_->loadoutChanged(*player, false);
+    sink_->loadoutChanged(*player, false, 0);
     return true;
 }
 
@@ -547,7 +548,7 @@ bool ServerCore::removeWeaponComponent(shared::PlayerId id, std::uint32_t weapon
     // Снятая насадка требует отбора: игра не снимает поставленное сама, и
     // список без насадки для неё выглядит просто как список без насадки.
     // Поэтому оружие выдаётся заново, поверх отобранного.
-    sink_->loadoutChanged(*player, true);
+    sink_->loadoutChanged(*player, true, 0);
     return true;
 }
 
@@ -564,7 +565,7 @@ bool ServerCore::setWeaponTint(shared::PlayerId id, std::uint32_t weapon, std::u
 
     slot->tint = tint;
 
-    sink_->loadoutChanged(*player, false);
+    sink_->loadoutChanged(*player, false, 0);
     return true;
 }
 
@@ -578,7 +579,7 @@ bool ServerCore::clearWeapons(shared::PlayerId id) {
 
     // С заменой: пустой список без этого признака означал бы «добавить ничего»,
     // и оружие осталось бы у игрока в руках.
-    sink_->loadoutChanged(*player, true);
+    sink_->loadoutChanged(*player, true, 0);
     return true;
 }
 

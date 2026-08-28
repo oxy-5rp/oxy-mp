@@ -72,10 +72,14 @@ public:
         sent.push_back(std::format("emit {} {} {}", player.id, name, payload));
     }
 
-    void loadoutChanged(const Player& player, bool replace) override {
+    void loadoutChanged(const Player& player, bool replace, std::uint32_t equip) override {
+        equipped = equip;
         sent.push_back(std::format("loadout {} {} {}", player.id, player.loadout.size(),
                                    replace ? "replace" : "add"));
     }
+
+    /// Какое оружие последний список велел вложить в руки. Ноль — никакое.
+    std::uint32_t equipped = 0;
 
     void vehicleAdded(shared::VehicleId id) override {
         sent.push_back(std::format("vehicle+ {}", id));
@@ -310,7 +314,7 @@ TEST_CASE("a player who left cannot be reached", "[server][script]") {
 
     CHECK_FALSE(session.core.player(0));
     CHECK_FALSE(session.core.setHealth(0, 200, 0));
-    CHECK_FALSE(session.core.giveWeapon(0, 0x1B06D571, 100));
+    CHECK_FALSE(session.core.giveWeapon(0, 0x1B06D571, 100, false));
     CHECK_FALSE(session.core.tell(0, "живой?"));
 
     CHECK(session.sink.sent.empty());
@@ -358,8 +362,8 @@ TEST_CASE("a weapon given twice stays one weapon", "[server][script]") {
     Session session;
     Player& player = session.join(1, "стрелок");
 
-    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 100));
-    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 250));
+    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 100, false));
+    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 250, false));
 
     // Игра держит по одному стволу каждого вида, и список обязан этому
     // соответствовать: иначе он рос бы на каждую выдачу.
@@ -378,7 +382,7 @@ TEST_CASE("a weapon without a hash is refused", "[server][script]") {
     Session session;
     Player& player = session.join(1, "стрелок");
 
-    CHECK_FALSE(session.core.giveWeapon(player.id, 0, 100));
+    CHECK_FALSE(session.core.giveWeapon(player.id, 0, 100, false));
     CHECK(player.loadout.empty());
     CHECK(session.sink.sent.empty());
 }
@@ -814,6 +818,31 @@ TEST_CASE("a blip is handed a number by the server, not by the script", "[server
     CHECK(session.sink.sent.back() == std::format("blip {}", id));
 }
 
+TEST_CASE("a weapon given to be held says so to the client", "[server][script]") {
+    // Просьба вложить в руки уезжает вместе со списком, а не отдельным
+    // распоряжением: список и так придёт, и второе сообщение о том же оружии
+    // разъехалось бы с ним по дороге.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 100, true));
+
+    CHECK(session.sink.equipped == 0x1B06D571);
+}
+
+TEST_CASE("a weapon given without asking to hold it changes nothing in the hands",
+          "[server][script]") {
+    // Ноль означает «не трогать того, что он держит». Подменять человеку оружие
+    // посреди перестрелки оттого, что сервер прислал список, — не то, о чём его
+    // просили.
+    Session session;
+    const Player& player = session.join(1, "oxy");
+
+    REQUIRE(session.core.giveWeapon(player.id, 0x1B06D571, 100, false));
+
+    CHECK(session.sink.equipped == 0);
+}
+
 TEST_CASE("a refused connection tells the scripts who was refused",
           "[server][script]") {
     // Игрока в этом событии нет и быть не может: отказ случается раньше, чем
@@ -1169,8 +1198,8 @@ TEST_CASE("one weapon can be taken away without touching the rest",
     Session session;
     Player& player = session.join(1, "игрок");
 
-    REQUIRE(session.core.giveWeapon(player.id, 0xAABB, 50));
-    REQUIRE(session.core.giveWeapon(player.id, 0xCCDD, 120));
+    REQUIRE(session.core.giveWeapon(player.id, 0xAABB, 50, false));
+    REQUIRE(session.core.giveWeapon(player.id, 0xCCDD, 120, false));
 
     REQUIRE(session.core.removeWeapon(player.id, 0xAABB));
 
@@ -1617,7 +1646,7 @@ TEST_CASE("a weapon component needs the weapon to be there", "[server][script]")
 
     CHECK_FALSE(session.core.addWeaponComponent(player.id, kRifle, kScope));
 
-    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120));
+    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120, false));
     REQUIRE(session.core.addWeaponComponent(player.id, kRifle, kScope));
 
     REQUIRE(player.loadout.size() == 1);
@@ -1643,7 +1672,7 @@ TEST_CASE("a weapon tint needs the weapon too", "[server][script]") {
 
     CHECK_FALSE(session.core.setWeaponTint(player.id, kPistol, 3));
 
-    REQUIRE(session.core.giveWeapon(player.id, kPistol, 50));
+    REQUIRE(session.core.giveWeapon(player.id, kPistol, 50, false));
     REQUIRE(session.core.setWeaponTint(player.id, kPistol, 3));
 
     REQUIRE(player.loadout.size() == 1);
@@ -1660,7 +1689,7 @@ TEST_CASE("removing a component asks for the weapon to be given anew",
     constexpr std::uint32_t kRifle = 0xBFEFFF6D;
     constexpr std::uint32_t kScope = 0xA0D89C42;
 
-    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120));
+    REQUIRE(session.core.giveWeapon(player.id, kRifle, 120, false));
     REQUIRE(session.core.addWeaponComponent(player.id, kRifle, kScope));
 
     session.sink.sent.clear();

@@ -35,6 +35,7 @@ constexpr std::int32_t kActionHold = 200;
 Player::Player(const NativeTable& table) noexcept
     : playerId_(table.handlerFor(natives::kPlayerId)),
       getPlayerName_(table.handlerFor(natives::kGetPlayerName)),
+      equipWeapon_(table.handlerFor(natives::kSetCurrentPedWeapon)),
       playerPedId_(table.handlerFor(natives::kPlayerPedId)),
       isPlaying_(table.handlerFor(natives::kIsPlayerPlaying)),
       getCoords_(table.handlerFor(natives::kGetEntityCoords)),
@@ -385,8 +386,8 @@ void Player::applyHealth(int ped, std::uint16_t health, std::uint16_t armour) co
     }
 }
 
-void Player::applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapons,
-                          bool replace) const {
+void Player::applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapons, bool replace,
+                          std::uint32_t equip) const {
     if (ped == 0 || giveWeapon_ == nullptr) {
         return;
     }
@@ -421,6 +422,17 @@ void Player::applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapon
         if (setWeaponTint_ != nullptr) {
             invokeNative<void>(setWeaponTint_, ped, slot.weapon, static_cast<int>(slot.tint));
         }
+    }
+
+    // И только если попросили — вложить в руки. Просьба относится к одной
+    // выдаче, а не к оружию навсегда: список приходит и при входе, и после
+    // смерти, и там вкладывать нечего.
+    //
+    // После всей выдачи, а не в её середине: игра отказывается брать в руки то,
+    // чего у персонажа ещё нет, и отказывает молча.
+    if (equip != 0 && equipWeapon_ != nullptr) {
+        // Последний довод — брать ли мгновенно, без доставания из-за спины.
+        invokeNative<void>(equipWeapon_, ped, equip, true);
     }
 }
 

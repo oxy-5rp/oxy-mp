@@ -130,7 +130,8 @@ public:
     ///
     /// replace означает «взамен всего»: с ним персонаж сперва разоружается
     /// начисто. Без него выданное добавляется к тому, что уже есть.
-    void applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapons, bool replace) const;
+    void applyLoadout(int ped, const std::vector<shared::WeaponSlot>& weapons, bool replace,
+                      std::uint32_t equip) const;
 
     /// Сколько патронов осталось в оружии, которое персонаж держит.
     [[nodiscard]] std::uint16_t ammo(int ped, std::uint32_t weapon) const;
@@ -181,6 +182,7 @@ private:
 
     NativeHandler playerId_ = nullptr;
     NativeHandler getPlayerName_ = nullptr;
+    NativeHandler equipWeapon_ = nullptr;
     NativeHandler playerPedId_ = nullptr;
     NativeHandler isPlaying_ = nullptr;
     NativeHandler getCoords_ = nullptr;

@@ -1838,7 +1838,7 @@ void GameSession::applyServerState(int ped) {
     // смерти отбирает оружие, и без этого воскресший поднимался бы с пустыми
     // руками.
     if (const auto loadout = mail_.takeIncomingLoadout()) {
-        player_.applyLoadout(ped, loadout->weapons, loadout->replace);
+        player_.applyLoadout(ped, loadout->weapons, loadout->replace, loadout->equip);
     }
 
     // Попадания по машинам, которые ведём мы. Отнимает прочность ведущий, и
