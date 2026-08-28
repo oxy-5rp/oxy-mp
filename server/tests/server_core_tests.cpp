@@ -862,6 +862,36 @@ TEST_CASE("a vehicle tells the scripts how far its wheel is turned", "[server][s
     CHECK(got->steer == -0.75F);
 }
 
+TEST_CASE("moving a player to another world layer is announced", "[server][script]") {
+    // Слой мира едет своим полем, а не общим `seat`: слой это число со знаком в
+    // четыре байта, а место в машине — байт, и урезанный слой указал бы не туда.
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+    session.events.subscribe(&recorder);
+
+    REQUIRE(session.core.setDimension(player.id, 100000));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PlayerDimensionChange);
+}
+
+TEST_CASE("moving a player to the layer it is already in says nothing",
+          "[server][script]") {
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+    REQUIRE(session.core.setDimension(player.id, 7));
+
+    session.events.subscribe(&recorder);
+
+    REQUIRE(session.core.setDimension(player.id, 7));
+
+    CHECK(recorder.seen.empty());
+}
+
 TEST_CASE("healing is told apart from taking damage", "[server][script]") {
     // Не всякая перемена здоровья — лечение: убыль это урон, и о нём говорит
     // своё событие там, где известен ударивший. Сюда попадает только рост.

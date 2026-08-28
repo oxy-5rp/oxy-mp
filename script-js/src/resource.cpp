@@ -74,6 +74,8 @@ namespace {
         return "playerConnectDenied";
     case EventKind::PlayerHeal:
         return "playerHeal";
+    case EventKind::PlayerDimensionChange:
+        return "playerDimensionChange";
     case EventKind::ClientEvent:
         // Отдельного имени нет: события от клиента различаются своим именем, и
         // собирается оно в dispatch.
@@ -569,6 +571,13 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.health)));
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armourHarm)));
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armour)));
+        break;
+
+    case EventKind::PlayerDimensionChange:
+        // Порядок доводов — alt:V: игрок, прежний слой, нынешний.
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(v8::Number::New(isolate, event.dimensionWas));
+        arguments.push_back(v8::Number::New(isolate, event.dimension));
         break;
 
     case EventKind::ClientEvent:

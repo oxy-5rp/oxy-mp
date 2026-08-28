@@ -191,6 +191,13 @@ enum class EventKind : std::uint8_t {
     /// `playerDamage` и `playerHeal` — две стороны одного, и различает их
     /// направление, а не набор чисел.
     PlayerHeal = 23,
+
+    /// Игрока переставили в другой слой мира.
+    ///
+    /// Прежний слой — в `dimensionWas`, нынешний — в `dimension`.
+    /// Своё поле, а не общее `seat`: слой это число со знаком в четыре байта, а
+    /// место в машине — байт, и урезанный слой указал бы не туда.
+    PlayerDimensionChange = 24,
 };
 
 /// Произошедшее, со всем, что к нему прилагается.
@@ -220,6 +227,11 @@ struct Event {
     /// Почему отказали во входе. Значение shared::RejectReason. Имеет смысл
     /// только в PlayerConnectDenied.
     std::uint8_t reason = 0;
+
+    /// В каком слое мира игрок был и в каком стал. Имеют смысл в
+    /// PlayerDimensionChange.
+    std::int32_t dimensionWas = 0;
+    std::int32_t dimension = 0;
 
     /// Доводы команды из консоли, по одному на слово. Имеет смысл только там.
     std::vector<std::string> arguments;

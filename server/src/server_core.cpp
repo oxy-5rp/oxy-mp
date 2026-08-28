@@ -999,6 +999,14 @@ bool ServerCore::setDimension(shared::PlayerId id, std::int32_t dimension) {
     // маркеры, точки — уходит к нему один раз, при входе, и само собой не
     // разберётся: без этого игрок унёс бы карту прежнего слоя с собой.
     sink_->dimensionChanged(*player, previous);
+
+    script::Event moved;
+    moved.kind = script::EventKind::PlayerDimensionChange;
+    moved.player = script::Player{*this, id};
+    moved.dimensionWas = previous;
+    moved.dimension = dimension;
+
+    events_->dispatch(moved);
     return true;
 }
 
