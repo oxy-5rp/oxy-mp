@@ -68,8 +68,8 @@ shared::PlayerAppearance PedAppearance::read(int ped) const {
         const auto component = static_cast<int>(slot);
 
         appearance.components[slot] = shared::PedComponent{
-            .drawable = static_cast<std::uint8_t>(invokeNative<int>(getDrawable_, ped, component)),
-            .texture = static_cast<std::uint8_t>(invokeNative<int>(getTexture_, ped, component)),
+            .drawable = static_cast<std::uint16_t>(invokeNative<int>(getDrawable_, ped, component)),
+            .texture = static_cast<std::uint16_t>(invokeNative<int>(getTexture_, ped, component)),
             .palette = static_cast<std::uint8_t>(invokeNative<int>(getPalette_, ped, component)),
         };
     }
@@ -80,8 +80,8 @@ shared::PlayerAppearance PedAppearance::read(int ped) const {
         // Игра отвечает минус единицей, когда в слоте пусто, и это же значение
         // мы передаём дальше: оно означает «снять», а не «надеть нулевую вещь».
         appearance.props[slot] = shared::PedProp{
-            .drawable = static_cast<std::int8_t>(invokeNative<int>(getProp_, ped, prop)),
-            .texture = static_cast<std::int8_t>(invokeNative<int>(getPropTexture_, ped, prop)),
+            .drawable = static_cast<std::int16_t>(invokeNative<int>(getProp_, ped, prop)),
+            .texture = static_cast<std::int16_t>(invokeNative<int>(getPropTexture_, ped, prop)),
         };
     }
 

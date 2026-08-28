@@ -573,15 +573,15 @@ public:
     /// невидимое.
     ///
     /// false — игрока уже нет либо слот назван неверно.
-    virtual bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
-                            std::uint8_t texture, std::uint8_t palette) = 0;
+    virtual bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint16_t drawable,
+                            std::uint16_t texture, std::uint8_t palette) = 0;
 
     /// Надевает аксессуар: шляпу, очки, серьги, часы, браслет.
     ///
     /// drawable в минус единицу означает «снять»: так это и хранится в
     /// протоколе, и так же толкует его игра.
-    virtual bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
-                         std::int8_t texture) = 0;
+    virtual bool setProp(shared::PlayerId id, std::uint8_t index, std::int16_t drawable,
+                         std::int16_t texture) = 0;
 
     /// Собирает лицо из двух родителей и третьего вклада.
     ///

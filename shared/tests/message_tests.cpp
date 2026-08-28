@@ -1555,6 +1555,40 @@ TEST_CASE("a command about the body says which flag is off", "[protocol]") {
     CHECK(has(back->flags, PlayerControlFlag::Invincible));
 }
 
+TEST_CASE("clothes from the add-ons survive the round trip", "[messages]") {
+    // Номер вещи сквозной по всем дополнениям сразу: они идут следом за
+    // основными, и у торса их нынче за четыре сотни. Пока номер жил в байте,
+    // он молча заворачивался — просивший триста получал сорок четвёртое, и
+    // одежда из дополнений была недостижима вовсе.
+    PlayerAppearance sent;
+    sent.components[11].drawable = 372;
+    sent.components[11].texture = 300;
+    sent.props[0].drawable = 260;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->components[11].drawable == 372);
+    CHECK(received->components[11].texture == 300);
+    CHECK(received->props[0].drawable == 260);
+}
+
+TEST_CASE("an accessory taken off is still told apart from the first one",
+          "[messages]") {
+    // Минус единица означает «ничего не надето», и расширение номера до двух
+    // байт не должно было её потерять: спутанная с нулём, она надела бы всем
+    // первую попавшуюся шляпу.
+    PlayerAppearance sent;
+    sent.props[1].drawable = -1;
+    sent.props[2].drawable = 0;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->props[1].drawable == -1);
+    CHECK(received->props[2].drawable == 0);
+}
+
 TEST_CASE("a resource list of a real game mode survives a round trip", "[messages]") {
     // Раздаётся не «ресурс», а каждый его файл: у живого режима клиентская
     // половина — это собранная страница интерфейса, полторы-две тысячи картинок,

@@ -99,14 +99,14 @@ void PlayerAppearance::write(ByteWriter& writer) const {
     // сторон. Написанные в пакет, они стали бы полем, которому получатель обязан
     // верить, — а верить ему нельзя.
     for (const PedComponent& component : components) {
-        writer.writeU8(component.drawable);
-        writer.writeU8(component.texture);
+        writer.writeU16(component.drawable);
+        writer.writeU16(component.texture);
         writer.writeU8(component.palette);
     }
 
     for (const PedProp& prop : props) {
-        writer.writeU8(static_cast<std::uint8_t>(prop.drawable));
-        writer.writeU8(static_cast<std::uint8_t>(prop.texture));
+        writer.writeU16(static_cast<std::uint16_t>(prop.drawable));
+        writer.writeU16(static_cast<std::uint16_t>(prop.texture));
     }
 
     writer.writeU8(shapeFirst);
@@ -155,14 +155,14 @@ PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
     message.model = reader.readU32();
 
     for (PedComponent& component : message.components) {
-        component.drawable = reader.readU8();
-        component.texture = reader.readU8();
+        component.drawable = reader.readU16();
+        component.texture = reader.readU16();
         component.palette = reader.readU8();
     }
 
     for (PedProp& prop : message.props) {
-        prop.drawable = static_cast<std::int8_t>(reader.readU8());
-        prop.texture = static_cast<std::int8_t>(reader.readU8());
+        prop.drawable = static_cast<std::int16_t>(reader.readU16());
+        prop.texture = static_cast<std::int16_t>(reader.readU16());
     }
 
     message.shapeFirst = reader.readU8();

@@ -230,10 +230,10 @@ public:
     bool setModel(shared::PlayerId id, std::uint32_t model) override;
     bool setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
                         std::int8_t seat) override;
-    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
-                    std::uint8_t texture, std::uint8_t palette) override;
-    bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
-                 std::int8_t texture) override;
+    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint16_t drawable,
+                    std::uint16_t texture, std::uint8_t palette) override;
+    bool setProp(shared::PlayerId id, std::uint8_t index, std::int16_t drawable,
+                 std::int16_t texture) override;
     bool setHeadBlend(shared::PlayerId id, std::uint8_t shapeFirst, std::uint8_t shapeSecond,
                       std::uint8_t shapeThird, std::uint8_t skinFirst, std::uint8_t skinSecond,
                       std::uint8_t skinThird, float shapeMix, float skinMix,

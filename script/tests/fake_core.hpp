@@ -351,8 +351,8 @@ public:
         return true;
     }
 
-    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
-                    std::uint8_t texture, std::uint8_t palette) override {
+    bool setClothes(shared::PlayerId id, std::uint8_t component, std::uint16_t drawable,
+                    std::uint16_t texture, std::uint8_t palette) override {
         if (!player(id) || component >= shared::kPedComponentCount) {
             return false;
         }
@@ -362,8 +362,8 @@ public:
         return true;
     }
 
-    bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
-                 std::int8_t texture) override {
+    bool setProp(shared::PlayerId id, std::uint8_t index, std::int16_t drawable,
+                 std::int16_t texture) override {
         if (!player(id) || index >= shared::kPedPropCount) {
             return false;
         }

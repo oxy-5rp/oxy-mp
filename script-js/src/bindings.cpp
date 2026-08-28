@@ -318,8 +318,8 @@ void playerSetClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
     const std::int64_t palette = argAt(info, 3).value_or(0);
 
     const bool done = resourceOf(isolate).core().setClothes(
-        *id, static_cast<std::uint8_t>(*component), static_cast<std::uint8_t>(*drawable),
-        static_cast<std::uint8_t>(texture), static_cast<std::uint8_t>(palette));
+        *id, static_cast<std::uint8_t>(*component), static_cast<std::uint16_t>(*drawable),
+        static_cast<std::uint16_t>(texture), static_cast<std::uint8_t>(palette));
 
     info.GetReturnValue().Set(done);
 }
@@ -932,8 +932,8 @@ void playerSetProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
     const std::int64_t texture = argAt(info, 2).value_or(0);
 
     const bool done = resourceOf(isolate).core().setProp(
-        *id, static_cast<std::uint8_t>(*index), static_cast<std::int8_t>(*drawable),
-        static_cast<std::int8_t>(texture));
+        *id, static_cast<std::uint8_t>(*index), static_cast<std::int16_t>(*drawable),
+        static_cast<std::int16_t>(texture));
 
     info.GetReturnValue().Set(done);
 }

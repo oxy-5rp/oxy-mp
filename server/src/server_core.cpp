@@ -612,8 +612,8 @@ bool ServerCore::setIntoVehicle(shared::PlayerId id, shared::VehicleId vehicle,
     return true;
 }
 
-bool ServerCore::setClothes(shared::PlayerId id, std::uint8_t component, std::uint8_t drawable,
-                            std::uint8_t texture, std::uint8_t palette) {
+bool ServerCore::setClothes(shared::PlayerId id, std::uint8_t component, std::uint16_t drawable,
+                            std::uint16_t texture, std::uint8_t palette) {
     Player* const player = players_->findById(id);
     if (player == nullptr || component >= shared::kPedComponentCount) {
         return false;
@@ -631,8 +631,8 @@ bool ServerCore::setClothes(shared::PlayerId id, std::uint8_t component, std::ui
     return true;
 }
 
-bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
-                         std::int8_t texture) {
+bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int16_t drawable,
+                         std::int16_t texture) {
     Player* const player = players_->findById(id);
     if (player == nullptr || index >= shared::kPedPropCount) {
         return false;
