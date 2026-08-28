@@ -163,6 +163,17 @@ std::int32_t setUp() {
     return out;
 }
 
+/// Говорит соседям, что ресурс не поднялся.
+///
+/// Отдельной дорогой от удавшегося подъёма: у alt:V это разные события, и
+/// молчать о неудаче нельзя — ресурс, который не встал, выглядит для соседей
+/// точно так же, как ресурс, которого не просили.
+void refused(const std::string& key) {
+    for (const auto& [other, living] : resources()) {
+        living->dispatch("anyResourceError", asArguments(key));
+    }
+}
+
 std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry) {
     if (!process().ready) {
         return 0;
@@ -188,6 +199,7 @@ std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry
 
     if (failure) {
         report(kOxympJsLogError, "корень ресурса \"" + fromAbi(root) + "\" не разобрать");
+        refused(key);
         return 0;
     }
 
@@ -200,12 +212,18 @@ std::int32_t startResource(OxympJsText name, OxympJsText root, OxympJsText entry
     if (!std::filesystem::exists(resolved) && !bundleHas(name, entryName)) {
         report(kOxympJsLogError, "точки входа \"" + resolved.string() +
                                      "\" нет ни на диске, ни в свёртке ресурса");
+        refused(key);
         return 0;
     }
 
     auto resource = std::make_unique<Resource>(key, rootPath, host(), *process().platform);
 
     if (!resource->start(resolved)) {
+        // Свой `resourceStart` с признаком «сломан» — тому, кто не поднялся, и
+        // до того, как его разберут: у alt:V довод этого события ровно об этом,
+        // и обработчик, узнающий о неудаче, обязан её увидеть.
+        resource->dispatch("resourceStart", "[true]");
+        refused(key);
         return 0;
     }
 

@@ -740,6 +740,12 @@
             const entity = tracked(kind, id);
             alt.client.fireLocal('worldObjectStreamOut', [entity]);
             alt.client.fireLocal('gameEntityDestroy', [entity]);
+
+            // И третьим именем — `removeEntity`. У alt:V оно означает то же
+            // самое с другой стороны: сущность ушла отсюда. Разводить его по
+            // своей сверке значило бы ходить по одному списку дважды, а молчать
+            // о нём — оставить режим без имени, которое он слушает.
+            alt.client.fireLocal('removeEntity', [entity]);
         }
 
         bodied[kind] = now;
