@@ -600,6 +600,33 @@
     /// говорят читающему, что имя занято и режиму его брать нельзя.
     const kSyncedMetaEvent = '__oxymp:meta';
 
+    /// То же для метаданных, которые видит один игрок.
+    const kLocalMetaEvent = '__oxymp:localmeta';
+
+    /// Метаданные, назначенные игроку и видимые только ему.
+    ///
+    /// Отдельно от synced, а не заодно: synced на то и synced, что её видит
+    /// каждый, — а эта принадлежит одному, и попади она в общий склад, ушла бы
+    /// всем при первом же снимке для вошедшего.
+    const localStore = new Map();
+
+    function localFor(id) {
+        let found = localStore.get(id);
+
+        if (found === undefined) {
+            found = new Map();
+            localStore.set(id, found);
+        }
+
+        return found;
+    }
+
+    /// Рассылает изменение одному — тому, кому оно назначено.
+    function publishLocal(player, key, value) {
+        native.emitClient(player, kLocalMetaEvent,
+                          encodeArgs([key, value === undefined ? null : value]));
+    }
+
     /// Рассылает изменение всем, кто его увидит.
     ///
     /// Всем, а не одному владельцу: `syncedMeta` на то и synced, что её видит
@@ -1539,6 +1566,25 @@
     addMeta(Vehicle, 'vehicle');
     addMeta(Ped, 'ped');
 
+    /// Метаданные, видимые одному игроку. Есть только у игрока — у alt:V тоже.
+    ///
+    /// Читает их клиент модульными функциями `alt.getLocalMeta`, а не у своей
+    /// сущности: так объявлено у alt:V, и своей сущности у него для этого нет —
+    /// метаданные эти принадлежат не телу, а тому, кто за ним сидит.
+    Object.assign(Player.prototype, {
+        setLocalMeta(key, value) {
+            localFor(this.id).set(key, value);
+            publishLocal(this, key, value);
+        },
+        getLocalMeta(key) { return localFor(this.id).get(key); },
+        hasLocalMeta(key) { return localFor(this.id).has(key); },
+        deleteLocalMeta(key) {
+            localFor(this.id).delete(key);
+            publishLocal(this, key, undefined);
+        },
+        getLocalMetaKeys() { return [...localFor(this.id).keys()]; },
+    });
+
     // Привязка — всем трём родам: у alt:V она объявлена у Entity, а Entity здесь
     // нет вовсе. Общего предка у наших классов не завести: они приходят из ядра
     // порознь, и связать их одним прототипом значило бы подменить чужие классы
@@ -1552,6 +1598,10 @@
     // событие объявляется до уборки нарочно (см. CLAUDE.md), и ресурс вправе
     // прочесть их в своём обработчике.
     on('playerConnect', (player) => sendSyncedSnapshot(player));
+
+    // Уходящий уносит свои личные метаданные с собой: номер игрока сервер
+    // выдаёт заново, и оставленное досталось бы следующему под тем же номером.
+    on('playerDisconnect', (player) => localStore.delete(player.id));
     on('playerDisconnect', (player) => forget('player', player.id));
     on('vehicleDestroy', (vehicle) => forget('vehicle', vehicle.id));
 

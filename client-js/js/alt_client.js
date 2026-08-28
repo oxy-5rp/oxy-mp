@@ -327,6 +327,10 @@
     /// перестанут доходить, и без единой жалобы: событие просто никто не ждёт.
     const kSyncedMetaEvent = '__oxymp:meta';
 
+    /// То же имя, что и на сервере, и по той же причине: разъедутся — личные
+    /// метаданные перестанут доходить, и без единой жалобы.
+    const kLocalMetaEvent = '__oxymp:localmeta';
+
     function syncedFor(kind, id) {
         const key = `${kind}:${id}`;
         let found = synced.get(key);
@@ -398,6 +402,27 @@
     });
 
     bridged.add(`server:${kSyncedMetaEvent}`);
+
+    // --- Метаданные, назначенные лично нам ------------------------------------
+    //
+    // Отдельно от synced и складом попроще: они принадлежат не сущности, а тому,
+    // кто за ней сидит, и у alt:V читаются модульными функциями, а не у объекта.
+    const localMeta = new Map();
+
+    native.on(`server:${kLocalMetaEvent}`, (payload) => {
+        const [key, value] = decodeArgs(payload);
+        const previous = localMeta.get(key);
+
+        if (value === null) {
+            localMeta.delete(key);
+        } else {
+            localMeta.set(key, value);
+        }
+
+        fire('localMetaChange', [key, value === null ? undefined : value, previous]);
+    });
+
+    bridged.add(`server:${kLocalMetaEvent}`);
 
     // --- Свой номер в сессии --------------------------------------------------
 
@@ -715,6 +740,13 @@
         isServer: false,
 
         get resourceName() { return native.resourceName; },
+
+        // Метаданные, назначенные лично нам сервером. Модульными функциями, а
+        // не у сущности: так объявлено у alt:V — принадлежат они не телу, а
+        // тому, кто за ним сидит.
+        getLocalMeta: (key) => localMeta.get(key),
+        hasLocalMeta: (key) => localMeta.has(key),
+        getLocalMetaKeys: () => [...localMeta.keys()],
 
         on,
         once,
