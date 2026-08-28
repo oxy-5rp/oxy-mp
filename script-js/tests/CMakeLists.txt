@@ -38,6 +38,7 @@ foreach(case
     missing-entry-is-named
     escaping-entry-is-refused
     a-session-event-with-one-string-arrives-whole
+    a-refused-connection-arrives-whole
     a-resource-still-hears-its-own-emit
     a-resource-hears-its-own-start
     a-resource-hears-about-its-neighbours)

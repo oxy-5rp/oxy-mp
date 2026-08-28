@@ -70,6 +70,8 @@ namespace {
         return "vehicleSiren";
     case EventKind::NetOwnerChange:
         return "netOwnerChange";
+    case EventKind::PlayerConnectDenied:
+        return "playerConnectDenied";
     case EventKind::ClientEvent:
         // Отдельного имени нет: события от клиента различаются своим именем, и
         // собирается оно в dispatch.
@@ -584,6 +586,17 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(event.killer.valid()
                                 ? wrapPlayer(*this, context, event.killer.id())
                                 : v8::Local<v8::Value>{v8::Null(isolate)});
+        break;
+
+    case EventKind::PlayerConnectDenied:
+        // Порядок доводов — alt:V: причина, имя, адрес. Дальше у него идут ещё
+        // шесть — хеш пароля, отладочная ли сборка, ветка, версия, адрес
+        // раздачи, номер Discord, — и все они про его собственные проверки,
+        // которых у нас нет. Не выдумываем их: обработчик, прочитавший оттуда
+        // ноль, решил бы, что игрок пришёл с версией ноль.
+        arguments.push_back(v8::Number::New(isolate, event.reason));
+        arguments.push_back(toJs(isolate, event.name));
+        arguments.push_back(toJs(isolate, event.text));
         break;
 
     case EventKind::ConsoleCommand:

@@ -130,18 +130,31 @@ constexpr double kTickShortfall = 0.9;
 /// 57.3 вместо 60 на пустом ожидании.
 constexpr auto kMaxPollSlice = std::chrono::milliseconds{2};
 
+/// Отказ словами — теми, которые уйдут в журнал.
+///
+/// По-английски, как и весь журнал: строку присылают, когда что-то не работает,
+/// и читает её не только тот, кто её писал. По-русски она здесь была и уезжала
+/// наружу вперемешку с английскими.
+///
+/// Ветка на всякую причину и без `default`: забытая причина должна ломать
+/// сборку, а не превращаться в «unknown». Так уже случилось — `WrongPassword`
+/// добавили в перечень и не добавили сюда, и всякий отказ по паролю писал в
+/// журнал «причина не указана» при указанной причине.
 std::string_view describe(shared::RejectReason reason) {
     switch (reason) {
     case shared::RejectReason::ProtocolMismatch:
-        return "версия протокола не совпадает";
+        return "protocol version does not match";
     case shared::RejectReason::ServerFull:
-        return "сервер заполнен";
+        return "the server is full";
     case shared::RejectReason::InvalidNickname:
-        return "недопустимое имя";
+        return "the nickname is not allowed";
     case shared::RejectReason::NicknameTaken:
-        return "имя занято";
+        return "the nickname is taken";
+    case shared::RejectReason::WrongPassword:
+        return "wrong password";
     }
-    return "причина не указана";
+
+    return "unknown reason";
 }
 
 bool nicknameLooksValid(const std::string& nickname) {
@@ -488,9 +501,11 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     }
 
     if (hello.protocolVersion != shared::kProtocolVersion) {
-        spdlog::info("connection {} refused: protocol {} against our {}", peer,
-                     hello.protocolVersion, shared::kProtocolVersion);
-        reject(peer, shared::RejectReason::ProtocolMismatch);
+        // Числа версий — здесь, потому что сам отказ их не знает; словами о нём
+        // скажет `reject`, и говорит он один за всех.
+        spdlog::debug("connection {} speaks protocol {} against our {}", peer,
+                      hello.protocolVersion, shared::kProtocolVersion);
+        reject(peer, shared::RejectReason::ProtocolMismatch, hello.nickname);
         return;
     }
 
@@ -502,13 +517,12 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // незачем.
     if (!config_.password.empty() && (hello.password.size() > shared::kMaxPasswordLength ||
                                       hello.password != config_.password)) {
-        spdlog::info("connection {} refused: wrong password", peer);
-        reject(peer, shared::RejectReason::WrongPassword);
+        reject(peer, shared::RejectReason::WrongPassword, hello.nickname);
         return;
     }
 
     if (!nicknameLooksValid(hello.nickname)) {
-        reject(peer, shared::RejectReason::InvalidNickname);
+        reject(peer, shared::RejectReason::InvalidNickname, hello.nickname);
         return;
     }
 
@@ -533,7 +547,7 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
     // умеет её понять: сервер прежней сборки всё ещё может её прислать.
 
     if (players_.size() >= config_.maxPlayers) {
-        reject(peer, shared::RejectReason::ServerFull);
+        reject(peer, shared::RejectReason::ServerFull, hello.nickname);
         return;
     }
 
@@ -2456,8 +2470,19 @@ void Server::announce(shared::ChatKind kind, shared::PlayerId author, std::strin
     broadcast(line);
 }
 
-void Server::reject(net::PeerId peer, shared::RejectReason reason) {
+void Server::reject(net::PeerId peer, shared::RejectReason reason, std::string_view nickname) {
     spdlog::info("connection {} refused: {}", peer, describe(reason));
+
+    // Режиму об отказе говорится здесь, в единственном месте, откуда отказы
+    // уходят. Игрока в событии нет и быть не может: отказ случается раньше, чем
+    // игрок заводится, и брать обработчику нечего — отсюда имя и адрес строками.
+    script::Event denied;
+    denied.kind = script::EventKind::PlayerConnectDenied;
+    denied.reason = static_cast<std::uint8_t>(reason);
+    denied.name = std::string{nickname};
+    denied.text = host_ == nullptr ? std::string{} : host_->addressOf(peer);
+
+    (void)events_.dispatch(denied);
 
     shared::ServerReject message;
     message.reason = reason;

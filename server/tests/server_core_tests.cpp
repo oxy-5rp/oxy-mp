@@ -814,6 +814,22 @@ TEST_CASE("a blip is handed a number by the server, not by the script", "[server
     CHECK(session.sink.sent.back() == std::format("blip {}", id));
 }
 
+TEST_CASE("a refused connection tells the scripts who was refused",
+          "[server][script]") {
+    // Игрока в этом событии нет и быть не может: отказ случается раньше, чем
+    // игрок заводится. Поэтому имя и адрес едут строками — взять их обработчику
+    // больше неоткуда.
+    script::Event denied;
+    denied.kind = script::EventKind::PlayerConnectDenied;
+    denied.reason = static_cast<std::uint8_t>(shared::RejectReason::WrongPassword);
+    denied.name = "oxy";
+    denied.text = "127.0.0.1";
+
+    CHECK(denied.player.id() == shared::kInvalidPlayerId);
+    CHECK(denied.reason == static_cast<std::uint8_t>(shared::RejectReason::WrongPassword));
+    CHECK(denied.name == "oxy");
+}
+
 TEST_CASE("a blip remembers who it was meant for", "[server][script]") {
     Session session;
 

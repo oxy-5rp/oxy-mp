@@ -272,7 +272,7 @@ private:
                   std::string text);
 
     /// Отправляет отказ и закрывает соединение.
-    void reject(net::PeerId peer, shared::RejectReason reason);
+    void reject(net::PeerId peer, shared::RejectReason reason, std::string_view nickname);
 
     template<typename Message>
     void sendTo(net::PeerId peer, const Message& message) {

@@ -254,6 +254,38 @@ void aResourceHearsAboutItsNeighbours() {
     engine()->stop("first");
 }
 
+/// Отказ во входе доходит до ресурса со всем, что о нём известно.
+///
+/// Игрока в этом событии нет и быть не может: отказ случается раньше, чем игрок
+/// заводится. Проверять его стоит именно поэтому — обработчик, написанный под
+/// alt:V, начинается не с игрока, а с причины, и перепутанный порядок доводов
+/// молчал бы: все три законны и по отдельности правдоподобны.
+void aRefusedConnectionArrivesWhole() {
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+alt.on('playerConnectDenied', (reason, name, ip) =>
+    fs.writeFileSync(path.join(__dirname, 'denied.txt'), `${reason}|${name}|${ip}`));
+)js"};
+
+    std::string error;
+    expect(engine()->start("denied", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event denied;
+    denied.kind = EventKind::PlayerConnectDenied;
+    denied.reason = 5;
+    denied.name = "oxy";
+    denied.text = "127.0.0.1";
+
+    (void)bus().dispatch(denied);
+
+    expect(wrote(resource.root() / "denied.txt") == "5|oxy|127.0.0.1",
+           "отказ пришёл не тем: " + wrote(resource.root() / "denied.txt"));
+}
+
 /// Событие сессии с единственным строковым доводом доходит целым.
 ///
 /// **Ровно здесь слой однажды промахнулся, и промахнулся молча.** Через одно имя
@@ -351,6 +383,7 @@ const std::map<std::string, std::function<void()>>& cases() {
     static const std::map<std::string, std::function<void()>> known{
         {"a-session-event-with-one-string-arrives-whole",
          &aSessionEventWithOneStringArrivesWhole},
+        {"a-refused-connection-arrives-whole", &aRefusedConnectionArrivesWhole},
         {"a-resource-still-hears-its-own-emit", &aResourceStillHearsItsOwnEmit},
         {"a-resource-hears-its-own-start", &aResourceHearsItsOwnStart},
         {"a-resource-hears-about-its-neighbours", &aResourceHearsAboutItsNeighbours},
