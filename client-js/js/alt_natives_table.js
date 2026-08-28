@@ -2171,6 +2171,7 @@ globalThis.__oxympAlt.nativeTable = {
     addOwnedExplosion: '8F03CD462437C002|ifffifbbf:n',
     addPatrolRouteLink: '62DDD8B4533C8E19|aa:n',
     addPatrolRouteNode: '595076DE836264C0|isffffffi:n',
+    addPedDecorationFromHashes: '49A5A17556C31561|iii:n',
     addPedToConversation: '302B7D91564CDE7F|aas:n',
     addPetrolDecal: '37E59D590865D5A|ffffff:a',
     addPickupToInteriorRoomByName: '57303BAC3E5DA035|is:n',

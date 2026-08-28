@@ -781,6 +781,69 @@ std::optional<shared::PlayerAppearance> ServerCore::appearance(shared::PlayerId 
     return player->appearance;
 }
 
+bool ServerCore::addDecoration(shared::PlayerId id, std::uint32_t collection,
+                               std::uint32_t overlay) {
+    Player* const player = players_->findById(id);
+
+    // Пустой хеш — не татуировка. Молча приняв его, мы поставили бы персонажу
+    // ничто и объявили бы это сделанным.
+    if (player == nullptr || collection == 0 || overlay == 0) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+    const shared::PedDecoration wanted{.collection = collection, .overlay = overlay};
+
+    // Уже стоящая вторично не заводится: игра держит по одной каждого вида.
+    if (std::ranges::find(look.decorations, wanted) != look.decorations.end()) {
+        return true;
+    }
+
+    if (look.decorations.size() >= shared::kMaxPedDecorations) {
+        return false;
+    }
+
+    look.decorations.push_back(wanted);
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::removeDecoration(shared::PlayerId id, std::uint32_t collection,
+                                  std::uint32_t overlay) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || !player->appearance) {
+        return false;
+    }
+
+    const shared::PedDecoration wanted{.collection = collection, .overlay = overlay};
+
+    if (std::erase(player->appearance->decorations, wanted) == 0) {
+        return false;
+    }
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::clearDecorations(shared::PlayerId id) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    if (look.decorations.empty()) {
+        return true;
+    }
+
+    look.decorations.clear();
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
 bool ServerCore::setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) {
     Player* const player = players_->findById(id);
     if (player == nullptr || index >= shared::kPedFaceFeatureCount) {

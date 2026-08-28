@@ -156,6 +156,10 @@ ALT_ALIASES = {
     # как это называется у самой игры. (BOOL) -> void.
     "setArtificialLightsState": "_SET_BLACKOUT",
 
+    # Татуировка на персонаже. У базы имя описывает, что ставят «украшение», у
+    # alt:V — что берут его из пары хешей. Подпись: (Ped, Hash, Hash) -> void.
+    "addPedDecorationFromHashes": "_SET_PED_DECORATION",
+
     # Набор частиц для следующего вызова. У базы имя длиннее и договаривает, что
     # действует он ровно один раз. (charPtr) -> void.
     "useParticleFxAsset": "_USE_PARTICLE_FX_ASSET_NEXT_CALL",

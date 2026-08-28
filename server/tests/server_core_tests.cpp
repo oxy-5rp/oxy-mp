@@ -1103,6 +1103,54 @@ TEST_CASE("a face assembled by the server comes back the same", "[server][script
     CHECK(look->skinMix == 0.25F);
 }
 
+TEST_CASE("a tattoo goes on once and comes off by name", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.addDecoration(player.id, 0xAAAA, 0xBBBB));
+
+    // Вторая такая же не заводится: игра держит по одной каждого вида, и список
+    // рос бы на каждую выдачу — как у насадок на оружие.
+    REQUIRE(session.core.addDecoration(player.id, 0xAAAA, 0xBBBB));
+
+    auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+    CHECK(look->decorations.size() == 1);
+
+    REQUIRE(session.core.addDecoration(player.id, 0xAAAA, 0xCCCC));
+
+    look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+    CHECK(look->decorations.size() == 2);
+
+    REQUIRE(session.core.removeDecoration(player.id, 0xAAAA, 0xBBBB));
+
+    look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+    REQUIRE(look->decorations.size() == 1);
+    CHECK(look->decorations.front().overlay == 0xCCCC);
+
+    REQUIRE(session.core.clearDecorations(player.id));
+
+    look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+    CHECK(look->decorations.empty());
+}
+
+TEST_CASE("a tattoo out of nothing is refused", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Пустой хеш — не татуировка. Молча приняв его, мы поставили бы персонажу
+    // ничто и объявили бы это сделанным.
+    CHECK_FALSE(session.core.addDecoration(player.id, 0, 0xBBBB));
+    CHECK_FALSE(session.core.addDecoration(player.id, 0xAAAA, 0));
+    CHECK_FALSE(session.core.addDecoration(99, 0xAAAA, 0xBBBB));
+
+    // И снять ту, которой не было, тоже нельзя молча.
+    CHECK_FALSE(session.core.removeDecoration(player.id, 0xAAAA, 0xBBBB));
+}
+
 TEST_CASE("a face feature comes back the way it was set", "[server][script]") {
     Session session;
     Player& player = session.join(1, "игрок");

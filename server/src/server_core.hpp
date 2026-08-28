@@ -242,6 +242,11 @@ public:
     bool setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) override;
     bool setEyeColour(shared::PlayerId id, std::uint8_t colour) override;
     bool setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) override;
+    bool addDecoration(shared::PlayerId id, std::uint32_t collection,
+                       std::uint32_t overlay) override;
+    bool removeDecoration(shared::PlayerId id, std::uint32_t collection,
+                          std::uint32_t overlay) override;
+    bool clearDecorations(shared::PlayerId id) override;
     [[nodiscard]] std::optional<shared::PlayerAppearance> appearance(
         shared::PlayerId id) const override;
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;

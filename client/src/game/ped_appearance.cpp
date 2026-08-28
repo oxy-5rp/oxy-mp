@@ -41,6 +41,8 @@ PedAppearance::PedAppearance(const NativeTable& table) noexcept
       clearProp_(table.handlerFor(natives::kClearPedProp)),
       setHeadBlend_(table.handlerFor(natives::kSetPedHeadBlendData)),
       setFaceFeature_(table.handlerFor(natives::kSetPedFaceFeature)),
+      setDecoration_(table.handlerFor(natives::kSetPedDecoration)),
+      clearDecorations_(table.handlerFor(natives::kClearPedDecorations)),
       setOverlay_(table.handlerFor(natives::kSetPedHeadOverlay)),
       setOverlayColour_(table.handlerFor(natives::kSetPedHeadOverlayColor)),
       setHairColour_(table.handlerFor(natives::kSetPedHairColor)),
@@ -127,6 +129,19 @@ void PedAppearance::apply(int ped, const shared::PlayerAppearance& appearance) c
                            static_cast<int>(appearance.skinSecond),
                            static_cast<int>(appearance.skinThird), appearance.shapeMix,
                            appearance.skinMix, appearance.thirdMix, false);
+    }
+
+    // Татуировки. Сперва снимаются все, потом ставятся присланные: своего
+    // «сними одну» у игры нет, и убрать снятую скриптом иначе нечем. Снимаются
+    // они не каждый кадр, а вместе со всей внешностью — то есть по изменению.
+    if (clearDecorations_ != nullptr) {
+        invokeNative<void>(clearDecorations_, ped);
+    }
+
+    if (setDecoration_ != nullptr) {
+        for (const shared::PedDecoration& decoration : appearance.decorations) {
+            invokeNative<void>(setDecoration_, ped, decoration.collection, decoration.overlay);
+        }
     }
 
     // Черты лица. Байт в снимке превращается обратно в дробное от −1 до 1: у

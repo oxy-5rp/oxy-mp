@@ -134,6 +134,19 @@ void PlayerAppearance::write(ByteWriter& writer) const {
     for (const std::int8_t feature : faceFeatures) {
         writer.writeU8(static_cast<std::uint8_t>(feature));
     }
+
+    // Обрезка при записи, а не только при чтении: список длиннее предела следует
+    // оборвать у того, кто его сочинил, — иначе получатель отвергнет посылку
+    // целиком, и отправитель об этом не узнает.
+    const auto many = static_cast<std::uint8_t>(
+        std::min(decorations.size(), kMaxPedDecorations));
+
+    writer.writeU8(many);
+
+    for (std::size_t at = 0; at < many; ++at) {
+        writer.writeU32(decorations[at].collection);
+        writer.writeU32(decorations[at].overlay);
+    }
 }
 
 PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
@@ -176,6 +189,17 @@ PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
 
     for (std::int8_t& feature : message.faceFeatures) {
         feature = static_cast<std::int8_t>(reader.readU8());
+    }
+
+    const std::size_t many = std::min<std::size_t>(reader.readU8(), kMaxPedDecorations);
+    message.decorations.reserve(many);
+
+    for (std::size_t at = 0; at < many; ++at) {
+        PedDecoration decoration;
+        decoration.collection = reader.readU32();
+        decoration.overlay = reader.readU32();
+
+        message.decorations.push_back(decoration);
     }
 
     return message;

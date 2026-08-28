@@ -1156,6 +1156,17 @@ inline constexpr std::uint64_t kClearVehicleCustomPrimaryColour = 0X963D9A7202C0
 /// CLEAR_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X5FFBDEEC3E8E2009.
 inline constexpr std::uint64_t kClearVehicleCustomSecondaryColour = 0X588D8FDC61F7CFAD;
 
+/// _SET_PED_DECORATION, канонический хеш 0X5F5D1665E352A839.
+///
+/// Ставит татуировку: набор и рисунок в нём, оба хешем. У alt:V этот же натив
+/// зовётся addPedDecorationFromHashes.
+inline constexpr std::uint64_t kSetPedDecoration = 0X49A5A17556C31561;
+
+/// CLEAR_PED_DECORATIONS, канонический хеш 0X0E5173C163976E38.
+///
+/// Снимает все разом: своего «сними одну» у игры нет.
+inline constexpr std::uint64_t kClearPedDecorations = 0XA781062E77B54775;
+
 /// _SET_PED_FACE_FEATURE, канонический хеш 0X71A5C1DBA060049E.
 ///
 /// Двадцать подвижных черт лица: нос, скулы, подбородок и прочие. Довод дробный,

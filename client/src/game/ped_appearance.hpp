@@ -50,6 +50,8 @@ private:
     NativeHandler setHeadBlend_ = nullptr;
     NativeHandler setOverlay_ = nullptr;
     NativeHandler setFaceFeature_ = nullptr;
+    NativeHandler setDecoration_ = nullptr;
+    NativeHandler clearDecorations_ = nullptr;
     NativeHandler setOverlayColour_ = nullptr;
     NativeHandler setHairColour_ = nullptr;
     NativeHandler setEyeColour_ = nullptr;

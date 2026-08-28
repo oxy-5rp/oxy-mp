@@ -227,6 +227,35 @@ public:
         return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
     }
 
+    bool addDecoration(shared::PlayerId id, std::uint32_t collection,
+                       std::uint32_t overlay) override {
+        if (!player(id) || collection == 0 || overlay == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("tattoo+ {} {:#x} {:#x}", id, collection, overlay));
+        return true;
+    }
+
+    bool removeDecoration(shared::PlayerId id, std::uint32_t collection,
+                          std::uint32_t overlay) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("tattoo- {} {:#x} {:#x}", id, collection, overlay));
+        return true;
+    }
+
+    bool clearDecorations(shared::PlayerId id) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("tattoo clear {}", id));
+        return true;
+    }
+
     bool setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) override {
         if (!player(id) || index >= shared::kPedFaceFeatureCount) {
             return false;

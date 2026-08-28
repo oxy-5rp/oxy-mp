@@ -1397,6 +1397,27 @@ TEST_CASE("a teleport carries only where to", "[protocol]") {
     CHECK(back->position.y == -2.5F);
 }
 
+TEST_CASE("tattoos survive a round trip and stop at the limit", "[protocol]") {
+    PlayerAppearance look;
+
+    for (std::uint32_t at = 0; at < kMaxPedDecorations + 5; ++at) {
+        look.decorations.push_back(PedDecoration{.collection = 0xA000 + at,
+                                                 .overlay = 0xB000 + at});
+    }
+
+    const auto packet = encode(look);
+    const auto back = decode<PlayerAppearance>(ByteView{packet});
+
+    REQUIRE(back);
+
+    // Обрезка при записи, а не только при чтении: список длиннее предела следует
+    // оборвать у того, кто его сочинил, — иначе получатель отверг бы посылку
+    // целиком, и отправитель об этом не узнал бы.
+    REQUIRE(back->decorations.size() == kMaxPedDecorations);
+    CHECK(back->decorations.front().collection == 0xA000);
+    CHECK(back->decorations.front().overlay == 0xB000);
+}
+
 TEST_CASE("an appearance from the client keeps the face the server knows",
           "[protocol]") {
     // У игры на лицо и цвета только запись: клиент всегда объявляет их

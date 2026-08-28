@@ -591,6 +591,111 @@ void playerSetHairColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
         *id, static_cast<std::uint8_t>(*colour), static_cast<std::uint8_t>(highlight)));
 }
 
+/// Хеш из довода: число как есть либо имя, посчитанное joaat.
+///
+/// У alt:V набор и рисунок татуировки принимаются и числом, и строкой — так и
+/// зовут их режимы: `addDecoration('mpbeach_overlays', 'FM_Hair_Fuzz')`.
+[[nodiscard]] std::optional<std::uint32_t> hashAt(
+    const v8::FunctionCallbackInfo<v8::Value>& info, int index) {
+    if (info.Length() <= index) {
+        return std::nullopt;
+    }
+
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    // Решается по числу, а не по строке, и это не вкусовщина: `IsString`
+    // объявлен экспортируемым из библиотеки, но определён прямо в заголовке, и
+    // линковщик отказывается выбирать между двумя его телами (LNK2005). Тот же
+    // приём стоит у `player.model` — см. setPlayerModel.
+    const std::optional<std::int64_t> number =
+        intFromJs(isolate->GetCurrentContext(), info[index]);
+
+    if (number) {
+        return static_cast<std::uint32_t>(*number);
+    }
+
+    const std::uint32_t hashed = shared::joaat(fromJs(isolate, info[index]));
+
+    // Пустое имя даёт нулевой хеш, и он же означает «ничего»: отличить одно от
+    // другого нечем, и оба одинаково негодны.
+    return hashed == 0 ? std::nullopt : std::optional{hashed};
+}
+
+/// Ставит татуировку.
+void playerAddDecoration(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::uint32_t> collection = hashAt(info, 0);
+    const std::optional<std::uint32_t> overlay = hashAt(info, 1);
+
+    if (!id || !collection || !overlay) {
+        fail(isolate, "addDecoration ждёт набор и рисунок — именем или хешем");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().addDecoration(*id, *collection, *overlay));
+}
+
+/// Снимает одну татуировку.
+void playerRemoveDecoration(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::uint32_t> collection = hashAt(info, 0);
+    const std::optional<std::uint32_t> overlay = hashAt(info, 1);
+
+    if (!id || !collection || !overlay) {
+        fail(isolate, "removeDecoration ждёт набор и рисунок — именем или хешем");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeDecoration(*id, *collection, *overlay));
+}
+
+/// Снимает все татуировки.
+void playerClearDecorations(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().clearDecorations(*id));
+}
+
+/// Какие татуировки на нём стоят.
+void playerDecorations(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::size_t many = look ? look->decorations.size() : 0;
+
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(many));
+
+    for (std::size_t at = 0; at < many; ++at) {
+        const v8::Local<v8::Object> entry = v8::Object::New(isolate);
+
+        // Имена полей — из `IDecoration` у alt:V.
+        putNumber(context, entry, "collection", look->decorations[at].collection);
+        putNumber(context, entry, "overlay", look->decorations[at].overlay);
+
+        (void)list->Set(context, static_cast<std::uint32_t>(at), entry);
+    }
+
+    info.GetReturnValue().Set(list);
+}
+
 /// Двигает черту лица.
 void playerSetFaceFeature(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -2864,6 +2969,10 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "setHairColor", playerSetHairColour);
     addMethod(isolate, shape, "setEyeColor", playerSetEyeColour);
     addMethod(isolate, shape, "setFaceFeature", playerSetFaceFeature);
+    addMethod(isolate, shape, "addDecoration", playerAddDecoration);
+    addMethod(isolate, shape, "removeDecoration", playerRemoveDecoration);
+    addMethod(isolate, shape, "clearDecorations", playerClearDecorations);
+    addMethod(isolate, shape, "getDecorations", playerDecorations);
     addMethod(isolate, shape, "getFaceFeatureScale", playerFaceFeature);
     addMethod(isolate, shape, "clearProp", playerClearProp);
     addMethod(isolate, shape, "clearClothes", playerClearClothes);

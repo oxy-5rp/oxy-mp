@@ -167,6 +167,25 @@ struct PedOverlay {
 /// Сколько у лица подвижных черт. Столько же, сколько у alt:V и у игры.
 inline constexpr std::size_t kPedFaceFeatureCount = 20;
 
+/// Татуировка на персонаже: набор и рисунок в нём, оба хешем.
+///
+/// Хешами, а не именами: именами их зовёт скрипт, а игре нужны числа, и считать
+/// хеш дважды — на сервере и у каждого клиента — незачем.
+struct PedDecoration {
+    std::uint32_t collection = 0;
+    std::uint32_t overlay = 0;
+
+    [[nodiscard]] friend bool operator==(const PedDecoration&, const PedDecoration&) = default;
+};
+
+/// Сколько татуировок разрешено одному персонажу.
+///
+/// Предел нужен разбору, а не хозяину сервера: без него испорченный пакет с
+/// огромным числом в поле длины заставил бы получателя выделять память под
+/// список, которого нет. Три десятка — вдвое больше, чем ставит редактор
+/// внешности GTA Online на всё тело разом.
+inline constexpr std::size_t kMaxPedDecorations = 32;
+
 /// Как игрок выглядит.
 ///
 /// Состав полей взят у alt:V поле в поле — иначе внешность, собранная в его
@@ -221,6 +240,9 @@ struct PlayerAppearance {
     /// принадлежат они серверу целиком. См. carryUnreadable.
     std::array<std::int8_t, kPedFaceFeatureCount> faceFeatures{};
 
+    /// Татуировки. Прочесть их у игры нечем — принадлежат серверу целиком.
+    std::vector<PedDecoration> decorations;
+
     /// Цвет волос и цвет мелирования.
     std::uint8_t hairColour = 0;
     std::uint8_t hairHighlight = 0;
@@ -254,7 +276,7 @@ struct PlayerAppearance {
 ///
 /// Живёт здесь, а не у сервера, потому что знание это про сам протокол: какие
 /// поля читаются у игры, а какие нет.
-constexpr void carryUnreadable(const PlayerAppearance& known, PlayerAppearance& fresh) noexcept {
+inline void carryUnreadable(const PlayerAppearance& known, PlayerAppearance& fresh) {
     fresh.shapeFirst = known.shapeFirst;
     fresh.shapeSecond = known.shapeSecond;
     fresh.shapeThird = known.shapeThird;
@@ -267,6 +289,7 @@ constexpr void carryUnreadable(const PlayerAppearance& known, PlayerAppearance& 
 
     fresh.overlays = known.overlays;
     fresh.faceFeatures = known.faceFeatures;
+    fresh.decorations = known.decorations;
 
     fresh.hairColour = known.hairColour;
     fresh.hairHighlight = known.hairHighlight;

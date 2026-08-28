@@ -610,6 +610,22 @@ public:
     /// Цвет глаз, номером в палитре игры.
     virtual bool setEyeColour(shared::PlayerId id, std::uint8_t colour) = 0;
 
+    /// Ставит татуировку: набор и рисунок в нём, оба хешем.
+    ///
+    /// Уже стоящая вторично не заводится: игра держит по одной каждого вида, и
+    /// список рос бы на каждую выдачу — как и у насадок на оружие.
+    ///
+    /// false — игрока нет, хеш пустой либо предел исчерпан.
+    virtual bool addDecoration(shared::PlayerId id, std::uint32_t collection,
+                               std::uint32_t overlay) = 0;
+
+    /// Снимает одну татуировку. false — такой на нём не было.
+    virtual bool removeDecoration(shared::PlayerId id, std::uint32_t collection,
+                                  std::uint32_t overlay) = 0;
+
+    /// Снимает все. false — игрока уже нет.
+    virtual bool clearDecorations(shared::PlayerId id) = 0;
+
     /// Двигает черту лица: нос, скулы, подбородок и прочие двадцать.
     ///
     /// scale — от минус единицы до единицы, как у игры и у alt:V; за границами
