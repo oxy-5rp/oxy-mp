@@ -591,6 +591,54 @@ void playerSetHairColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
         *id, static_cast<std::uint8_t>(*colour), static_cast<std::uint8_t>(highlight)));
 }
 
+/// Двигает черту лица.
+void playerSetFaceFeature(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> index = argAt(info, 0);
+
+    if (!id || !index) {
+        fail(isolate, "setFaceFeature ждёт номер черты числом");
+        return;
+    }
+
+    // Доля дробная, и читать её целым нельзя: 0.75 обратилось бы в ноль, то
+    // есть в другое лицо — без единой жалобы.
+    const double scale = realAt(info, 1).value_or(0.0);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setFaceFeature(
+        *id, static_cast<std::uint8_t>(*index), static_cast<float>(scale)));
+}
+
+/// Насколько сдвинута черта лица. Пусто — игрок не объявлял внешности.
+void playerFaceFeature(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> index = argAt(info, 0);
+
+    if (!id || !index) {
+        fail(isolate, "getFaceFeatureScale ждёт номер черты числом");
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+
+    if (!look || *index < 0 ||
+        *index >= static_cast<std::int64_t>(shared::kPedFaceFeatureCount)) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    // Обратно в долю от минус единицы до единицы — тем же числом ступеней,
+    // каким её укладывали.
+    const double scale =
+        static_cast<double>(look->faceFeatures[static_cast<std::size_t>(*index)]) / 127.0;
+
+    info.GetReturnValue().Set(scale);
+}
+
 /// Цвет глаз.
 void playerSetEyeColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -2815,6 +2863,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "setHeadOverlayColor", playerSetHeadOverlayColour);
     addMethod(isolate, shape, "setHairColor", playerSetHairColour);
     addMethod(isolate, shape, "setEyeColor", playerSetEyeColour);
+    addMethod(isolate, shape, "setFaceFeature", playerSetFaceFeature);
+    addMethod(isolate, shape, "getFaceFeatureScale", playerFaceFeature);
     addMethod(isolate, shape, "clearProp", playerClearProp);
     addMethod(isolate, shape, "clearClothes", playerClearClothes);
     addMethod(isolate, shape, "setHairHighlightColor", playerSetHairHighlight);

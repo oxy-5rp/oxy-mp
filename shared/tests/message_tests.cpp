@@ -1397,6 +1397,43 @@ TEST_CASE("a teleport carries only where to", "[protocol]") {
     CHECK(back->position.y == -2.5F);
 }
 
+TEST_CASE("an appearance from the client keeps the face the server knows",
+          "[protocol]") {
+    // У игры на лицо и цвета только запись: клиент всегда объявляет их
+    // умолчанием, и принять его объявление как есть значит затереть назначенное
+    // скриптом лицо нулями. Найдено живой игрой: назначенная внешность
+    // возвращалась к умолчанию через секунду.
+    PlayerAppearance known;
+    known.model = 0xAAAA;
+    known.shapeFirst = 21;
+    known.skinSecond = 27;
+    known.shapeMix = 0.75F;
+    known.hairColour = 12;
+    known.eyeColour = 7;
+    known.overlays[1] = PedOverlay{.index = 5, .colourType = 1, .colour = 4, .opacity = 0.8F};
+    known.components[11] = PedComponent{.drawable = 15};
+
+    // Объявление клиента: одежда своя и настоящая, лицо и цвета — умолчания.
+    PlayerAppearance fresh;
+    fresh.model = 0xBBBB;
+    fresh.components[11] = PedComponent{.drawable = 3};
+
+    carryUnreadable(known, fresh);
+
+    // Читаемое осталось клиентским.
+    CHECK(fresh.model == 0xBBBB);
+    CHECK(fresh.components[11].drawable == 3);
+
+    // Нечитаемое — серверным.
+    CHECK(fresh.shapeFirst == 21);
+    CHECK(fresh.skinSecond == 27);
+    CHECK(fresh.shapeMix == 0.75F);
+    CHECK(fresh.hairColour == 12);
+    CHECK(fresh.eyeColour == 7);
+    CHECK(fresh.overlays[1].index == 5);
+    CHECK(fresh.overlays[1].colour == 4);
+}
+
 TEST_CASE("a lock of a vehicle names both the vehicle and the lock", "[protocol]") {
     VehicleControl control;
     control.id = 4242;

@@ -164,6 +164,9 @@ struct PedOverlay {
     [[nodiscard]] friend bool operator==(const PedOverlay&, const PedOverlay&) = default;
 };
 
+/// Сколько у лица подвижных черт. Столько же, сколько у alt:V и у игры.
+inline constexpr std::size_t kPedFaceFeatureCount = 20;
+
 /// Как игрок выглядит.
 ///
 /// Состав полей взят у alt:V поле в поле — иначе внешность, собранная в его
@@ -206,6 +209,18 @@ struct PlayerAppearance {
 
     std::array<PedOverlay, kPedOverlayCount> overlays{};
 
+    /// Черты лица: нос, скулы, подбородок и прочие двадцать.
+    ///
+    /// Байтом на черту, а не дробным. У игры это дробное от −1 до 1, но шаг её
+    /// собственного редактора куда крупнее сотой доли — а восемьдесят байт на
+    /// то, что почти всегда состоит из нулей, платились бы каждым объявлением
+    /// внешности. Сто двадцать семь ступеней в каждую сторону: точнее, чем
+    /// различает глаз, и вчетверо дешевле.
+    ///
+    /// Прочесть их у игры нечем — натива нет ни у неё, ни у alt:V, — и потому
+    /// принадлежат они серверу целиком. См. carryUnreadable.
+    std::array<std::int8_t, kPedFaceFeatureCount> faceFeatures{};
+
     /// Цвет волос и цвет мелирования.
     std::uint8_t hairColour = 0;
     std::uint8_t hairHighlight = 0;
@@ -222,6 +237,41 @@ struct PlayerAppearance {
     void write(ByteWriter& writer) const;
     [[nodiscard]] static PlayerAppearance read(ByteReader& reader);
 };
+
+/// Переносит в свежую внешность то, чего игра прочесть не умеет.
+///
+/// **У игры на лицо и цвета только запись.** Ни лица из родителей, ни слоёв, ни
+/// цвета волос и глаз обратно не спросить — натива для этого нет ни у неё, ни у
+/// alt:V. Клиент читает у персонажа только то, что читается: модель, одежду и
+/// аксессуары; остальное в его объявлении всегда стоит умолчанием.
+///
+/// Отсюда правило: **объявление клиента об этих полях не свидетельство, а шум**,
+/// и принимать его нельзя. Сервер, приняв его как есть, затирал назначенное
+/// скриптом лицо своими же нулями — режим назначал внешность, она вставала, а
+/// через секунду возвращалась к умолчанию. Найдено живой игрой: между двумя
+/// вопросами о лице клиент успевал объявить свою внешность, и второй ответ
+/// приходил пустым.
+///
+/// Живёт здесь, а не у сервера, потому что знание это про сам протокол: какие
+/// поля читаются у игры, а какие нет.
+constexpr void carryUnreadable(const PlayerAppearance& known, PlayerAppearance& fresh) noexcept {
+    fresh.shapeFirst = known.shapeFirst;
+    fresh.shapeSecond = known.shapeSecond;
+    fresh.shapeThird = known.shapeThird;
+    fresh.skinFirst = known.skinFirst;
+    fresh.skinSecond = known.skinSecond;
+    fresh.skinThird = known.skinThird;
+    fresh.shapeMix = known.shapeMix;
+    fresh.skinMix = known.skinMix;
+    fresh.thirdMix = known.thirdMix;
+
+    fresh.overlays = known.overlays;
+    fresh.faceFeatures = known.faceFeatures;
+
+    fresh.hairColour = known.hairColour;
+    fresh.hairHighlight = known.hairHighlight;
+    fresh.eyeColour = known.eyeColour;
+}
 
 struct PlayerJoined {
     static constexpr MessageId kId = MessageId::PlayerJoined;

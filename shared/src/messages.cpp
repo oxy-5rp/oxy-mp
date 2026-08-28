@@ -130,6 +130,10 @@ void PlayerAppearance::write(ByteWriter& writer) const {
     writer.writeU8(hairColour);
     writer.writeU8(hairHighlight);
     writer.writeU8(eyeColour);
+
+    for (const std::int8_t feature : faceFeatures) {
+        writer.writeU8(static_cast<std::uint8_t>(feature));
+    }
 }
 
 PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
@@ -169,6 +173,10 @@ PlayerAppearance PlayerAppearance::read(ByteReader& reader) {
     message.hairColour = reader.readU8();
     message.hairHighlight = reader.readU8();
     message.eyeColour = reader.readU8();
+
+    for (std::int8_t& feature : message.faceFeatures) {
+        feature = static_cast<std::int8_t>(reader.readU8());
+    }
 
     return message;
 }

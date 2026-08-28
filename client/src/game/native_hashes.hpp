@@ -1156,6 +1156,12 @@ inline constexpr std::uint64_t kClearVehicleCustomPrimaryColour = 0X963D9A7202C0
 /// CLEAR_VEHICLE_CUSTOM_SECONDARY_COLOUR, канонический хеш 0X5FFBDEEC3E8E2009.
 inline constexpr std::uint64_t kClearVehicleCustomSecondaryColour = 0X588D8FDC61F7CFAD;
 
+/// _SET_PED_FACE_FEATURE, канонический хеш 0X71A5C1DBA060049E.
+///
+/// Двадцать подвижных черт лица: нос, скулы, подбородок и прочие. Довод дробный,
+/// от минус единицы до единицы.
+inline constexpr std::uint64_t kSetPedFaceFeature = 0XAAF9B08B469F707F;
+
 /// SET_VEHICLE_DOORS_LOCKED, канонический хеш 0XB664292EAECF7FA6.
 inline constexpr std::uint64_t kSetVehicleDoorsLocked = 0X0B74F181ADFC39BF;
 

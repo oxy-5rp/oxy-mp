@@ -16,6 +16,13 @@ namespace {
 constexpr std::array<int, shared::kPedPropCount> kPropSlots{0, 1, 2, 6, 7};
 
 /// Слой лица, которого нет.
+/// На сколько ступеней в каждую сторону разложена черта лица.
+///
+/// У натива довод дробный, от минус единицы до единицы; по сети идёт байт. Сто
+/// двадцать семь ступеней точнее, чем различает глаз, и вчетверо дешевле
+/// четырёх байт на черту.
+constexpr float kFaceFeatureSteps = 127.0F;
+
 constexpr std::uint8_t kNoOverlay = 255;
 
 /// Цвета у слоя нет вовсе.
@@ -33,6 +40,7 @@ PedAppearance::PedAppearance(const NativeTable& table) noexcept
       setProp_(table.handlerFor(natives::kSetPedPropIndex)),
       clearProp_(table.handlerFor(natives::kClearPedProp)),
       setHeadBlend_(table.handlerFor(natives::kSetPedHeadBlendData)),
+      setFaceFeature_(table.handlerFor(natives::kSetPedFaceFeature)),
       setOverlay_(table.handlerFor(natives::kSetPedHeadOverlay)),
       setOverlayColour_(table.handlerFor(natives::kSetPedHeadOverlayColor)),
       setHairColour_(table.handlerFor(natives::kSetPedHairColor)),
@@ -119,6 +127,17 @@ void PedAppearance::apply(int ped, const shared::PlayerAppearance& appearance) c
                            static_cast<int>(appearance.skinSecond),
                            static_cast<int>(appearance.skinThird), appearance.shapeMix,
                            appearance.skinMix, appearance.thirdMix, false);
+    }
+
+    // Черты лица. Байт в снимке превращается обратно в дробное от −1 до 1: у
+    // натива довод дробный, и целое число он истолковал бы как «до упора».
+    if (setFaceFeature_ != nullptr) {
+        for (std::size_t index = 0; index < shared::kPedFaceFeatureCount; ++index) {
+            const float scale =
+                static_cast<float>(appearance.faceFeatures[index]) / kFaceFeatureSteps;
+
+            invokeNative<void>(setFaceFeature_, ped, static_cast<int>(index), scale);
+        }
     }
 
     if (setOverlay_ != nullptr) {

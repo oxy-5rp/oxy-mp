@@ -564,7 +564,7 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `entityEnterColshape`, `entityLeaveColshape` | Нынешние имена alt:V; старые (`enterColshape`) объявляются тоже |
 | Признаки состояния игрока | Четырнадцать штук: `isDead`, `isAiming`, `isShooting`, `isInRagdoll`, `isJumping`, `isCrouching`, `isParachuting`, `isReloading`, `isInCover`, `isInMelee`, `isEnteringVehicle`, `isLeavingVehicle`, `isInWater`, `isSpawned` |
 | `player.aimPos`, `player.currentWeapon` | Оттуда же — из снимка |
-| Внешность лица | `setHeadBlendData`, `setHeadOverlay`, `setHeadOverlayColor`, `setHairColor`, `setEyeColor` и чтение к ним: `getClothes`, `getProp`, `getHeadBlendData`, `getHeadOverlay`, `getHairColor`, `getHairHighlightColor`, `getEyeColor` |
+| Внешность лица | `setHeadBlendData`, `setHeadOverlay`, `setHeadOverlayColor`, `setHairColor`, `setEyeColor`, `setFaceFeature` и чтение к ним: `getClothes`, `getProp`, `getHeadBlendData`, `getHeadOverlay`, `getHairColor`, `getHairHighlightColor`, `getEyeColor`, `getFaceFeatureScale`. Принадлежит серверу целиком: у игры на эти поля только запись |
 | `playerEnteredVehicle` и родня | Плюс `playerEnteringVehicle`, `playerLeftVehicle`, `playerChangedVehicleSeat` — выводятся из снимка сравнением |
 | `playerWeaponChange`, `playerDamage` | Первое из снимка, второе — там же, где урон разводится по броне и здоровью |
 | `syncedMetaChange` и родня | Теперь и на сервере: плюс `streamSyncedMetaChange`, `globalSyncedMetaChange`, `globalMetaChange`, `metaChange` |

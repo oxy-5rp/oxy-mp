@@ -86,6 +86,9 @@ public:
     std::unordered_map<shared::PlayerId, HairColour> hairColour;
     std::unordered_map<shared::PlayerId, std::uint8_t> eyeColour;
 
+    /// Черты лица, какими их двигал скрипт: номер и доля.
+    std::unordered_map<shared::PlayerId, std::vector<std::pair<std::uint8_t, float>>> features;
+
     /// Внешность целиком — то, что отдаётся на вопрос о ней.
     std::unordered_map<shared::PlayerId, shared::PlayerAppearance> looks;
 
@@ -222,6 +225,15 @@ public:
     bool setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) override {
         hairColour[id] = {colour, highlight};
         return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    bool setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) override {
+        if (!player(id) || index >= shared::kPedFaceFeatureCount) {
+            return false;
+        }
+
+        features[id].push_back({index, scale});
+        return true;
     }
 
     bool setEyeColour(shared::PlayerId id, std::uint8_t colour) override {

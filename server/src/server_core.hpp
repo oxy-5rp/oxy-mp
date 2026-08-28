@@ -241,6 +241,7 @@ public:
                               std::uint8_t colour, std::uint8_t secondColour) override;
     bool setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) override;
     bool setEyeColour(shared::PlayerId id, std::uint8_t colour) override;
+    bool setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) override;
     [[nodiscard]] std::optional<shared::PlayerAppearance> appearance(
         shared::PlayerId id) const override;
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;

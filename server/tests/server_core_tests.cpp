@@ -1103,6 +1103,48 @@ TEST_CASE("a face assembled by the server comes back the same", "[server][script
     CHECK(look->skinMix == 0.25F);
 }
 
+TEST_CASE("a face feature comes back the way it was set", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setFaceFeature(player.id, 3, 0.5F));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    // По сети черта идёт байтом в сто двадцать семь ступеней; половина от
+    // единицы это шестьдесят три с половиной, то есть шестьдесят три.
+    CHECK(look->faceFeatures[3] == 63);
+
+    // Остальные девятнадцать не тронуты: черты двигают по одной.
+    CHECK(look->faceFeatures[0] == 0);
+    CHECK(look->faceFeatures[19] == 0);
+}
+
+TEST_CASE("a face feature outside its range is cut to it", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setFaceFeature(player.id, 0, 5.0F));
+    REQUIRE(session.core.setFaceFeature(player.id, 1, -5.0F));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    // Обрезается здесь, а не только у игры: внешность сервер помнит и
+    // пересказывает вошедшим позже.
+    CHECK(look->faceFeatures[0] == 127);
+    CHECK(look->faceFeatures[1] == -127);
+}
+
+TEST_CASE("a face feature that does not exist is refused", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    CHECK_FALSE(session.core.setFaceFeature(player.id, 20, 0.5F));
+    CHECK_FALSE(session.core.setFaceFeature(99, 0, 0.5F));
+}
+
 TEST_CASE("blend shares outside their range are cut to it", "[server][script]") {
     Session session;
     Player& player = session.join(1, "игрок");

@@ -781,6 +781,25 @@ std::optional<shared::PlayerAppearance> ServerCore::appearance(shared::PlayerId 
     return player->appearance;
 }
 
+bool ServerCore::setFaceFeature(shared::PlayerId id, std::uint8_t index, float scale) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || index >= shared::kPedFaceFeatureCount) {
+        return false;
+    }
+
+    // Обрезается и здесь, а не только у игры: внешность сервер помнит и
+    // пересказывает вошедшим позже, и сохранённое число, которого игра не
+    // приняла, дало бы им одно лицо, а хозяину другое.
+    const float held = scale < -1.0F ? -1.0F : (scale > 1.0F ? 1.0F : scale);
+
+    // В байт — по сто двадцать семь ступеней в каждую сторону, как в протоколе.
+    appearanceOf(*player).faceFeatures[index] =
+        static_cast<std::int8_t>(held * 127.0F);
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
 bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) {
     const Player* const player = players_->findById(id);
     if (player == nullptr) {
