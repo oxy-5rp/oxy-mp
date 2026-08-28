@@ -1585,6 +1585,82 @@
         },
     });
 
+    // --- Кто рядом ------------------------------------------------------------
+
+    /// Сущности сессии, отобранные родом, слоем мира и расстоянием.
+    ///
+    /// `position` в пустоту означает «не отбирать по расстоянию» — так работает
+    /// `getEntitiesInDimension`. Слой мира в пустоту означает «любой»: у alt:V
+    /// довод обязателен, но ноль там законный слой, и отличить «в нулевом» от
+    /// «в любом» иначе нечем.
+    function entitiesNear(position, range, dimension, allowedTypes) {
+        const kinds = alt.enums.BaseObjectFilterType;
+
+        // Не названный набор означает «все роды», как и у alt:V.
+        const wanted = Number.isFinite(Number(allowedTypes)) && Number(allowedTypes) !== 0
+            ? Number(allowedTypes)
+            : kinds.Player | kinds.Vehicle | kinds.Ped | kinds.Object;
+
+        const slice = Number(dimension);
+        const inSlice = (entity) =>
+            !Number.isFinite(slice) || entity.dimension === slice;
+
+        const at = position === null ? null : new shared.Vector3(position);
+        const reach = Number(range);
+        const close = (entity) =>
+            at === null || at.distanceToSquared(entity.pos) <= reach * reach;
+
+        const found = [];
+
+        const take = (flag, list) => {
+            if ((wanted & flag) === 0) {
+                return;
+            }
+
+            for (const entity of list) {
+                if (inSlice(entity) && close(entity)) {
+                    found.push(entity);
+                }
+            }
+        };
+
+        take(kinds.Player, Player.all);
+        take(kinds.Vehicle, Vehicle.all);
+        take(kinds.Ped, Ped.all);
+        take(kinds.Object, WorldObject.all);
+
+        return found;
+    }
+
+    /// Ближайшая сущность одного рода. Пусто — рядом никого.
+    function nearestOf(kind, options) {
+        const where = options?.pos;
+
+        if (where === undefined || where === null) {
+            throw new TypeError('нужен объект вида { pos, range }');
+        }
+
+        const at = new shared.Vector3(where);
+
+        // Не названная дальность означает «где угодно»: так у alt:V, и так же
+        // ведёт себя его же описание — довод там необязателен.
+        const reach = Number.isFinite(Number(options?.range)) ? Number(options.range) : Infinity;
+
+        let nearest = null;
+        let nearestAt = Infinity;
+
+        for (const entity of entitiesNear(null, 0, undefined, kind)) {
+            const away = at.distanceToSquared(entity.pos);
+
+            if (away <= reach * reach && away < nearestAt) {
+                nearest = entity;
+                nearestAt = away;
+            }
+        }
+
+        return nearest;
+    }
+
     Object.defineProperties(WorldObject.prototype, {
         /// Где предмет стоит и как повёрнут.
         ///
@@ -1800,6 +1876,47 @@
         startResource: absent('alt.startResource'),
         stopResource: absent('alt.stopResource'),
         getServerConfig: absent('alt.getServerConfig'),
+        /// Кто и что стоит рядом с точкой.
+        ///
+        /// Считается перебором по реестрам, а не по своему указателю: своего
+        /// указателя у нас нет, а реестры сервер и так держит целиком. Игроков в
+        /// сессии сотни, а не миллионы, и перебор их дешевле всякого дерева,
+        /// которое пришлось бы держать в согласии с миром.
+        ///
+        /// `allowedTypes` — набор `alt.BaseObjectFilterType`, складываемый
+        /// побитово. Не названный, он означает «все роды»: так же толкует его и
+        /// alt:V.
+        getEntitiesInRange: (position, range, dimension, allowedTypes) =>
+            entitiesNear(position, range, dimension, allowedTypes),
+
+        getEntitiesInDimension: (dimension, allowedTypes) =>
+            entitiesNear(null, 0, dimension, allowedTypes),
+
+        getClosestEntities: (position, range, dimension, limit, allowedTypes) => {
+            const at = new shared.Vector3(position);
+
+            // Сортируется копия, и сортируется по квадрату расстояния: корень
+            // здесь не нужен никому — порядок у квадратов тот же самый.
+            const found = entitiesNear(position, range, dimension, allowedTypes)
+                .map((entity) => [entity, at.distanceToSquared(entity.pos)])
+                .sort((left, right) => left[1] - right[1])
+                .map(([entity]) => entity);
+
+            const many = Number(limit);
+            return Number.isFinite(many) && many >= 0 ? found.slice(0, many) : found;
+        },
+
+        /// Ближайший игрок и ближайшая машина.
+        ///
+        /// Доводом объект `{ pos, range }`, а не два числа, — так это объявлено
+        /// у alt:V. Пусто — рядом никого нет.
+        getClosestPlayer: (options) => nearestOf(alt.enums.BaseObjectFilterType.Player, options),
+        getClosestVehicle: (options) => nearestOf(alt.enums.BaseObjectFilterType.Vehicle, options),
+
+        /// Поднятые ресурсы: все и по имени.
+        getAllResources: () => ScriptResource.all,
+        hasResource: (name) => ScriptResource.exists(String(name)),
+
         /// Метаданные сессии, не привязанные ни к какой сущности.
         ///
         /// События у них свои — `globalSyncedMetaChange` и `globalMetaChange`, —

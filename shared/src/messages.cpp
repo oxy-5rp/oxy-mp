@@ -858,6 +858,16 @@ PlayerTeleport PlayerTeleport::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerControl::write(ByteWriter& writer) const {
+    writer.writeU8(flags);
+}
+
+PlayerControl PlayerControl::read(ByteReader& reader) {
+    PlayerControl message;
+    message.flags = reader.readU8();
+    return message;
+}
+
 namespace {
 
 /// Пишет именованное событие.

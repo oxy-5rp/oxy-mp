@@ -101,6 +101,10 @@ public:
     /// всем: клиент, у которого она заведена, иначе оставит её стоять навсегда.
     virtual void vehicleRemoved(shared::VehicleId id) = 0;
 
+    /// Сервер распорядился о теле игрока: заморозил, отпустил, сделал
+    /// неуязвимым. Уходит ему одному — тело живёт в игре у него.
+    virtual void controlChanged(const Player& player) = 0;
+
     virtual void objectAdded(shared::ObjectId id) = 0;
 
     /// Предмет переехал.
@@ -202,6 +206,14 @@ public:
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
+    bool setFrozen(shared::PlayerId id, bool frozen) override;
+    bool setInvincible(shared::PlayerId id, bool invincible) override;
+
+    /// Поднимает или снимает один признак распоряжения о теле.
+    ///
+    /// Один на оба: признаки уходят целиком, и разводить их по двум почти
+    /// одинаковым телам значило бы завести два места, где легко разойтись.
+    bool setControl(shared::PlayerId id, shared::PlayerControlFlag flag, bool on);
     bool removeWeapon(shared::PlayerId id, std::uint32_t weapon) override;
     [[nodiscard]] std::vector<shared::WeaponSlot> loadout(shared::PlayerId id) const override;
     bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,

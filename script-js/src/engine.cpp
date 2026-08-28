@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,23 @@ namespace {
 /// делать в стороне. Четыре — то же число, что берёт себе Node по умолчанию на
 /// обычной машине.
 constexpr int kBackgroundThreads = 4;
+
+/// Приставка, под которой до слоя alt:V доходит объявленное ресурсом.
+///
+/// См. `NodeEngine::announce`: ею разведены два потока событий, приходящих под
+/// одним именем.
+constexpr std::string_view kLocalPrefix = "local:";
+
+/// Имена событий жизни ресурса — целиком, а не собранные из кусков.
+///
+/// Собранное имя работает точно так же, но его не найти поиском — ни человеку,
+/// ни машинной сверке с объявлениями alt:V, по которой здесь считают паритет.
+/// Спрятанное в склейке, оно числится отсутствующим; на этом уже попались имена
+/// зон.
+constexpr std::string_view kResourceStart = "resourceStart";
+constexpr std::string_view kResourceStop = "resourceStop";
+constexpr std::string_view kAnyResourceStart = "anyResourceStart";
+constexpr std::string_view kAnyResourceStop = "anyResourceStop";
 
 /// Строка в вид, годный для JSON.
 ///
@@ -298,8 +316,9 @@ public:
         // тоже уложены в JSON, и разбирать их должен тот же мостик. Без неё
         // обработчик получил бы строку «[false]» вместо признака — набор это и
         // поймал.
-        started.deliver("local:resourceStart", "[false]");
-        announce("anyResourceStart", std::format("[{}]", asJsonString(key)));
+        started.deliver(std::string{kLocalPrefix} + std::string{kResourceStart},
+                        "[false]");
+        announce(kAnyResourceStart, std::format("[{}]", asJsonString(key)));
 
         return true;
     }
@@ -316,8 +335,8 @@ public:
         // ещё живым — с окнами, таймерами и подписками, — и убрать за собой ему
         // есть чем. Объяви мы это после, объявлять было бы уже нечему: изолята
         // не осталось бы. То же правило и у `playerDisconnect`.
-        found->second->deliver("local:resourceStop", "[]");
-        announce("anyResourceStop", std::format("[{}]", asJsonString(key)));
+        found->second->deliver(std::string{kLocalPrefix} + std::string{kResourceStop}, "[]");
+        announce(kAnyResourceStop, std::format("[{}]", asJsonString(key)));
 
         resources_.erase(found);
     }
@@ -360,7 +379,7 @@ private:
 
         ++announcing_;
 
-        const std::string local = "local:" + std::string{name};
+        const std::string local = std::string{kLocalPrefix} + std::string{name};
 
         for (const auto& [key, resource] : resources_) {
             resource->deliver(local, payload);

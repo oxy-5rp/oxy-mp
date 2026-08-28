@@ -1397,6 +1397,34 @@ TEST_CASE("a teleport carries only where to", "[protocol]") {
     CHECK(back->position.y == -2.5F);
 }
 
+TEST_CASE("a command about the body carries both of its flags", "[protocol]") {
+    PlayerControl control;
+    control.flags = static_cast<std::uint8_t>(PlayerControlFlag::Frozen) |
+                    static_cast<std::uint8_t>(PlayerControlFlag::Invincible);
+
+    const auto packet = encode(control);
+    const auto back = decode<PlayerControl>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK(has(back->flags, PlayerControlFlag::Frozen));
+    CHECK(has(back->flags, PlayerControlFlag::Invincible));
+}
+
+TEST_CASE("a command about the body says which flag is off", "[protocol]") {
+    // Признаки уходят целиком, а не по одному, и потому снятый обязан
+    // читаться как снятый: пришли мы только поднятые, разморозить игрока было
+    // бы нечем.
+    PlayerControl control;
+    control.flags = static_cast<std::uint8_t>(PlayerControlFlag::Invincible);
+
+    const auto packet = encode(control);
+    const auto back = decode<PlayerControl>(ByteView{packet});
+
+    REQUIRE(back);
+    CHECK_FALSE(has(back->flags, PlayerControlFlag::Frozen));
+    CHECK(has(back->flags, PlayerControlFlag::Invincible));
+}
+
 TEST_CASE("a resource list of a real game mode survives a round trip", "[messages]") {
     // Раздаётся не «ресурс», а каждый его файл: у живого режима клиентская
     // половина — это собранная страница интерфейса, полторы-две тысячи картинок,

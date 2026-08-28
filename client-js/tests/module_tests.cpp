@@ -536,6 +536,25 @@ TEST_CASE("the client knows every player of the session, not only itself", "[cli
     CHECK(said("я 7"));
 }
 
+TEST_CASE("a player on foot is nowhere, not in the driver seat", "[client][js]") {
+    // **Минус единица возвращалась дважды: и «не в машине», и «место не
+    // нашлось».** А минус единица — это место водителя у игры, и не севший в
+    // машину читался как сидящий за рулём. У alt:V «нигде» — ноль, и спутать
+    // его с местом нельзя.
+    Recorder& kept = recorder();
+    kept.selfId = 1;
+    kept.players = {{1, 100}};
+    kept.names = {{1, "я"}};
+
+    // Ноль ответом на всё: `getVehiclePedIsIn` отвечает «ни в какой».
+    kept.nativeAnswer = 0;
+
+    REQUIRE(run("seat", "const alt = require('alt-client');\n"
+                        "alt.log('место ' + alt.Player.local.seat);\n"));
+
+    CHECK(said("место 0"));
+}
+
 TEST_CASE("a native that returns nothing still keeps its place in the answer",
           "[client][js]") {
     // **Место возврата занято всегда, даже у натива, который ничего не

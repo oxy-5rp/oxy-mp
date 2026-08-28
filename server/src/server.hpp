@@ -112,6 +112,13 @@ private:
     /// передать нажатие.
     void handleClientEvent(net::PeerId peer, const shared::ClientEvent& event);
 
+    /// Пересказывает игроку распоряжение о его теле.
+    ///
+    /// Отдельно от `controlChanged`, потому что зовётся ещё и при возрождении:
+    /// `RESURRECT_PED` сбрасывает признаки персонажа, и поднятый игрок
+    /// разморозился бы сам собой, а сервер об этом не узнал бы никогда.
+    void sendControl(const Player& player);
+
     /// Сообщает игроку его здоровье и броню.
     void sendHealth(const Player& player, shared::PlayerId attacker);
 
@@ -151,6 +158,7 @@ private:
     void vehicleRepaired(shared::VehicleId id) override;
     void vehicleAppearanceChanged(shared::VehicleId id) override;
     void attachmentChanged(AttachmentDirectory::Ref entity) override;
+    void controlChanged(const Player& player) override;
     void objectAdded(shared::ObjectId id) override;
     void objectMoved(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;

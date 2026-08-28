@@ -228,6 +228,14 @@ public:
         teleports_.insert(teleports_.end(), points.begin(), points.end());
     }
 
+    /// Кладёт распоряжение о теле. Заменяет прежнее целиком.
+    void deliverControl(std::uint8_t flags) { control_ = flags; }
+
+    /// Чем сервер распорядился о теле. Спрашивается каждый кадр и потому не
+    /// забирается: наложить признаки однажды нельзя — их сбрасывает подъём из
+    /// мёртвых.
+    [[nodiscard]] std::uint8_t control() const noexcept { return control_; }
+
     [[nodiscard]] std::vector<shared::Vec3> takeTeleports() {
         const std::lock_guard guard{mutex_};
         return std::exchange(teleports_, {});
@@ -741,6 +749,9 @@ private:
     /// Имена расстановки, о которых ещё не просили игру.
     std::vector<std::string> mapPlacements_;
     std::vector<shared::Vec3> teleports_;
+
+    /// Чем сервер распорядился о нашем теле. Состояние, а не очередь.
+    std::uint8_t control_ = 0;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;

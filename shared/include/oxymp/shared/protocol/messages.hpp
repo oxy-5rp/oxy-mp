@@ -1209,6 +1209,41 @@ struct PlayerTeleport {
     [[nodiscard]] static PlayerTeleport read(ByteReader& reader);
 };
 
+/// Чем сервер распоряжается о теле игрока.
+enum class PlayerControlFlag : std::uint8_t {
+    /// Персонаж стоит на месте и не двигается ни своей волей, ни физикой.
+    Frozen = 1U << 0U,
+
+    /// Персонажу не наносится урон.
+    ///
+    /// Неуязвимость — не то же самое, что бессмертие: здоровье по-прежнему
+    /// принадлежит серверу, и отнять его скриптом можно и у неуязвимого. Здесь
+    /// закрывается только урон, который считает игра у хозяина.
+    Invincible = 1U << 1U,
+};
+
+[[nodiscard]] constexpr bool has(std::uint8_t flags, PlayerControlFlag flag) noexcept {
+    return (flags & static_cast<std::uint8_t>(flag)) != 0;
+}
+
+/// Распоряжение о теле игрока. Только ему самому.
+///
+/// Признаки уходят целиком, а не по одному: их два, и байт под них всё равно
+/// один. Наложить их однажды и забыть нельзя — `RESURRECT_PED` сбрасывает
+/// признаки персонажа, — поэтому получатель накладывает их каждый кадр, а
+/// сервер помнит и пересказывает их вошедшему заново.
+struct PlayerControl {
+    static constexpr MessageId kId = MessageId::PlayerControl;
+
+    /// Набор PlayerControlFlag.
+    std::uint8_t flags = 0;
+
+    [[nodiscard]] friend bool operator==(const PlayerControl&, const PlayerControl&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerControl read(ByteReader& reader);
+};
+
 /// Предел длины имени события.
 ///
 /// Нужен разбору, а не хозяину сервера: без него испорченный пакет с огромным

@@ -580,11 +580,25 @@ alt:V копирует `GTA5.exe` в `backup/` и запускает копию 
 - [x] **прочность, скорость, признаки и пассажиры машины** видны скрипту
 - [x] **двенадцать имён нативов** из тех, что зовёт живой режим, опознаны по
       подписи и вписаны в `ALT_ALIASES`
-- [ ] остальные события: `weaponDamage`, `consoleCommand`, `explosion`,
-      `startProjectile`, `netOwnerChange`, `vehicleHorn`, `vehicleSiren`,
-      `playerConnectDenied`, `baseObjectCreate` / `Remove`
-- [ ] клиентские события: `worldObjectStreamIn` / `Out`, `gameEntityCreate` /
-      `Destroy`, `enteredVehicle` / `leftVehicle`, `playerWeaponShoot`
+- [x] **`weaponDamage` и `consoleCommand`** — первое объявляется до применения
+      урона и отменяется возвратом `false`; второе читает окно сервера своим
+      потоком
+- [x] **клиентские события о появлении тел и о своей машине** —
+      `worldObjectStreamIn` / `Out`, `gameEntityCreate` / `Destroy`,
+      `enteredVehicle`, `leftVehicle`, `changedVehicleSeat`
+- [x] **`connectionComplete` и `disconnect`** — `ScriptHost::sessionEvent` был
+      написан и не звался ниоткуда
+- [x] **запросы «кто рядом»** — `getEntitiesInRange`, `getClosestEntities`,
+      `getEntitiesInDimension`, `getClosestPlayer`, `getClosestVehicle`
+- [x] **снаряжение спрашивается и отбирается** — `weapons`, `hasWeapon`,
+      `getWeaponAmmo`, `removeWeapon`, `removeAllWeapons`
+- [x] **`stringToSHA256`, `time` / `timeEnd`, `hasResource`, `getAllResources`**
+- [ ] остальные события: `explosion`, `startProjectile`, `netOwnerChange`,
+      `vehicleHorn`, `vehicleSiren`, `playerConnectDenied`, `baseObjectCreate` /
+      `Remove`, `playerWeaponShoot` на клиенте
+- [x] **`player.frozen` и `player.invincible`** — своё сообщение
+      (`PlayerControl`, версия протокола 34). Накладывается каждым кадром и
+      уживается с заморозкой на подгрузке: держим, пока просит хоть кто-то
 - [ ] `setFaceFeature` — двадцать чисел, которых в протоколе нет; потребует
       новых полей и подъёма версии
 - [ ] справочники моделей (`getVehicleModelInfoByHash` и родня, `getModsCount`,

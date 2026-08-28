@@ -130,6 +130,24 @@ public:
         return it == playerList.end() ? std::nullopt : std::optional{*it};
     }
 
+    bool setFrozen(shared::PlayerId id, bool frozen) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("frozen {} {}", id, frozen ? 1 : 0));
+        return true;
+    }
+
+    bool setInvincible(shared::PlayerId id, bool invincible) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("invincible {} {}", id, invincible ? 1 : 0));
+        return true;
+    }
+
     bool removeWeapon(shared::PlayerId id, std::uint32_t weapon) override {
         if (!player(id) || weapon == 0) {
             return false;

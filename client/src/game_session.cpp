@@ -778,13 +778,22 @@ void GameSession::advance() {
 
         // Пока мир вокруг точки переноса не появился, персонажа держат
         // замороженным: отпущенный, он полетит сквозь незагруженную землю.
+        //
+        // Заморозку просят двое — подгрузка и сервер, — и спорить им нельзя.
+        // Отпускает только тот, кто держал последним, и потому решение здесь
+        // одно на обоих: держим, пока хоть один просит.
+        const bool frozenByServer =
+            shared::has(mail_.control(), shared::PlayerControlFlag::Frozen);
+
         if (streaming_.loading()) {
             player_.freeze(ped, true);
 
-            if (streaming_.advance()) {
+            if (streaming_.advance() && !frozenByServer) {
                 player_.freeze(ped, false);
             }
         }
+
+        applyControl(ped, frozenByServer);
 
         // Посадка разбирается до всего прочего в кадре: задача входа выдаётся
         // игрой в тот же кадр, когда игрок нажал клавишу, и перехватить её
@@ -1446,6 +1455,25 @@ void GameSession::runScripts() {
     // Звать можно только отсюда: обработчики зовут нативы, а нативы живут
     // ровно в этом кадре игры.
     scripts_->sessionEvent("render");
+}
+
+void GameSession::applyControl(int ped, bool frozenByServer) {
+    if (ped == 0) {
+        return;
+    }
+
+    // Накладывается каждый кадр, а не при изменении, и это не расточительство.
+    // `RESURRECT_PED` сбрасывает признаки персонажа: наложенные однажды, они
+    // пропали бы у поднятого игрока — и вернуть их было бы нечем, потому что
+    // прошлое распоряжение сервера с новым совпадает и «изменением» не будет.
+    // То же правило, что и у запрета падать у кукол.
+    //
+    // Стоит это двух нативов на кадр, и оба дешёвые: они пишут признак в
+    // структуру персонажа, а не считают ничего.
+    player_.freeze(ped, frozenByServer || streaming_.loading());
+
+    player_.setInvincible(
+        ped, shared::has(mail_.control(), shared::PlayerControlFlag::Invincible));
 }
 
 void GameSession::applyIncomingDamage(int ped) {

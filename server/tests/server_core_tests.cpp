@@ -85,6 +85,10 @@ public:
         sent.push_back(std::format("vehicle- {}", id));
     }
 
+    void controlChanged(const Player& player) override {
+        sent.push_back(std::format("control {} {}", player.id, player.control));
+    }
+
     void objectAdded(shared::ObjectId id) override {
         sent.push_back(std::format("object+ {}", id));
     }
@@ -974,6 +978,52 @@ script::EntityRef entity(shared::EntityKind kind, std::uint32_t id) {
 }
 
 } // namespace
+
+TEST_CASE("freezing a player is told once, not every time", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setFrozen(player.id, true));
+    CHECK(std::ranges::count(session.sink.sent, std::format("control {} 1", player.id)) == 1);
+
+    // Второй раз то же самое не рассылается: признаки ставят из обработчиков,
+    // которые идут каждый такт, и слать одно и то же тридцать раз в секунду
+    // значило бы платить за ничто.
+    REQUIRE(session.core.setFrozen(player.id, true));
+    CHECK(std::ranges::count(session.sink.sent, std::format("control {} 1", player.id)) == 1);
+}
+
+TEST_CASE("both flags of the body live side by side", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setFrozen(player.id, true));
+    REQUIRE(session.core.setInvincible(player.id, true));
+
+    // Второй признак не стирает первый: уходят они целиком, и ставящий один
+    // обязан сохранить другой.
+    const auto shown = session.core.player(player.id);
+    REQUIRE(shown.has_value());
+
+    CHECK(shared::has(shown->control, shared::PlayerControlFlag::Frozen));
+    CHECK(shared::has(shown->control, shared::PlayerControlFlag::Invincible));
+
+    // И снятие одного не трогает второй.
+    REQUIRE(session.core.setFrozen(player.id, false));
+
+    const auto after = session.core.player(player.id);
+    REQUIRE(after.has_value());
+
+    CHECK_FALSE(shared::has(after->control, shared::PlayerControlFlag::Frozen));
+    CHECK(shared::has(after->control, shared::PlayerControlFlag::Invincible));
+}
+
+TEST_CASE("a body of nobody is not commanded", "[server][script]") {
+    Session session;
+
+    CHECK_FALSE(session.core.setFrozen(99, true));
+    CHECK_FALSE(session.core.setInvincible(99, true));
+}
 
 TEST_CASE("one weapon can be taken away without touching the rest",
           "[server][script]") {

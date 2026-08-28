@@ -28,6 +28,10 @@ namespace {
         // который разойдётся с первым на первом же пропущенном пакете.
         .flags = player.state.flags,
         .aimAt = player.state.aimAt,
+
+        // Распоряжение о теле помнит сервер, а не снимок: клиент о нём не
+        // рассказывает — он его исполняет.
+        .control = player.control,
         .weapon = player.state.weapon,
         .ammo = player.state.ammo,
 
@@ -631,6 +635,36 @@ bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int8_t dr
     look.props[index] = shared::PedProp{.drawable = drawable, .texture = texture};
 
     sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setFrozen(shared::PlayerId id, bool frozen) {
+    return setControl(id, shared::PlayerControlFlag::Frozen, frozen);
+}
+
+bool ServerCore::setInvincible(shared::PlayerId id, bool invincible) {
+    return setControl(id, shared::PlayerControlFlag::Invincible, invincible);
+}
+
+bool ServerCore::setControl(shared::PlayerId id, shared::PlayerControlFlag flag, bool on) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    const auto bit = static_cast<std::uint8_t>(flag);
+    const std::uint8_t wanted = on ? static_cast<std::uint8_t>(player->control | bit)
+                                   : static_cast<std::uint8_t>(player->control & ~bit);
+
+    // Ничего не изменилось — ничего и не рассылаем. Признаки эти ставят из
+    // обработчиков, которые идут каждый такт, и слать одно и то же тридцать раз
+    // в секунду значило бы платить за ничто.
+    if (wanted == player->control) {
+        return true;
+    }
+
+    player->control = wanted;
+    sink_->controlChanged(*player);
     return true;
 }
 

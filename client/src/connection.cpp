@@ -552,6 +552,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerControl:
+        if (const auto control = shared::decode<shared::PlayerControl>(packet)) {
+            control_ = control->flags;
+        }
+        return;
+
     case shared::MessageId::VehicleTeleport:
         if (const auto teleport = shared::decode<shared::VehicleTeleport>(packet)) {
             vehicleTeleports_.push_back(*teleport);
@@ -1331,6 +1337,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     vehicles_.clear();
     sentAppearances_.clear();
     teleports_.clear();
+    control_ = 0;
     serverEvents_.clear();
 
     // Предметы и снаряжение забываются вместе с соединением: их список

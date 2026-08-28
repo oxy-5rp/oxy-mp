@@ -1973,6 +1973,7 @@ void run() {
         // незачем.
         mail.deliverDamage(connection->takeDamage());
         mail.deliverTeleports(connection->takeTeleports());
+        mail.deliverControl(connection->control());
         mail.deliverVehicleTeleports(connection->takeVehicleTeleports());
         mail.deliverVehicleRepairs(connection->takeVehicleRepairs());
         mail.deliverVehicleDamage(connection->takeVehicleDamage());

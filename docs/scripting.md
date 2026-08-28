@@ -571,6 +571,14 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `resourceStart`, `resourceStop` | И `anyResourceStart` / `anyResourceStop` соседям, и `serverStarted` всем |
 | `weaponDamage` | Объявляется до применения урона и отменяется возвратом `false`; числом урон не правится — об этом говорится один раз |
 | `consoleCommand` | Сервер читает своё окно своим потоком; имя команды первым доводом, слова следом |
+| `enteredVehicle`, `leftVehicle`, `changedVehicleSeat` | На клиенте, про своего игрока; считаются кадровой сверкой |
+| `connectionComplete`, `disconnect` | На клиенте; прежде не приходили ни разу |
+| `worldObjectStreamIn` / `Out`, `gameEntityCreate` / `Destroy` | На клиенте; кадровая сверка появившихся тел |
+| `alt.getEntitiesInRange` и родня | Плюс `getClosestEntities`, `getEntitiesInDimension`, `getClosestPlayer`, `getClosestVehicle` — перебором по реестрам |
+| `alt.hasResource`, `getAllResources` | Из того же списка, что и `alt.Resource` |
+| `player.frozen`, `player.invincible` | Распоряжение о теле: помнит сервер, накладывает игра хозяина каждым кадром |
+| `alt.stringToSHA256`, `alt.time` / `timeEnd` | В общей части; отпечаток через `crypto` из Node |
+| Снаряжение: `weapons`, `hasWeapon`, `getWeaponAmmo`, `removeWeapon`, `removeAllWeapons` | Список сервера, а не то, что в руках сию секунду |
 | Машина: прочность и признаки | `bodyHealth`, `engineHealth`, `petrolTankHealth`, `velocity`, `engineOn`, `handbrakeActive`, `daylightOn`, `nightlightOn`, `sirenActive`, `hornActive`, `destroyed`, `passengers` |
 | `object.pos`, `object.rot` | Переставляют предмет по-настоящему: сервер двигает его сразу у всех |
 | `vehicle.rot` | Разворачивает машину; поворот переводится из градусов ядра в радианы alt:V |

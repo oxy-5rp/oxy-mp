@@ -1424,6 +1424,15 @@ void Server::reviveDead() {
 
         sendHealth(player, shared::kInvalidPlayerId);
 
+        // И распоряжение о теле — заново. `RESURRECT_PED` сбрасывает признаки
+        // персонажа: заморозка и неуязвимость, поставленные до смерти, у
+        // поднятого пропали бы, а нового распоряжения от сервера не было бы —
+        // прошлое с нынешним совпадает, и «изменением» это не считается.
+        //
+        // Клиент накладывает их каждый кадр и оттого переживёт даже потерю
+        // этого сообщения; посылка нужна тем, кто вошёл заново.
+        sendControl(player);
+
         // Снаряжение возвращается вместе с жизнью: игра при смерти отбирает
         // оружие, и без этого воскресший поднимался бы с пустыми руками.
         sendLoadout(player, true);
@@ -2036,6 +2045,20 @@ void Server::vehicleRemoved(shared::VehicleId id) {
     for (auto& [peer, player] : players_) {
         player.streamed.erase(id);
     }
+}
+
+void Server::controlChanged(const Player& player) {
+    sendControl(player);
+}
+
+void Server::sendControl(const Player& player) {
+    // Только хозяину: тело живёт в его игре, и накладывать признаки будет она.
+    // Остальным они не нужны вовсе — замороженный игрок и так стоит на месте, и
+    // его снимки об этом говорят сами.
+    shared::PlayerControl control;
+    control.flags = player.control;
+
+    sendTo(player.peer, control);
 }
 
 void Server::objectAdded(shared::ObjectId /*id*/) {

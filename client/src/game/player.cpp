@@ -42,6 +42,7 @@ Player::Player(const NativeTable& table) noexcept
       getVelocity_(table.handlerFor(natives::kGetEntityVelocity)),
       getHealth_(table.handlerFor(natives::kGetEntityHealth)),
       freeze_(table.handlerFor(natives::kFreezeEntityPosition)),
+      invincible_(table.handlerFor(natives::kSetEntityInvincible)),
       setCollision_(table.handlerFor(natives::kSetEntityCollision)),
       clearTasks_(table.handlerFor(natives::kClearPedTasksImmediately)),
       selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)),
@@ -172,6 +173,14 @@ void Player::freeze(int ped, bool frozen) const {
     }
 
     invokeNative<void>(freeze_, ped, frozen);
+}
+
+void Player::setInvincible(int ped, bool invincible) const {
+    if (invincible_ == nullptr || ped == 0) {
+        return;
+    }
+
+    invokeNative<void>(invincible_, ped, invincible);
 }
 
 shared::Vec3 Player::cameraPoint(int ped, float range) const {

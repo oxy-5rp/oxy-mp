@@ -318,6 +318,10 @@ public:
     /// Забирает точки, в которые сервер велел перенести игрока.
     [[nodiscard]] std::vector<shared::Vec3> takeTeleports();
 
+    /// Чем сервер распорядился о нашем теле. Не забирается, а спрашивается:
+    /// накладывать это нужно каждый кадр.
+    [[nodiscard]] std::uint8_t control() const noexcept { return control_; }
+
     /// Распоряжения о машинах: переставить и починить.
     ///
     /// Приходят только ведущему: машина живёт в игре у него, и сделать с ней
@@ -516,6 +520,13 @@ private:
     std::vector<shared::ChatLine> chatLines_;
     std::vector<shared::DamageTaken> damage_;
     std::vector<shared::Vec3> teleports_;
+
+    /// Чем сервер распорядился о нашем теле: набор shared::PlayerControlFlag.
+    ///
+    /// Состояние, а не очередь: распоряжение приходит целиком и заменяет
+    /// прежнее. Копи мы их списком, замороженный и тут же отпущенный игрок
+    /// увидел бы оба распоряжения по очереди — и остался бы замороженным.
+    std::uint8_t control_ = 0;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;

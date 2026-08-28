@@ -331,6 +331,46 @@ void putNumber(v8::Local<v8::Context> context, const v8::Local<v8::Object>& targ
                       v8::Number::New(context->GetIsolate(), value));
 }
 
+/// Ставит признак распоряжения о теле: заморозку или неуязвимость.
+///
+/// Шаблоном на оба, потому что отличаются они одним вызовом ядра: подпись,
+/// разбор довода и отказ у них одни и те же, а два почти одинаковых тела — это
+/// два места, где легко разойтись.
+template<bool (Core::*Method)(shared::PlayerId, bool)>
+void playerSetSwitch(v8::Local<v8::Name>, v8::Local<v8::Value> value,
+                     const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = idOf<shared::PlayerId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    // Любое значение годится: у alt:V это признак, и ресурсы пишут туда что
+    // угодно осмысленное — `1`, `!!x`, `state`. Отказывать на «не то» здесь
+    // было бы строже самого alt:V.
+    (resourceOf(isolate).core().*Method)(*id, value->BooleanValue(isolate));
+}
+
+/// Стоит ли у игрока признак распоряжения о теле.
+template<shared::PlayerControlFlag Flag>
+void playerSwitch(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(shared::has(player->control, Flag));
+}
+
 /// Есть ли у игрока такой ствол.
 void playerHasWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -2699,6 +2739,14 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "isLeavingVehicle", playerFlag<shared::PlayerFlag::LeavingVehicle>);
     addGetter(isolate, shape, "isInWater", playerInWater);
     addGetter(isolate, shape, "isSpawned", playerSpawned);
+
+    // Распоряжения о теле. Читаются и ставятся: помнит их сервер, накладывает
+    // игра хозяина, и накладывает каждый кадр.
+    addGetter(isolate, shape, "frozen", playerSwitch<shared::PlayerControlFlag::Frozen>,
+              playerSetSwitch<&Core::setFrozen>);
+    addGetter(isolate, shape, "invincible",
+              playerSwitch<shared::PlayerControlFlag::Invincible>,
+              playerSetSwitch<&Core::setInvincible>);
     addGetter(isolate, shape, "dimension", playerField<&PlayerInfo::dimension>,
               setPlayerDimension);
     addGetter(isolate, shape, "vehicle", playerVehicle);

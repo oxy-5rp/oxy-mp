@@ -11,6 +11,19 @@
 
 globalThis.__oxympAlt.enums = {
 
+    /// Чем отбирают сущности в запросах вида «кто рядом».
+    ///
+    /// Числа — степени двойки, и это не то же самое, что `BaseObjectType`:
+    /// там они по порядку, здесь складываются побитово, чтобы спросить сразу о
+    /// нескольких родах. Спутать их легко, а последствие тихое — запрос вернёт
+    /// не тех, кого просили.
+    BaseObjectFilterType: Object.freeze({
+        Player: 1,
+        Vehicle: 2,
+        Ped: 4,
+        Object: 8,
+    }),
+
     /// BaseObjectType: 31 значений.
     BaseObjectType: Object.freeze({
         Player: 0,

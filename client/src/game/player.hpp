@@ -71,6 +71,13 @@ public:
     /// отпущенный он полетит сквозь неё.
     void freeze(int ped, bool frozen) const;
 
+    /// Закрывает персонажа от урона, который считает игра.
+    ///
+    /// Не бессмертие: здоровье принадлежит серверу, и отнять его распоряжением
+    /// можно и у неуязвимого. Закрывается только то, что игра считает сама, —
+    /// падение, огонь, чужая пуля.
+    void setInvincible(int ped, bool invincible) const;
+
     /// Собирает снимок, который уходит на сервер.
     ///
     /// Одним вызовом, а не пятнадцатью по отдельности, и это не забота об
@@ -168,6 +175,7 @@ private:
     NativeHandler getVelocity_ = nullptr;
     NativeHandler getHealth_ = nullptr;
     NativeHandler freeze_ = nullptr;
+    NativeHandler invincible_ = nullptr;
     NativeHandler setCollision_ = nullptr;
     NativeHandler clearTasks_ = nullptr;
     NativeHandler selectedWeapon_ = nullptr;
