@@ -14,6 +14,9 @@ namespace {
     return script::PlayerInfo{
         .id = player.id,
         .nickname = player.nickname,
+        .hwidHash = player.hwidHash,
+        .socialId = player.socialId,
+        .socialName = player.socialName,
         .position = player.position,
         .heading = player.heading,
         .health = player.health,

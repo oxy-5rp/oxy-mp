@@ -2,6 +2,7 @@
 
 #include "console_sink.hpp"
 #include "discord_presence.hpp"
+#include "machine_id.hpp"
 #include "resource_cache.hpp"
 #include "session_mail.hpp"
 #include "ui_feed.hpp"
@@ -1566,6 +1567,18 @@ void run() {
     // а имя — из настроек страницы.
     Connection::Settings active = settings;
 
+    // Отпечаток машины считается один раз: он не меняется ни между попытками
+    // подключения, ни между серверами, а лезть за ним в реестр на каждой
+    // попытке значило бы делать одну и ту же работу заново.
+    //
+    // Лежит он отдельно от `active`, а не в нём: перед всяким подключением
+    // `active` берётся заново из настроек, и положенное в него до того
+    // затирается. Так уже случилось — сервер получал нулевой отпечаток при
+    // живом и посчитанном.
+    const std::uint64_t fingerprint = machineFingerprint();
+
+    spdlog::debug("machine fingerprint {:#016x}", fingerprint);
+
     // Что меню уже знает о соединении.
     MenuProgress menuProgress;
 
@@ -1665,6 +1678,14 @@ void run() {
             if (worldHold != nullptr) {
                 worldHold->release();
             }
+
+            // Кем мы назовёмся — ставится здесь, перед самым представлением, и
+            // обе половины вместе. Имя Social Club спрашивает игра, и до её
+            // входа в мир она молчит; спрошенное позже, оно опоздало бы —
+            // режим читает `player.socialClubName` в обработчике входа.
+            active.hwidHash = fingerprint;
+            active.socialId = mail.socialId();
+            active.socialName = mail.socialName();
 
             connection = std::make_unique<Connection>(active);
 

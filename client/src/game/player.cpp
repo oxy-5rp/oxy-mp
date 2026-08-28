@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 namespace oxymp::client::game {
 namespace {
@@ -33,6 +34,7 @@ constexpr std::int32_t kActionHold = 200;
 
 Player::Player(const NativeTable& table) noexcept
     : playerId_(table.handlerFor(natives::kPlayerId)),
+      getPlayerName_(table.handlerFor(natives::kGetPlayerName)),
       playerPedId_(table.handlerFor(natives::kPlayerPedId)),
       isPlaying_(table.handlerFor(natives::kIsPlayerPlaying)),
       getCoords_(table.handlerFor(natives::kGetEntityCoords)),
@@ -98,6 +100,34 @@ bool Player::playing() const {
 
     const int player = invokeNative<int>(playerId_);
     return invokeNative<bool>(isPlaying_, player);
+}
+
+std::uint64_t Player::socialId() const {
+    // Ноль, и спрашивать его у игры нельзя.
+    //
+    // `NETWORK_PLAYER_GET_USERID` роняет игру записью по нулевому адресу — не
+    // всегда, а начиная с того мгновения, когда сессия поднята. Проверено живой
+    // игрой: единственной переменой в сборке был этот вызов, и игра слегла
+    // внутри себя, придя туда из нашего кадра.
+    //
+    // Номер Social Club у alt:V приходит и не от игры вовсе: его называет его
+    // собственная служба входа, которой у нас нет. Пока её нет, номер остаётся
+    // неназванным — и наружу выходит пустой строкой, а не нулём: ноль читался
+    // бы как настоящий номер.
+    return 0;
+}
+
+std::string Player::socialName() const {
+    if (getPlayerName_ == nullptr || playerId_ == nullptr) {
+        return {};
+    }
+
+    // Игра отдаёт указатель на свою строку, а не копию: держать его нельзя, и
+    // копия снимается здесь же. Пустой указатель — обычное дело до входа в
+    // сессию, и это не поломка, а «ещё нечего сказать».
+    const char* const name = invokeNative<const char*>(getPlayerName_, id());
+
+    return name == nullptr ? std::string{} : std::string{name};
 }
 
 shared::Vec3 Player::coords(int ped) const {

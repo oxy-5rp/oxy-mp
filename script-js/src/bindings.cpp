@@ -107,6 +107,36 @@ void playerField(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&
     }
 }
 
+/// Число в шестьдесят четыре разряда, отданное строкой.
+///
+/// Строкой, потому что строкой отдаёт его alt:V (`readonly hwidHash: string`), и
+/// потому что иначе его не отдать вовсе: числа в JS хранятся как double, и
+/// отпечаток машины потерял бы младшие разряды — два разных игрока сошлись бы в
+/// одном числе там, где различались бы последними цифрами.
+template<auto Field>
+void playerBigNumber(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    // Ноль означает «неизвестно», и наружу он выходит пустой строкой, а не
+    // нулём: «0» читалось бы как настоящий отпечаток, и режим, запрещающий по
+    // нему вход, запретил бы всем сразу.
+    const auto value = (*player).*Field;
+
+    info.GetReturnValue().Set(
+        toJs(isolate, value == 0 ? std::string{} : std::to_string(value)));
+}
+
 /// Стоит ли у игрока этот признак состояния.
 ///
 /// Отдельным обработчиком на признак, а не одним числом наружу: у alt:V это
@@ -2949,6 +2979,16 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
     addGetter(isolate, shape, "seat", playerSeat);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
+
+    // Кем игрок назвался при входе. Строками, как у alt:V, и по той же
+    // причине: числа в JS теряют младшие разряды шестидесятичетырёхразрядного.
+    //
+    // Проверено это ничем и проверено быть не может: считает отпечаток чужая
+    // машина. Режимы держат на нём свои запреты — так же, как на alt:V, — но
+    // доказательством он не является ни там, ни здесь.
+    addGetter(isolate, shape, "hwidHash", playerBigNumber<&PlayerInfo::hwidHash>);
+    addGetter(isolate, shape, "socialID", playerBigNumber<&PlayerInfo::socialId>);
+    addGetter(isolate, shape, "socialClubName", playerField<&PlayerInfo::socialName>);
 
     // Что у него в руках и куда он целится. Имена — alt:V, поля — те же, что
     // ехали в снимке с самого начала.

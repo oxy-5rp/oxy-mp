@@ -572,6 +572,10 @@ private:
 
     /// Сказали ли уже, что ввод у игры отобран открытым меню.
     bool menuSuppressed_ = false;
+
+    /// Спросили ли мы уже имя Social Club. Спрашивается оно до первого
+    /// непустого ответа: до входа в сессию игра его не отдаёт.
+    bool socialNameKnown_ = false;
 };
 
 } // namespace oxymp::client

@@ -598,6 +598,19 @@ void GameSession::suppressGame() {
     world_.suppressPopulation();
     world_.suppressWanted(player_.id());
 
+    // Имя Social Club спрашивается один раз и только отсюда: натив зовётся из
+    // кадра игры, а нужно оно сетевому потоку — он представляется им серверу.
+    // До входа в сессию игра его не отдаёт, поэтому спрашиваем, пока не
+    // ответит.
+    if (!socialNameKnown_) {
+        if (std::string name = player_.socialName(); !name.empty()) {
+            spdlog::debug("social club name: {}, id {}", name, player_.socialId());
+
+            mail_.postSocialName(std::move(name), player_.socialId());
+            socialNameKnown_ = true;
+        }
+    }
+
     // И вдогонку — уборка того, что просочилось. Запреты останавливают почти
     // всё, но не всё: машины с водителями заводят и сюжетные скрипты игры,
     // которые продолжают работать. По одной за кадр, вокруг игрока: перебирать

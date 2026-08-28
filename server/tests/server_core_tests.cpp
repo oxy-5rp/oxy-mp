@@ -213,7 +213,7 @@ struct Session {
                     checkpoints,  attachments,  world,   config,  events, sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
-        players.add(peer, std::move(nickname), 0);
+        players.add(peer, std::move(nickname), 0, Identity{});
         return *players.findByPeer(peer);
     }
 };

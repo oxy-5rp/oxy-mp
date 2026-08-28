@@ -30,10 +30,33 @@ inline constexpr std::uint16_t kFullArmour = 100;
 ///
 /// Соединения, которые ещё не представились, игроками не считаются и здесь
 /// не хранятся: до рукопожатия о подключившемся неизвестно ничего.
+/// Кем игрок назвался при входе.
+///
+/// Отдельной кучкой, а не тремя доводами: заводится игрок в одном месте, и три
+/// числа подряд в списке доводов путались бы местами при всякой правке.
+struct Identity {
+    std::uint64_t hwidHash = 0;
+    std::uint64_t socialId = 0;
+    std::string socialName;
+};
+
 struct Player {
     shared::PlayerId id = shared::kInvalidPlayerId;
     net::PeerId peer = net::kInvalidPeerId;
     std::string nickname;
+
+    /// Кем игрок назвался при входе: отпечаток машины, номер и имя Social Club.
+    ///
+    /// Названо клиентом и потому не проверено ничем — так же, как у alt:V.
+    /// Режимы держат на этом свои запреты, и знать им нужно то же, что знает
+    /// alt:V, но полагаться на это как на доказательство нельзя: считает
+    /// отпечаток чужая машина.
+    ///
+    /// Ноль и пустая строка означают «клиент не сказал»: у клиента прежней
+    /// сборки этих полей нет вовсе.
+    std::uint64_t hwidHash = 0;
+    std::uint64_t socialId = 0;
+    std::string socialName;
 
     /// Деньги игрока в нашей сессии.
     ///
@@ -188,7 +211,7 @@ public:
     ///
     /// Идентификатор — наименьшее свободное место, а не следующее по счёту:
     /// первый вошедший получает ноль, а место ушедшего достаётся следующему.
-    const Player& add(net::PeerId peer, std::string nickname, std::int64_t money);
+    const Player& add(net::PeerId peer, std::string nickname, std::int64_t money, Identity identity);
 
     /// Удаляет игрока по соединению. Возвращает его данные, если он был.
     std::optional<Player> removeByPeer(net::PeerId peer);

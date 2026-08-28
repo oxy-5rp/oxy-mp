@@ -35,6 +35,9 @@ void ClientHello::write(ByteWriter& writer) const {
     writer.writeU16(protocolVersion);
     writer.writeString(nickname);
     writer.writeString(password);
+    writer.writeU64(hwidHash);
+    writer.writeU64(socialId);
+    writer.writeString(socialName);
 }
 
 ClientHello ClientHello::read(ByteReader& reader) {
@@ -42,6 +45,9 @@ ClientHello ClientHello::read(ByteReader& reader) {
     message.protocolVersion = reader.readU16();
     message.nickname = reader.readString();
     message.password = reader.readString();
+    message.hwidHash = reader.readU64();
+    message.socialId = reader.readU64();
+    message.socialName = reader.readString();
     return message;
 }
 

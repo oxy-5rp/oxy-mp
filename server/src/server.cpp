@@ -550,7 +550,11 @@ void Server::handleHello(net::PeerId peer, const shared::ClientHello& hello) {
         existing.push_back(std::move(joined));
     }
 
-    const Player& player = players_.add(peer, hello.nickname, config_.startingMoney);
+    const Player& player =
+        players_.add(peer, hello.nickname, config_.startingMoney,
+                     Identity{.hwidHash = hello.hwidHash,
+                              .socialId = hello.socialId,
+                              .socialName = hello.socialName});
 
     shared::ServerWelcome welcome;
     welcome.playerId = player.id;

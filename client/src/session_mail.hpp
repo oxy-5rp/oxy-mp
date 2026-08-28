@@ -735,6 +735,29 @@ public:
 
     /// Своя внешность — наружу. Только когда изменилась: она уходит по надёжному
     /// каналу, и слать её каждый кадр значило бы забить его целиком.
+    /// Кем игрок числится у Social Club.
+    ///
+    /// Кладёт это сессия, а забирает сетевой поток — и иначе быть не может:
+    /// имя спрашивается нативом, а нативы зовутся только из кадра игры.
+    /// Спрошенное из своего потока, оно уронило бы игру внутри неё самой:
+    /// строку она выделяет своим потоковым аллокатором, а у чужого потока его
+    /// нет вовсе.
+    void postSocialName(std::string name, std::uint64_t id) {
+        const std::lock_guard guard{mutex_};
+        socialName_ = std::move(name);
+        socialId_ = id;
+    }
+
+    [[nodiscard]] std::string socialName() const {
+        const std::lock_guard guard{mutex_};
+        return socialName_;
+    }
+
+    [[nodiscard]] std::uint64_t socialId() const {
+        const std::lock_guard guard{mutex_};
+        return socialId_;
+    }
+
     void postAppearance(shared::PlayerAppearance appearance) {
         const std::lock_guard guard{mutex_};
         outgoingAppearance_ = std::move(appearance);
@@ -772,6 +795,13 @@ private:
     /// Замки машин, о которых сказал сервер и о которых ещё не рассказали игре.
     std::vector<shared::VehicleControl> vehicleControls_;
     std::vector<shared::VehicleDoors> vehicleDoors_;
+
+    /// Имя Social Club, прочитанное сессией. Пусто — ещё не прочитано или игра
+    /// его не отдала.
+    std::string socialName_;
+
+    /// Номер там же. Ноль — вне сетевой сессии игра его не знает.
+    std::uint64_t socialId_ = 0;
     std::vector<shared::VehicleTeleport> vehicleTeleports_;
     std::vector<shared::VehicleRepair> vehicleRepairs_;
     std::vector<shared::BlipState> blips_;

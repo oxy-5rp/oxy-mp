@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace oxymp::client::game {
 
@@ -35,6 +36,19 @@ public:
     /// Играет ли игрок сейчас. Во время загрузки и кат-сцен — нет, и трогать
     /// его в этот момент бессмысленно: игра вернёт персонажа обратно.
     [[nodiscard]] bool playing() const;
+
+    /// Номер игрока в Social Club (Rockstar ID).
+    ///
+    /// Всегда ноль: спрашивать его у игры нельзя — натив её роняет. Подробности
+    /// в теле метода и в CLAUDE.md.
+    [[nodiscard]] std::uint64_t socialId() const;
+
+    /// Как игрока зовут в Social Club.
+    ///
+    /// Пусто — игра ещё не назвалась: до входа в сессию она отвечает своим
+    /// сюжетным именем либо не отвечает вовсе. Зовётся только из кадра игры,
+    /// как и всё здесь.
+    [[nodiscard]] std::string socialName() const;
 
     [[nodiscard]] shared::Vec3 coords(int ped) const;
 
@@ -166,6 +180,7 @@ private:
 
 
     NativeHandler playerId_ = nullptr;
+    NativeHandler getPlayerName_ = nullptr;
     NativeHandler playerPedId_ = nullptr;
     NativeHandler isPlaying_ = nullptr;
     NativeHandler getCoords_ = nullptr;

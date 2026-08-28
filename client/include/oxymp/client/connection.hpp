@@ -204,6 +204,13 @@ public:
 
         /// Пароль сервера, если игрок его назвал. Пусто — обычное дело.
         std::string password;
+
+        /// Кто это, по мнению машины и Social Club. Уходит в представлении:
+        /// режим читает это в обработчике входа, и вторым сообщением опоздало
+        /// бы. Ноль и пустая строка означают «выяснить не вышло».
+        std::uint64_t hwidHash = 0;
+        std::uint64_t socialId = 0;
+        std::string socialName;
     };
 
     explicit Connection(Settings settings);

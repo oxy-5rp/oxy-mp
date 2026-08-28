@@ -24,6 +24,11 @@ struct PlayerInfo {
     shared::PlayerId id = shared::kInvalidPlayerId;
     std::string nickname;
 
+    /// Кем игрок назвался при входе. Не проверено ничем — см. Player в реестре.
+    std::uint64_t hwidHash = 0;
+    std::uint64_t socialId = 0;
+    std::string socialName;
+
     shared::Vec3 position;
     float heading = 0.0F;
 

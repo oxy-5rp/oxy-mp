@@ -62,6 +62,40 @@ TEST_CASE("ClientHello survives a round trip", "[messages]") {
     CHECK(received->password == "открой");
 }
 
+TEST_CASE("ClientHello carries who the client says it is", "[messages]") {
+    // Отпечаток машины — число в шестьдесят четыре разряда, и старшие его
+    // разряды обязаны доехать: обрезанный до тридцати двух, он сводил бы разные
+    // машины в одну, а на нём режимы держат свои запреты.
+    ClientHello sent;
+    sent.nickname = "oxy";
+    sent.hwidHash = 0xFEDCBA9876543210ULL;
+    sent.socialId = 0x0123456789ABCDEFULL;
+    sent.socialName = "oxy_sc";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->hwidHash == 0xFEDCBA9876543210ULL);
+    CHECK(received->socialId == 0x0123456789ABCDEFULL);
+    CHECK(received->socialName == "oxy_sc");
+}
+
+TEST_CASE("ClientHello from a client that says nothing about itself is still read",
+          "[messages]") {
+    // Ноль и пустая строка означают «клиент не сказал», а не поломку: у клиента
+    // прежней сборки этих полей нет вовсе, и представление обязано разобраться
+    // так же, как разбирается представление без пароля.
+    ClientHello sent;
+    sent.nickname = "oxy";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->hwidHash == 0);
+    CHECK(received->socialId == 0);
+    CHECK(received->socialName.empty());
+}
+
 TEST_CASE("ClientHello without a password survives a round trip", "[messages]") {
     // Сервер без пароля — обычное дело, и пустая строка обязана пережить дорогу
     // так же, как непустая: разбор, споткнувшийся на ней, закрыл бы вход в

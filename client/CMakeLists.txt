@@ -4,6 +4,7 @@
 # консольный бот-клиент. Сеть таким образом отлаживается без запуска игры.
 add_library(oxymp_clientcore STATIC
     src/connection.cpp
+    src/machine_id.cpp
     src/interpolation.cpp
 )
 add_library(oxymp::clientcore ALIAS oxymp_clientcore)

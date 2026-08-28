@@ -1201,6 +1201,9 @@ void Connection::sendHello() {
     hello.protocolVersion = shared::kProtocolVersion;
     hello.nickname = settings_.nickname;
     hello.password = settings_.password;
+    hello.hwidHash = settings_.hwidHash;
+    hello.socialId = settings_.socialId;
+    hello.socialName = settings_.socialName;
 
     const auto packet = shared::encode(hello);
     host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
