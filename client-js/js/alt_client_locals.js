@@ -45,6 +45,16 @@
         return typeof model === 'string' ? shared.hash(model) : Number(model) || 0;
     }
 
+    /// Отпускает заказ на модель.
+    ///
+    /// Звать обязательно, и это не уборка ради уборки: заказ держит модель в
+    /// памяти сам по себе, а заведённую сущность игра держит и без него. Не
+    /// отпустив, мы копим в памяти по модели на каждую заведённую машину,
+    /// куклу и ствол до конца сессии.
+    function releaseModel(хеш) {
+        natives.setModelAsNoLongerNeeded(хеш);
+    }
+
     /// Просит игру подгрузить модель и говорит, дождалась ли.
     ///
     /// Ждать по-настоящему здесь нельзя: конструктор alt:V синхронный, а
@@ -159,6 +169,7 @@
                 throw new Error(`LocalVehicle: игра отказала модели ${хеш}`);
             }
 
+            releaseModel(хеш);
             super(дескриптор);
 
             natives.setEntityAsMissionEntity(дескриптор, true, true);
@@ -222,6 +233,7 @@
                 throw new Error(`LocalPed: игра отказала модели ${хеш}`);
             }
 
+            releaseModel(хеш);
             super(дескриптор);
 
             natives.setEntityAsMissionEntity(дескриптор, true, true);
@@ -251,26 +263,69 @@
     /// У игры это отдельный натив, а не обычный объект: у оружия свои прицепы —
     /// обвесы, магазин, вид от модели, — и обычный `CREATE_OBJECT` их не заводит.
     class WeaponObject extends LocalEntity {
-        constructor(weapon, pos, rot, useStreaming, streamingDistance, ammoCount, model) {
-            const хеш = modelHash(weapon);
+        /// Доводы — те же и в том же порядке, что у alt:V.
+        ///
+        /// Прежде они шли своим порядком: `(weapon, pos, rot, useStreaming,
+        /// streamingDistance, ammoCount, model)`. Разъезжались от четвёртого, и
+        /// разъезд этот молчал: обычная у alt:V запись
+        /// `new alt.WeaponObject(хеш, pos, rot, 0, 30)` давала здесь тридцать
+        /// не патронов, а метров подгрузки, патронов же — сотню по умолчанию.
+        /// Ни исключения, ни строки в журнале: числа законны, только не те.
+        constructor(weaponHash, pos, rot, modelHash_, numAmmo, createDefaultComponents,
+                    scale, useStreaming, streamingDistance) {
+            const хеш = modelHash(weaponHash);
             const точка = new shared.Vector3(pos);
+
+            // Модель ствола нужна игре загруженной, и своей она её не грузит:
+            // `CREATE_WEAPON_OBJECT` без неё молча отвечает нулём. Хеш оружия и
+            // хеш его модели — разные числа, и второй спрашивается у игры по
+            // первому; заказать модель по хешу оружия нельзя, такой модели нет.
+            //
+            // Найдено живой игрой: до этой правки не заводилось ни одного
+            // ствола, и виноватым выглядело оружие, а не незагруженная модель.
+            const модель = modelHash_ === undefined ? natives.getWeapontypeModel(хеш)
+                                                    : modelHash(modelHash_);
+
+            if (модель !== 0 && !demandModel(модель)) {
+                throw new Error(`WeaponObject: модель ствола ${модель} ещё не ` +
+                                'загружена — закажите её через alt.Utils.requestModel ' +
+                                'и дождитесь');
+            }
             const поворот = rot === undefined ? shared.Vector3.zero
                                               : new shared.Vector3(rot).toDegrees();
 
-            // Доводы игры: хеш, патроны, точка, «показать сразу», размер, вид.
+            // Доводы игры: хеш, патроны, точка, «показать в мире», размер, вид.
             // Последний — «какой из вариантов модели»; ноль означает обычный.
             const дескриптор = natives.createWeaponObject(
-                хеш, ammoCount === undefined ? 100 : Number(ammoCount) || 0,
-                точка.x, точка.y, точка.z, true, 1.0, model === undefined ? 0 : model);
+                хеш,
+                numAmmo === undefined ? 100 : Number(numAmmo) || 0,
+                точка.x, точка.y, точка.z,
+                true,
+                scale === undefined ? 1.0 : Number(scale) || 1.0,
+                // Вид модели: ноль означает обычный. Свой хеш подставляется
+                // только названный режимом — подставленный нами вид совпал бы с
+                // обычным и ничего не изменил, а вот отказать игре мог бы.
+                modelHash_ === undefined ? 0 : modelHash(modelHash_));
 
             if (дескриптор === 0) {
                 throw new Error(`WeaponObject: игра отказала оружию ${хеш}`);
             }
 
+            releaseModel(модель);
+
             super(дескриптор);
 
             if (rot !== undefined) {
                 natives.setEntityRotation(дескриптор, поворот.x, поворот.y, поворот.z, 2, true);
+            }
+
+            // Обвесы игра вешает сама, и отговорить её нечем: своего натива на
+            // это нет. Говорим об этом один раз, а не молчим: режим, просивший
+            // голое оружие, получит его с прицелом и будет искать причину не
+            // здесь.
+            if (createDefaultComponents === false) {
+                warnOnce('WeaponObject.createDefaultComponents',
+                         'обвесы по умолчанию отменить нечем — игра вешает их сама');
             }
 
             if (useStreaming === true || streamingDistance !== undefined) {
@@ -282,6 +337,43 @@
         static getByID(id) { return LocalEntity.byId(id, WeaponObject); }
         static get all() { return LocalEntity.allOf(WeaponObject); }
         static get count() { return WeaponObject.all.length; }
+
+        /// Отличает оружие от обычного предмета. У alt:V оба живут в одном
+        /// списке, и разбирают их по этому признаку.
+        get isWeaponObject() { return true; }
+
+        get tintIndex() {
+            return natives.getWeaponObjectTintIndex(this.scriptID);
+        }
+
+        set tintIndex(value) {
+            natives.setWeaponObjectTintIndex(this.scriptID, Number(value) || 0);
+        }
+
+        giveComponent(componentType) {
+            natives.giveWeaponComponentToWeaponObject(this.scriptID,
+                                                     modelHash(componentType));
+        }
+
+        removeComponent(componentType) {
+            natives.removeWeaponComponentFromWeaponObject(this.scriptID,
+                                                         modelHash(componentType));
+        }
+
+        /// Цвет отдельного обвеса. У игры натива на это нет — есть только цвет
+        /// оружия целиком (`tintIndex`), — и отказ здесь громкий: вопрос без
+        /// ответа обязан отказать, а не отдать чужой цвет вместо своего.
+        getComponentTintIndex(_componentId) {
+            throw new Error('WeaponObject.getComponentTintIndex: у игры нет натива '
+                            + 'на цвет отдельного обвеса — есть только tintIndex '
+                            + 'на всё оружие');
+        }
+
+        setComponentTintIndex(_componentId, _tintIndex) {
+            warnOnce('WeaponObject.setComponentTintIndex',
+                     'у игры нет натива на цвет отдельного обвеса — есть только '
+                     + 'tintIndex на всё оружие');
+        }
 
         /// Отдаёт оружие персонажу в руки.
         giveTo(ped) {
