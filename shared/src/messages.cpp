@@ -976,6 +976,46 @@ VehicleTeleport VehicleTeleport::read(ByteReader& reader) {
     return message;
 }
 
+void VehicleHarm::write(ByteWriter& writer) const {
+    writer.writeU16(body);
+    writer.writeU16(engine);
+    writer.writeU16(tank);
+}
+
+VehicleHarm VehicleHarm::read(ByteReader& reader) {
+    VehicleHarm harm;
+    harm.body = reader.readU16();
+    harm.engine = reader.readU16();
+    harm.tank = reader.readU16();
+    return harm;
+}
+
+void VehicleDamageReport::write(ByteWriter& writer) const {
+    writer.writeU32(vehicle);
+    harm.write(writer);
+    writer.writeU32(weapon);
+}
+
+VehicleDamageReport VehicleDamageReport::read(ByteReader& reader) {
+    VehicleDamageReport message;
+    message.vehicle = reader.readU32();
+    message.harm = VehicleHarm::read(reader);
+    message.weapon = reader.readU32();
+    return message;
+}
+
+void VehicleDamaged::write(ByteWriter& writer) const {
+    writer.writeU32(vehicle);
+    harm.write(writer);
+}
+
+VehicleDamaged VehicleDamaged::read(ByteReader& reader) {
+    VehicleDamaged message;
+    message.vehicle = reader.readU32();
+    message.harm = VehicleHarm::read(reader);
+    return message;
+}
+
 void VehicleRepair::write(ByteWriter& writer) const {
     writer.writeU32(id);
 }

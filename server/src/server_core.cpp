@@ -21,6 +21,16 @@ namespace {
         .model = player.appearance ? player.appearance->model : 0,
         .vehicle = seat.vehicle,
         .seat = seat.index,
+
+        // Признаки, прицел и оружие в руках берутся из последнего снимка, а не
+        // ведутся отдельно. Снимок и есть то, что игрок о себе рассказал: вести
+        // рядом с ним вторую запись значило бы завести второй источник правды,
+        // который разойдётся с первым на первом же пропущенном пакете.
+        .flags = player.state.flags,
+        .aimAt = player.state.aimAt,
+        .weapon = player.state.weapon,
+        .ammo = player.state.ammo,
+
         .dimension = player.dimension,
 
         // Адрес и задержка спрашиваются у рассылки: знает их транспорт, а до
@@ -39,13 +49,25 @@ namespace {
 }
 
 [[nodiscard]] script::VehicleInfo describe(shared::VehicleId id,
-                                           const VehicleDirectory::Vehicle& vehicle) {
+                                           const VehicleDirectory::Vehicle& vehicle,
+                                           const VehicleDirectory& vehicles) {
     return script::VehicleInfo{
         .id = id,
         .model = vehicle.state.model,
         .position = vehicle.state.position,
         .rotation = vehicle.state.rotation,
         .owner = vehicle.owner,
+
+        // Скорость, прочность и признаки берутся из последнего снимка. Ехали
+        // они в нём с самого начала — недоставало дороги наружу, ровно как у
+        // признаков состояния игрока.
+        .velocity = vehicle.state.velocity,
+        .bodyHealth = vehicle.state.bodyHealth,
+        .engineHealth = vehicle.state.engineHealth,
+        .tankHealth = vehicle.state.tankHealth,
+        .flags = vehicle.state.flags,
+        .passengers = vehicles.seatedIn(id),
+
         .dimension = vehicle.dimension,
     };
 }
@@ -386,6 +408,39 @@ bool ServerCore::setHealth(shared::PlayerId id, std::uint16_t health, std::uint1
     return true;
 }
 
+std::vector<shared::WeaponSlot> ServerCore::loadout(shared::PlayerId id) const {
+    const Player* const player = players_->findById(id);
+    return player == nullptr ? std::vector<shared::WeaponSlot>{} : player->loadout;
+}
+
+bool ServerCore::removeWeapon(shared::PlayerId id, std::uint32_t weapon) {
+    if (weapon == 0) {
+        return false;
+    }
+
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    if (std::erase_if(player->loadout, [weapon](const shared::WeaponSlot& slot) {
+            return slot.weapon == weapon;
+        }) == 0) {
+        return false;
+    }
+
+    // Насадки и расцветка уходят вместе со стволом сами: лежат они внутри
+    // самого слота (`WeaponSlot::components`), а не отдельным списком. Отдельный
+    // пришлось бы чистить вручную, и забытая насадка досталась бы следующему
+    // такому же стволу — игрок, которому вернули пистолет, получил бы его с
+    // прежним глушителем, о котором никто не просил.
+
+    // Снаряжение уходит игроку заменой, а не добавкой: иначе игра оставила бы у
+    // него отобранный ствол — она о нём не забывала.
+    sink_->loadoutChanged(*player, true);
+    return true;
+}
+
 bool ServerCore::giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) {
     if (weapon == 0) {
         return false;
@@ -579,6 +634,115 @@ bool ServerCore::setProp(shared::PlayerId id, std::uint8_t index, std::int8_t dr
     return true;
 }
 
+bool ServerCore::setHeadBlend(shared::PlayerId id, std::uint8_t shapeFirst,
+                              std::uint8_t shapeSecond, std::uint8_t shapeThird,
+                              std::uint8_t skinFirst, std::uint8_t skinSecond,
+                              std::uint8_t skinThird, float shapeMix, float skinMix,
+                              float thirdMix) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    // Доли обрезаются здесь, а не у клиента. Обрежет их всё равно игра, но
+    // помнит внешность сервер и пересказывает её вошедшим позже: сохрани он
+    // число, которого игра не приняла, — вошедшие увидели бы одно лицо, а
+    // хозяин у себя другое.
+    const auto clamp = [](float value) {
+        return value < 0.0F ? 0.0F : (value > 1.0F ? 1.0F : value);
+    };
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    look.shapeFirst = shapeFirst;
+    look.shapeSecond = shapeSecond;
+    look.shapeThird = shapeThird;
+    look.skinFirst = skinFirst;
+    look.skinSecond = skinSecond;
+    look.skinThird = skinThird;
+    look.shapeMix = clamp(shapeMix);
+    look.skinMix = clamp(skinMix);
+    look.thirdMix = clamp(thirdMix);
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setHeadOverlay(shared::PlayerId id, std::uint8_t slot, std::uint8_t index,
+                                float opacity) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || slot >= shared::kPedOverlayCount) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    // Цвет слоя здесь не трогается: ставят его отдельно, и обнулять его при
+    // всякой смене самого слоя значило бы стирать сделанное соседним вызовом.
+    look.overlays[slot].index = index;
+    look.overlays[slot].opacity = opacity < 0.0F ? 0.0F : (opacity > 1.0F ? 1.0F : opacity);
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setHeadOverlayColour(shared::PlayerId id, std::uint8_t slot,
+                                      std::uint8_t colourType, std::uint8_t colour,
+                                      std::uint8_t secondColour) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr || slot >= shared::kPedOverlayCount) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    look.overlays[slot].colourType = colourType;
+    look.overlays[slot].colour = colour;
+    look.overlays[slot].secondColour = secondColour;
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::PlayerAppearance& look = appearanceOf(*player);
+
+    look.hairColour = colour;
+    look.hairHighlight = highlight;
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+bool ServerCore::setEyeColour(shared::PlayerId id, std::uint8_t colour) {
+    Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    appearanceOf(*player).eyeColour = colour;
+
+    sink_->appearanceChanged(*player);
+    return true;
+}
+
+std::optional<shared::PlayerAppearance> ServerCore::appearance(shared::PlayerId id) const {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return std::nullopt;
+    }
+
+    // Пусто, пока игрок не объявил внешности сам и скрипт её не назначил.
+    // Выдумывать её сервер не вправе: отданная по умолчанию, она разошлась бы с
+    // тем, что игрок видит у себя, — а спросивший принял бы её за правду.
+    return player->appearance;
+}
+
 bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) {
     const Player* const player = players_->findById(id);
     if (player == nullptr) {
@@ -723,7 +887,7 @@ std::vector<script::VehicleInfo> ServerCore::vehicles() const {
     everything.reserve(vehicles_->size());
 
     for (const auto& [id, vehicle] : vehicles_->all()) {
-        everything.push_back(describe(id, vehicle));
+        everything.push_back(describe(id, vehicle, *vehicles_));
     }
 
     return everything;
@@ -731,7 +895,7 @@ std::vector<script::VehicleInfo> ServerCore::vehicles() const {
 
 std::optional<script::VehicleInfo> ServerCore::vehicle(shared::VehicleId id) const {
     const VehicleDirectory::Vehicle* found = vehicles_->find(id);
-    return found == nullptr ? std::nullopt : std::optional{describe(id, *found)};
+    return found == nullptr ? std::nullopt : std::optional{describe(id, *found, *vehicles_)};
 }
 
 shared::VehicleId ServerCore::createVehicle(std::uint32_t model, const shared::Vec3& position,
@@ -942,6 +1106,16 @@ shared::ObjectId ServerCore::createObject(std::uint32_t model, const shared::Vec
 
     sink_->objectAdded(id);
     return id;
+}
+
+bool ServerCore::moveObject(shared::ObjectId id, const shared::Vec3& position,
+                            const shared::Vec3& rotation) {
+    if (!objects_->move(id, position, rotation)) {
+        return false;
+    }
+
+    sink_->objectMoved(id);
+    return true;
 }
 
 bool ServerCore::setObjectDimension(shared::ObjectId id, std::int32_t dimension) {

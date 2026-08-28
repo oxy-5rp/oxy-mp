@@ -2,6 +2,7 @@
 
 #include "attachment_directory.hpp"
 #include "config.hpp"
+#include "console.hpp"
 #include "http_server.hpp"
 #include "player_registry.hpp"
 #include "resource_catalog.hpp"
@@ -151,6 +152,7 @@ private:
     void vehicleAppearanceChanged(shared::VehicleId id) override;
     void attachmentChanged(AttachmentDirectory::Ref entity) override;
     void objectAdded(shared::ObjectId id) override;
+    void objectMoved(shared::ObjectId id) override;
     void objectRemoved(shared::ObjectId id) override;
     void pedChanged(shared::PedId id) override;
     void pedRemoved(shared::PedId id) override;
@@ -212,10 +214,41 @@ private:
     /// на это влияет, было бы обманом.
     bool tellScripts(script::EventKind kind, shared::PlayerId about, std::string text = {});
 
+    /// Объявляет скриптам всё, что видно из разницы двух снимков игрока.
+    ///
+    /// Посадка в машину, высадка, пересадка и смена оружия в руках — четыре
+    /// события alt:V, которых у нас не было вовсе. Отдельного сообщения ни у
+    /// одного из них нет и быть не может: клиент рассказывает о себе снимком, и
+    /// всё это в нём уже есть — недоставало сравнения.
+    ///
+    /// Сравнение живёт здесь, а не в скрипте, потому что в скрипте оно
+    /// невозможно: снимки до него не доходят, а состояние, спрошенное в такте,
+    /// он застаёт уже переменившимся.
+    ///
+    /// Зовётся до того, как свежий снимок ляжет в реестр: обработчику нужен
+    /// игрок таким, каким он стал, — то есть после `player.state = state`, — но
+    /// разница считается по тому, что было. Отсюда и два довода.
+    void tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
+                                 const shared::PlayerState& after);
+
     /// Сколько игрок лежит мёртвым, прежде чем сервер поднимет его.
     static constexpr auto kRespawnDelay = std::chrono::seconds{5};
+    /// Разбирает набранное в окне сервера и объявляет это скриптам.
+    ///
+    /// Раз в такт, а не по строке: строки приходят чужим потоком, и сервер
+    /// забирает накопленное там же, где делает всё остальное.
+    void runConsole();
+
     void handleChatSay(net::PeerId peer, const shared::ChatSay& say);
     void handleDamageReport(net::PeerId peer, const shared::DamageReport& report);
+
+    /// Разбирает свидетельство о попадании по чужой машине.
+    ///
+    /// Сервер здесь не судья, а посредник: прочность машины живёт в игре у её
+    /// ведущего — физику сервер не считает, — и отнять её может только он. Дело
+    /// сервера — проверить, что попадание правдоподобно, и передать его тому,
+    /// кто машину ведёт.
+    void handleVehicleDamage(net::PeerId peer, const shared::VehicleDamageReport& report);
 
     /// Рассылает строку чата всем и записывает её в журнал сервера.
     void announce(shared::ChatKind kind, shared::PlayerId author, std::string nickname,
@@ -386,6 +419,12 @@ private:
     /// Со значением по умолчанию, потому что сервер собирается пустым, а
     /// настройки прикладываются к нему в start. Заменяется там же целиком.
     WorldClock world_{"EXTRASUNNY", 12, 0};
+
+    /// Окно сервера: то, что в нём набирает хозяин.
+    ///
+    /// Читается своим потоком и забирается на такте. Сам сервер набранным не
+    /// распоряжается — строка уходит скриптам событием `consoleCommand`.
+    Console console_;
 
     /// Кто слушает происходящее в сессии.
     ///

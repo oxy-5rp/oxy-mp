@@ -69,6 +69,15 @@ set(server_obsolete_files
     concrt140.dll
 )
 
+# То же, но в modules: клиентская скриптовая машина, которую раскладка клала
+# сюда, пока копировала каталог modules целиком. Серверу она не нужна ни для
+# чего — см. client_only_modules ниже, — а оставленная, живёт в чужой раздаче
+# вечно и заставляет хозяина гадать, зачем серверу файл со словом client в
+# имени.
+set(server_obsolete_modules
+    js/oxymp-client-js.dll
+)
+
 foreach(name IN LISTS client_files)
     if(EXISTS "${DIST_BIN}/${name}")
         file(COPY "${DIST_BIN}/${name}" DESTINATION "${client}")
@@ -176,10 +185,29 @@ endforeach()
 # и по которому его кладёт сборка рядом с собранным сервером. Три места, и
 # разъехаться им нельзя: разъехавшись, они дают сервер, который собрался,
 # разложился и не нашёл движка.
+#
+# Клиентская скриптовая машина при этом отсеивается. Каталог modules у сборки
+# один на двоих — движок в нём общий, — но серверу она не нужна ни для чего:
+# серверная машина слинкована в сам oxymp-server.exe, а эта грузится клиентом
+# внутри процесса игры (client/src/script_host.cpp). Попав в раздачу сервера,
+# она делает ровно одно: заставляет хозяина гадать, зачем серверу файл со словом
+# client в имени.
+set(client_only_modules oxymp-client-js.dll)
+
+foreach(relative IN LISTS server_obsolete_modules)
+    file(REMOVE "${server}/modules/${relative}")
+endforeach()
+
 if(EXISTS "${DIST_BIN}/modules")
     file(GLOB_RECURSE module_files RELATIVE "${DIST_BIN}/modules" "${DIST_BIN}/modules/*")
 
     foreach(relative IN LISTS module_files)
+        get_filename_component(name "${relative}" NAME)
+
+        if(name IN_LIST client_only_modules)
+            continue()
+        endif()
+
         get_filename_component(subdirectory "${relative}" DIRECTORY)
 
         file(COPY "${DIST_BIN}/modules/${relative}"

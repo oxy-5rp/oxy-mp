@@ -19,6 +19,18 @@ shared::ObjectId ObjectDirectory::add(std::uint32_t model, const shared::Vec3& p
     return id;
 }
 
+bool ObjectDirectory::move(shared::ObjectId id, const shared::Vec3& position,
+                           const shared::Vec3& rotation) {
+    const auto found = objects_.find(id);
+    if (found == objects_.end()) {
+        return false;
+    }
+
+    found->second.position = position;
+    found->second.rotation = rotation;
+    return true;
+}
+
 bool ObjectDirectory::setDimension(shared::ObjectId id, std::int32_t dimension) {
     const auto found = objects_.find(id);
     if (found == objects_.end()) {

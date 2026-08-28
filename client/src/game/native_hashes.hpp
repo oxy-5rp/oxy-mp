@@ -54,6 +54,9 @@ inline constexpr std::uint64_t kIsVehicleAttachedToTrailer = 0XA6D8AF5A058A75F0;
 /// EXPLODE_VEHICLE, канонический хеш 0XBA71116ADF5B514C.
 inline constexpr std::uint64_t kExplodeVehicle = 0XAE89444B15234CCE;
 
+/// SET_ENTITY_PROOFS, канонический хеш 0XFAEE099C6F890BB8.
+inline constexpr std::uint64_t kSetEntityProofs = 0XD0F1DB0E50B367AD;
+
 /// IS_ENTITY_DEAD, канонический хеш 0X5F9532F3B5CC2551.
 inline constexpr std::uint64_t kIsEntityDead = 0X1C2F771CDC87A3A5;
 
@@ -77,6 +80,9 @@ inline constexpr std::uint64_t kTaskStayInCover = 0X115CA3B4F950226D;
 
 /// TASK_DRIVE_BY, канонический хеш 0X2F8AF0E82773A171.
 inline constexpr std::uint64_t kTaskDriveBy = 0XD83588CA24829967;
+
+/// TASK_VEHICLE_AIM_AT_COORD, канонический хеш 0X447C1E9EF844BC0F.
+inline constexpr std::uint64_t kTaskVehicleAimAtCoord = 0XE61AF8D27706A774;
 
 /// FORCE_PED_MOTION_STATE, канонический хеш 0XF28965D04F570DCA.
 inline constexpr std::uint64_t kForcePedMotionState = 0X717804C8C8DA67BF;
@@ -584,6 +590,9 @@ inline constexpr std::uint64_t kIsPedShooting = 0X65F146FF416F109F;
 
 /// IS_PLAYER_FREE_AIMING, канонический хеш 0X2E397FD2ECD37C87.
 inline constexpr std::uint64_t kIsPlayerFreeAiming = 0X1C751EF63BF4D501;
+
+/// IS_PLAYER_TARGETTING_ANYTHING, канонический хеш 0X78CFE51896B6B8A4.
+inline constexpr std::uint64_t kIsPlayerTargettingAnything = 0X4F035D45FC2856F8;
 
 /// GET_SELECTED_PED_WEAPON, канонический хеш 0X0A6DB4965674D243.
 inline constexpr std::uint64_t kGetSelectedPedWeapon = 0XB0D77D90171EC35F;

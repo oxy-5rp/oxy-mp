@@ -770,6 +770,23 @@ TEST_CASE("PlayerState survives a round trip", "[messages]") {
     CHECK(received->actionSequence == 42);
 }
 
+TEST_CASE("a player climbing out of a vehicle says so apart from sitting in it", "[messages]") {
+    // Вход и выход — два разных признака, и ни один не выводится из InVehicle.
+    // Пока выход не объявлялся отдельно, о нём узнавали по тому, что игрок
+    // перестал числиться сидящим, — то есть уже после того, как он встал на
+    // асфальт, и полутора секунд выхода со стороны не было видно.
+    PlayerState sent;
+    sent.playerId = 5;
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::LeavingVehicle);
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, PlayerFlag::LeavingVehicle));
+    CHECK_FALSE(has(received->flags, PlayerFlag::InVehicle));
+    CHECK_FALSE(has(received->flags, PlayerFlag::EnteringVehicle));
+}
+
 TEST_CASE("PlayerLoadout survives a round trip", "[messages]") {
     PlayerLoadout sent;
     sent.replace = true;
@@ -1472,6 +1489,64 @@ TEST_CASE("a vehicle command is recognised by its first byte", "[messages]") {
 
     CHECK(peekMessageId(teleport) == MessageId::VehicleTeleport);
     CHECK(peekMessageId(repair) == MessageId::VehicleRepair);
+}
+
+TEST_CASE("a hit on a vehicle survives the round trip", "[messages]") {
+    VehicleDamageReport sent;
+    sent.vehicle = 0x00040009;
+    sent.harm.body = 120;
+    sent.harm.engine = 45;
+    sent.harm.tank = 7;
+    sent.weapon = 0x1B06D571;
+
+    const auto got = roundTrip(sent);
+
+    REQUIRE(got);
+    CHECK(got->vehicle == sent.vehicle);
+    CHECK(got->harm.body == 120);
+    CHECK(got->harm.engine == 45);
+    CHECK(got->harm.tank == 7);
+    CHECK(got->weapon == 0x1B06D571);
+}
+
+TEST_CASE("a hit passed on to the vehicle owner survives the round trip", "[messages]") {
+    VehicleDamaged sent;
+    sent.vehicle = 0x00040009;
+    sent.harm.body = 300;
+    sent.harm.engine = 0;
+    sent.harm.tank = 65535;
+
+    const auto got = roundTrip(sent);
+
+    REQUIRE(got);
+    CHECK(got->vehicle == sent.vehicle);
+    CHECK(got->harm.body == 300);
+    CHECK(got->harm.engine == 0);
+    CHECK(got->harm.tank == 65535);
+}
+
+TEST_CASE("three kinds of vehicle harm are told apart, not summed", "[messages]") {
+    // Кузов, двигатель и бак ведут себя по-разному: пробитый бак течёт и
+    // загорается, разбитый двигатель дымит и глохнет, а кузов не делает ни того,
+    // ни другого. Сумма не сказала бы, что именно случилось, — и потому по сети
+    // едут три числа, а не одно.
+    VehicleHarm engineOnly;
+    engineOnly.engine = 200;
+
+    VehicleHarm tankOnly;
+    tankOnly.tank = 200;
+
+    CHECK(engineOnly.any());
+    CHECK(tankOnly.any());
+    CHECK_FALSE(VehicleHarm{}.any());
+
+    VehicleDamaged first;
+    first.harm = engineOnly;
+
+    VehicleDamaged second;
+    second.harm = tankOnly;
+
+    CHECK(encode(first) != encode(second));
 }
 
 TEST_CASE("a blip survives the round trip", "[messages]") {

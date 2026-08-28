@@ -113,6 +113,12 @@ public:
         /// Не запускать игру, а внедриться в уже запущенную.
         bool attach = false;
 
+        /// Закрывать ли Rockstar Games Launcher, когда клиент оказался в игре.
+        ///
+        /// Настройка `closeRockstarLauncher` из `oxymp.toml`, по умолчанию да.
+        /// Подробности — у самой closeRockstarLauncher.
+        bool closeRockstarLauncher = true;
+
         /// Запускать закреплённую копию игры, а не установленную.
         ///
         /// Копия делается один раз и переживает обновления Rockstar — см.

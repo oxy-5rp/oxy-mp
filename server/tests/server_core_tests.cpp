@@ -89,6 +89,10 @@ public:
         sent.push_back(std::format("object+ {}", id));
     }
 
+    void objectMoved(shared::ObjectId id) override {
+        sent.push_back(std::format("object= {}", id));
+    }
+
     void objectRemoved(shared::ObjectId id) override {
         sent.push_back(std::format("object- {}", id));
     }
@@ -970,6 +974,165 @@ script::EntityRef entity(shared::EntityKind kind, std::uint32_t id) {
 }
 
 } // namespace
+
+TEST_CASE("one weapon can be taken away without touching the rest",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.giveWeapon(player.id, 0xAABB, 50));
+    REQUIRE(session.core.giveWeapon(player.id, 0xCCDD, 120));
+
+    REQUIRE(session.core.removeWeapon(player.id, 0xAABB));
+
+    const auto left = session.core.loadout(player.id);
+
+    REQUIRE(left.size() == 1);
+    CHECK(left.front().weapon == 0xCCDD);
+    CHECK(left.front().ammo == 120);
+
+    // Уходит оно заменой, а не добавкой: иначе игра оставила бы отобранный ствол
+    // у игрока — она о нём не забывала.
+    CHECK(std::ranges::count(session.sink.sent,
+                             std::format("loadout {} 1 replace", player.id)) == 1);
+}
+
+TEST_CASE("taking away a weapon nobody had is refused", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Молчаливое согласие здесь было бы ложью: просивший решил бы, что ствол
+    // отобран, — а его и не было.
+    CHECK_FALSE(session.core.removeWeapon(player.id, 0xAABB));
+    CHECK_FALSE(session.core.removeWeapon(player.id, 0));
+    CHECK_FALSE(session.core.removeWeapon(99, 0xAABB));
+}
+
+TEST_CASE("a face assembled by the server comes back the same", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setHeadBlend(player.id, 21, 33, 0, 14, 27, 0, 0.75F, 0.25F, 0.0F));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    // Порядок доводов здесь перепутать легче всего: шесть чисел подряд, и все
+    // законные. Перепутанные, они собрали бы другое лицо без единой жалобы.
+    CHECK(look->shapeFirst == 21);
+    CHECK(look->shapeSecond == 33);
+    CHECK(look->skinFirst == 14);
+    CHECK(look->skinSecond == 27);
+    CHECK(look->shapeMix == 0.75F);
+    CHECK(look->skinMix == 0.25F);
+}
+
+TEST_CASE("blend shares outside their range are cut to it", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setHeadBlend(player.id, 0, 0, 0, 0, 0, 0, 3.5F, -1.0F, 0.5F));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    // Обрезаются здесь, а не у клиента, и это существенно: внешность сервер
+    // помнит и пересказывает вошедшим позже. Сохрани он долю, которой игра не
+    // приняла, — вошедшие увидели бы одно лицо, а хозяин у себя другое.
+    CHECK(look->shapeMix == 1.0F);
+    CHECK(look->skinMix == 0.0F);
+    CHECK(look->thirdMix == 0.5F);
+}
+
+TEST_CASE("a layer of the face keeps its colour when the layer changes",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setHeadOverlay(player.id, 1, 5, 0.8F));
+    REQUIRE(session.core.setHeadOverlayColour(player.id, 1, 1, 4, 4));
+
+    // Смена самого слоя цвет не трогает: ставят их разными вызовами, и стирать
+    // сделанное соседним было бы неожиданностью.
+    REQUIRE(session.core.setHeadOverlay(player.id, 1, 6, 0.5F));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    CHECK(look->overlays[1].index == 6);
+    CHECK(look->overlays[1].opacity == 0.5F);
+    CHECK(look->overlays[1].colourType == 1);
+    CHECK(look->overlays[1].colour == 4);
+}
+
+TEST_CASE("a layer outside the thirteen is refused", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Молча проглоченный, такой слой выглядел бы поставленным и невидимым — то
+    // же самое правило, что и у слотов одежды.
+    CHECK_FALSE(session.core.setHeadOverlay(player.id, 99, 1, 1.0F));
+    CHECK_FALSE(session.core.setHeadOverlayColour(player.id, 99, 1, 1, 1));
+}
+
+TEST_CASE("hair and eye colours are told and remembered", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    REQUIRE(session.core.setHairColour(player.id, 12, 3));
+    REQUIRE(session.core.setEyeColour(player.id, 7));
+
+    const auto look = session.core.appearance(player.id);
+    REQUIRE(look.has_value());
+
+    CHECK(look->hairColour == 12);
+    CHECK(look->hairHighlight == 3);
+    CHECK(look->eyeColour == 7);
+}
+
+TEST_CASE("a player who never said how they look has no appearance",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+
+    // Пустота, а не описание из нулей. Нули означали бы лысого голого человека
+    // с белыми глазами, и спросивший принял бы это за правду; сервер же
+    // внешности не выдумывает.
+    CHECK_FALSE(session.core.appearance(player.id).has_value());
+    CHECK_FALSE(session.core.appearance(99).has_value());
+}
+
+TEST_CASE("an object that moved says so", "[server][script]") {
+    Session session;
+    session.join(1, "игрок");
+
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    const shared::Vec3 where{.x = 10.0F, .y = -20.0F, .z = 30.0F};
+    const shared::Vec3 turn{.x = 0.0F, .y = 0.0F, .z = 90.0F};
+
+    REQUIRE(session.core.moveObject(box, where, turn));
+
+    // Повод объявляется, и объявляется отдельно от появления: у тех, кто предмет
+    // уже видит, раздача его больше не тронет, и не скажи им никто — предмет
+    // остался бы стоять на старом месте до конца сессии.
+    CHECK(std::ranges::count(session.sink.sent, std::format("object= {}", box)) == 1);
+
+    const auto moved = session.core.object(box);
+    REQUIRE(moved.has_value());
+
+    CHECK(moved->position == where);
+    CHECK(moved->rotation == turn);
+}
+
+TEST_CASE("moving an object that is gone is refused", "[server][script]") {
+    Session session;
+
+    // Молчаливое согласие здесь было бы ложью: просивший решил бы, что предмет
+    // стоит там, куда он его послал.
+    CHECK_FALSE(session.core.moveObject(99, shared::Vec3{}, shared::Vec3{}));
+}
 
 TEST_CASE("an object hangs on a player and everyone hears about it", "[server][script]") {
     Session session;

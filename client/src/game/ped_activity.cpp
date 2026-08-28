@@ -34,6 +34,7 @@ constexpr int kStealthOn = 1;
 PedActivity::PedActivity(const NativeTable& table) noexcept
     : isShooting_(table.handlerFor(natives::kIsPedShooting)),
       isAiming_(table.handlerFor(natives::kIsPlayerFreeAiming)),
+      isTargetting_(table.handlerFor(natives::kIsPlayerTargettingAnything)),
       isRagdoll_(table.handlerFor(natives::kIsPedRagdoll)),
       isJumping_(table.handlerFor(natives::kIsPedJumping)),
       stealthMovement_(table.handlerFor(natives::kGetPedStealthMovement)),
@@ -50,6 +51,7 @@ PedActivity::PedActivity(const NativeTable& table) noexcept
       isDrivingBy_(table.handlerFor(natives::kIsPedDoingDriveby)),
       isInMelee_(table.handlerFor(natives::kIsPedInMeleeCombat)),
       gettingIntoVehicle_(table.handlerFor(natives::kIsPedGettingIntoAVehicle)),
+      inAnyVehicle_(table.handlerFor(natives::kIsPedInAnyVehicle)),
       vehicleEntering_(table.handlerFor(natives::kGetVehiclePedIsTryingToEnter)),
       seatEntering_(table.handlerFor(natives::kGetSeatPedIsTryingToEnter)),
       getArmour_(table.handlerFor(natives::kGetPedArmour)),
@@ -79,8 +81,14 @@ std::uint32_t PedActivity::flags(int player, int ped, bool dead) const {
 
     set(shared::PlayerFlag::Dead, dead);
 
+    // Прицел спрашивается двумя вопросами, а не одним. Свободный прицел —
+    // это мышь и перекрестье; но у игры есть и второй способ, помощь в
+    // наведении, и человек, играющий с ней, свободно не целится ни разу. Со
+    // стороны это выглядело так, что часть игроков вообще не поднимает оружие,
+    // — и объяснить, почему одни поднимают, а другие нет, было нечем.
     set(shared::PlayerFlag::Aiming,
-        isAiming_ != nullptr && invokeNative<bool>(isAiming_, player));
+        (isAiming_ != nullptr && invokeNative<bool>(isAiming_, player)) ||
+            (isTargetting_ != nullptr && invokeNative<bool>(isTargetting_, player)));
     set(shared::PlayerFlag::Shooting, ask(isShooting_));
     set(shared::PlayerFlag::Ragdoll, ask(isRagdoll_));
     set(shared::PlayerFlag::Jumping, ask(isJumping_));
@@ -108,6 +116,27 @@ std::uint32_t PedActivity::flags(int player, int ped, bool dead) const {
     if (parachuteState_ != nullptr) {
         set(shared::PlayerFlag::Parachuting,
             invokeNative<int>(parachuteState_, ped) >= kParachuteDeploying);
+    }
+
+    // Выход из машины игра отдельным вопросом не отвечает — его приходится
+    // выводить из трёх её ответов, и вывод здесь точный, а не приблизительный.
+    //
+    // IS_PED_IN_ANY_VEHICLE с признаком «считать и залезающего» стоит всё время,
+    // пока персонаж имеет к машине отношение: от открытой двери при входе до
+    // последнего кадра выхода. Без этого признака он стоит только тогда, когда
+    // персонаж сидит по-настоящему. Значит «имеет отношение, но не сидит» — это
+    // ровно вход или выход, а вход игра называет сама.
+    //
+    // Считать выход по пропаже InVehicle нельзя, и это здесь уже было: к тому
+    // мгновению хозяин уже стоит на асфальте, и получателю остаётся выдернуть
+    // куклу из машины рывком. Секунда с лишним, за которую человек открывает
+    // дверь и вылезает, не была видна со стороны никогда.
+    if (inAnyVehicle_ != nullptr && gettingIntoVehicle_ != nullptr) {
+        const bool attached = invokeNative<bool>(inAnyVehicle_, ped, true);
+        const bool seated = invokeNative<bool>(inAnyVehicle_, ped, false);
+        const bool gettingIn = invokeNative<bool>(gettingIntoVehicle_, ped);
+
+        set(shared::PlayerFlag::LeavingVehicle, attached && !seated && !gettingIn);
     }
 
     return flags;

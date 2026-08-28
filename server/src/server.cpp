@@ -182,6 +182,22 @@ std::unique_ptr<Server> Server::start(const Config& config, std::string& error) 
     // раньше первого события, а первым будет вход игрока.
     server->startResources();
 
+    // Ресурсы подняты все до одного — теперь можно сказать им об этом.
+    //
+    // Здесь, а не внутри startResources, и разница существенна: событие
+    // означает «поднялись и соседи», и объявленное в середине обхода оно
+    // застало бы половину ресурсов ещё не поднятыми. Ресурс, спросивший о
+    // соседе из такого обработчика, получил бы пустоту — и виноватого искал бы
+    // в себе.
+    //
+    // До первого подключения, как и у alt:V: подписка ресурса на вход игрока
+    // должна стоять раньше первого входа.
+    {
+        script::Event started;
+        started.kind = script::EventKind::ServerStarted;
+        (void)server->events_.dispatch(started);
+    }
+
     if (!server->resources_.empty()) {
         std::string httpError;
 
@@ -282,6 +298,7 @@ void Server::run(const std::atomic<bool>& stopRequested) {
         reviveDead();
 
         reportTraffic();
+        runConsole();
 
         // Скрипты — последними в такте, когда сессия уже приведена в порядок.
         // Обработчик увидит мир таким, каким его увидят клиенты, а не застанет
@@ -429,6 +446,12 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::VehicleDamageReport:
+        if (const auto hit = shared::decode<shared::VehicleDamageReport>(packet)) {
+            handleVehicleDamage(peer, *hit);
+        }
+        return;
+
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -452,6 +475,7 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
     case shared::MessageId::ServerEvent:
     case shared::MessageId::VehicleStates:
     case shared::MessageId::Explosion:
+    case shared::MessageId::VehicleDamaged:
         spdlog::warn("connection {} sent a server-only message", peer);
         return;
     }
@@ -856,12 +880,49 @@ void Server::handlePlayerState(net::PeerId peer, shared::PlayerState state) {
         player->stateFresh = true;
     }
 
+    // Разница считается по прошлому снимку, а объявляется по свежему: пока
+    // обработчик работает, игрок в реестре обязан быть уже новым — режим первым
+    // делом спрашивает у него `seat` и `vehicle`. Отсюда порядок: запомнить
+    // прошлое, положить свежее, объявить.
+    const shared::PlayerState before = player->state;
     player->state = state;
+
+    tellScriptsAboutChanges(*player, before, state);
 
     // Оружие в руках сменилось — рассказать остальным, как оно выглядит.
     // Сравнение с прошлым объявлением живёт внутри: снимок приходит каждый
     // такт, а насадки меняются раз в несколько минут.
     announceWeapon(*player);
+}
+
+void Server::runConsole() {
+    for (const std::string& line : console_.take()) {
+        std::vector<std::string> parts = splitCommand(line);
+
+        if (parts.empty()) {
+            continue;
+        }
+
+        script::Event typed;
+        typed.kind = script::EventKind::ConsoleCommand;
+        typed.name = parts.front();
+        typed.arguments.assign(parts.begin() + 1, parts.end());
+
+        // Строка объявляется скриптам и больше ничего с ней не делается: своих
+        // команд у голого сервера нет и не будет — как нет их и у клиента.
+        //
+        // Слушателя нет вовсе — говорим об этом хозяину. Иначе набранное молча
+        // пропадает, и он решит, что сервер не отвечает. Дальше этого проверка
+        // не идёт: подписан ли кто-нибудь именно на consoleCommand, отсюда не
+        // видно — список подписок ведёт каждый ресурс у себя.
+        if (events_.size() == 0) {
+            spdlog::info("Command \"{}\" went nowhere: nothing is listening for commands",
+                         typed.name);
+            continue;
+        }
+
+        (void)events_.dispatch(typed);
+    }
 }
 
 void Server::reportTraffic() {
@@ -1528,6 +1589,70 @@ void Server::handleChatSay(net::PeerId peer, const shared::ChatSay& say) {
     announce(shared::ChatKind::Say, author, std::move(nickname), std::move(text));
 }
 
+void Server::handleVehicleDamage(net::PeerId peer, const shared::VehicleDamageReport& report) {
+    const Player* attacker = players_.findByPeer(peer);
+    if (attacker == nullptr || !report.harm.any()) {
+        return;
+    }
+
+    const VehicleDirectory::Vehicle* vehicle = vehicles_.find(report.vehicle);
+    if (vehicle == nullptr) {
+        return;
+    }
+
+    // Ведущего нет — машину никто не считает, и отнять у неё прочность некому.
+    // Это не потеря: стоящая без присмотра машина никому и не мешает, а первый
+    // же подошедший станет её ведущим и получит следующее попадание.
+    if (vehicle->owner == shared::kInvalidPlayerId) {
+        return;
+    }
+
+    // Стрелявший не может быть ведущим той же машины: свою машину он бьёт у
+    // себя по-настоящему и рассказывает о новой прочности снимком. Пришедшее
+    // сюда означало бы, что прочность отнимут дважды.
+    if (vehicle->owner == attacker->id) {
+        return;
+    }
+
+    // Попадание с другого конца карты не бывает. Проверка та же, что и у людей,
+    // и такая же грубая: точную линию выстрела сервер не построит — мира у него
+    // нет, — а отличить перестрелку от доклада за километр может.
+    const float reach = config_.streamDistance * config_.streamDistance;
+    if (shared::distanceSquared(attacker->position, vehicle->state.position) > reach) {
+        spdlog::warn("player \"{}\" (id {}) reported a hit on a vehicle too far away",
+                     attacker->nickname, attacker->id);
+        return;
+    }
+
+    // Убыль обрезается тем же пределом, что и урон человеку, и по той же
+    // причине: число могло испортиться по дороге или прийти от ошибки в
+    // клиенте, а выстрел при этом был настоящим.
+    shared::VehicleDamaged passed;
+    passed.vehicle = report.vehicle;
+    passed.harm.body = std::min(report.harm.body, config_.maxDamagePerHit);
+    passed.harm.engine = std::min(report.harm.engine, config_.maxDamagePerHit);
+    passed.harm.tank = std::min(report.harm.tank, config_.maxDamagePerHit);
+
+    const Player* owner = players_.findById(vehicle->owner);
+    if (owner == nullptr) {
+        return;
+    }
+
+    sendTo(owner->peer, passed);
+
+    // И скриптам — здесь же, а не у ведущего. Тем же порядком, что и смерть от
+    // чужой руки: объявляет тот, кто знает обоих участников, а знает их только
+    // сервер. Ведущему стрелявший не назван вовсе — ему он и не нужен.
+    script::Event damage;
+    damage.kind = script::EventKind::VehicleDamage;
+    damage.vehicle = script::Vehicle{core_, report.vehicle};
+    damage.killer = script::Player{core_, attacker->id};
+    damage.weapon = report.weapon;
+    damage.harm = passed.harm;
+
+    events_.dispatch(damage);
+}
+
 void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& report) {
     const Player* attacker = players_.findByPeer(peer);
     if (attacker == nullptr) {
@@ -1567,6 +1692,26 @@ void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& re
         return;
     }
 
+    // Скриптам попадание объявляется до того, как оно применено, и это
+    // единственное место, где его ещё можно отменить. Отсюда и порядок: сперва
+    // проверки правдоподобия — врать о попадании за километр не позволено и
+    // скрипту, — потом слово режима, и лишь затем сам урон.
+    //
+    // Отказ здесь означает «попадания не было»: ни здоровья, ни брони, ни
+    // сообщения жертве. Так же поступает и alt:V.
+    {
+        script::Event shot;
+        shot.kind = script::EventKind::WeaponDamage;
+        shot.player = script::Player{core_, victim->id};
+        shot.killer = script::Player{core_, attackerId};
+        shot.weapon = report.weapon;
+        shot.healthHarm = amount;
+
+        if (!events_.dispatch(shot)) {
+            return;
+        }
+    }
+
     // Броня принимает удар первой и целиком. Так же считает и сама игра, и
     // расходиться с ней здесь незачем: игрок судит о своей броне по её счётчику.
     std::uint16_t left = amount;
@@ -1575,11 +1720,31 @@ void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& re
     victim->armour = static_cast<std::uint16_t>(victim->armour - absorbed);
     left = static_cast<std::uint16_t>(left - absorbed);
 
+    const std::uint16_t healthHarm =
+        left >= victim->health ? victim->health : left;
+
     victim->health = left >= victim->health ? 0 : static_cast<std::uint16_t>(victim->health - left);
 
     // Здоровье — самому пострадавшему: остальные узнают его из снимка, который
     // сервер и без того правит на своё значение перед рассылкой.
     sendHealth(*victim, attackerId);
+
+    // Урон объявляется здесь, а не там, где приходит сообщение, и это
+    // существенно: доводы alt:V разводят убыль здоровья и убыль брони, а развела
+    // их только что броня — приняв удар первой и целиком. До этого места
+    // известна одна общая цифра, и по ней режим не отличил бы спасший
+    // бронежилет от пробитого.
+    {
+        script::Event hurt;
+        hurt.kind = script::EventKind::PlayerDamage;
+        hurt.player = script::Player{core_, victim->id};
+        hurt.killer = script::Player{core_, attackerId};
+        hurt.weapon = report.weapon;
+        hurt.healthHarm = healthHarm;
+        hurt.armourHarm = absorbed;
+
+        (void)events_.dispatch(hurt);
+    }
 
     // Прежнее сообщение об уроне уходит следом и живёт по-прежнему. Здоровье оно
     // больше не меняет — его меняет сервер, — но остаётся тем, чем и было:
@@ -1877,6 +2042,32 @@ void Server::objectAdded(shared::ObjectId /*id*/) {
     streamedAt_ = {};
 }
 
+void Server::objectMoved(shared::ObjectId id) {
+    const ObjectDirectory::Object* const object = objects_.find(id);
+    if (object == nullptr) {
+        return;
+    }
+
+    // Тем, у кого предмет уже стоит, — новое объявление того же предмета. Клиент
+    // толкует повторное объявление как «поправь», а не «заведи второй»
+    // (Objects::add), и потому своего сообщения о переезде не понадобилось.
+    shared::ObjectAdded moved;
+    moved.id = id;
+    moved.model = object->model;
+    moved.position = object->position;
+    moved.rotation = object->rotation;
+
+    for (const auto& [peer, player] : players_) {
+        if (player.streamedObjects.contains(id)) {
+            sendTo(peer, moved);
+        }
+    }
+
+    // А тем, у кого его нет, он мог как раз приехать в поле зрения. Раздача
+    // ходит по расстоянию и разберётся сама — её нужно только поторопить.
+    streamedAt_ = {};
+}
+
 void Server::objectRemoved(shared::ObjectId id) {
     shared::ObjectRemoved removed;
     removed.id = id;
@@ -2004,6 +2195,67 @@ void Server::chatLine(shared::PlayerId to, std::string text) {
     }
 
     sendTo(target->peer, line);
+}
+
+void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
+                                     const shared::PlayerState& after) {
+    // Событий здесь пять, и все они — разница, а не сообщение. Если разницы
+    // нет, не должно быть и работы: снимок приходит тридцать раз в секунду на
+    // каждого игрока, и лишний обход списка подписчиков тут стоит дороже, чем
+    // где бы то ни было ещё.
+    const bool satBefore = shared::has(before.flags, shared::PlayerFlag::InVehicle);
+    const bool satAfter = shared::has(after.flags, shared::PlayerFlag::InVehicle);
+
+    const bool enteringBefore = shared::has(before.flags, shared::PlayerFlag::EnteringVehicle);
+    const bool enteringAfter = shared::has(after.flags, shared::PlayerFlag::EnteringVehicle);
+
+    const auto tell = [&](script::EventKind kind, shared::VehicleId vehicle, std::int8_t seat,
+                          std::int8_t seatWas) {
+        script::Event event;
+        event.kind = kind;
+        event.player = script::Player{core_, player.id};
+        event.vehicle = script::Vehicle{core_, vehicle};
+        event.seat = seat;
+        event.seatWas = seatWas;
+
+        (void)events_.dispatch(event);
+    };
+
+    // Полез в машину. Объявляется на подъёме признака, а не на каждом снимке,
+    // пока он стоит: вход длится полторы секунды, то есть полсотни снимков.
+    if (enteringAfter && !enteringBefore) {
+        tell(script::EventKind::PlayerEnteringVehicle, after.vehicleId, after.seat,
+             shared::kNoSeat);
+    }
+
+    if (satAfter && !satBefore) {
+        tell(script::EventKind::PlayerEnteredVehicle, after.vehicleId, after.seat,
+             shared::kNoSeat);
+    } else if (!satAfter && satBefore) {
+        // Вылез. Машина и место берутся из прошлого снимка, и по-другому нельзя:
+        // к этому мгновению у него уже нет ни того ни другого.
+        tell(script::EventKind::PlayerLeftVehicle, before.vehicleId, before.seat,
+             shared::kNoSeat);
+    } else if (satAfter && satBefore && after.seat != before.seat &&
+               after.vehicleId == before.vehicleId) {
+        // Пересел, не выходя. Проверка на ту же машину обязательна: пересадка в
+        // другую машину — это выход и вход, и объявлять её пересадкой значило
+        // бы соврать дважды.
+        tell(script::EventKind::PlayerChangedVehicleSeat, after.vehicleId, after.seat,
+             before.seat);
+    }
+
+    // Оружие в руках. Ноль — безоружен, и переход в ноль такое же событие, как
+    // и всякий другой: убрать ствол значит его сменить.
+    if (after.weapon != before.weapon) {
+        script::Event event;
+        event.kind = script::EventKind::PlayerWeaponChange;
+        event.player = script::Player{core_, player.id};
+        event.weaponWas = before.weapon;
+        event.weapon = after.weapon;
+
+        (void)events_.dispatch(event);
+    }
 }
 
 bool Server::tellScripts(script::EventKind kind, shared::PlayerId about, std::string text) {

@@ -3,6 +3,8 @@
 #include "bindings.hpp"
 #include "convert.hpp"
 
+#include <oxymp/script/js/alt_seat.hpp>
+
 #include <alt_bootstrap.hpp>
 #include <alt_enums.hpp>
 #include <alt_objects.hpp>
@@ -42,6 +44,26 @@ namespace {
         return "vehicleDestroy";
     case EventKind::Tick:
         return "tick";
+    case EventKind::VehicleDamage:
+        return "vehicleDamage";
+    case EventKind::PlayerEnteringVehicle:
+        return "playerEnteringVehicle";
+    case EventKind::PlayerEnteredVehicle:
+        return "playerEnteredVehicle";
+    case EventKind::PlayerLeftVehicle:
+        return "playerLeftVehicle";
+    case EventKind::PlayerChangedVehicleSeat:
+        return "playerChangedVehicleSeat";
+    case EventKind::PlayerWeaponChange:
+        return "playerWeaponChange";
+    case EventKind::PlayerDamage:
+        return "playerDamage";
+    case EventKind::ServerStarted:
+        return "serverStarted";
+    case EventKind::WeaponDamage:
+        return "weaponDamage";
+    case EventKind::ConsoleCommand:
+        return "consoleCommand";
     case EventKind::ClientEvent:
         // Отдельного имени нет: события от клиента различаются своим именем, и
         // собирается оно в dispatch.
@@ -458,11 +480,106 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
         break;
 
+    case EventKind::VehicleDamage:
+        // Доводы и их порядок — как у alt:V, вплоть до того, которого у нас
+        // нет. Второе число кузова у него отдельное; мы такого не считаем и
+        // ставим ноль, но место за ним держим: режим, написанный под alt:V,
+        // читает доводы по счёту, и сдвинутый счёт отдал бы ему оружие вместо
+        // прочности двигателя.
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+
+        arguments.push_back(event.killer.valid()
+                                ? wrapPlayer(*this, context, event.killer.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.harm.body)));
+        arguments.push_back(v8::Number::New(isolate, 0));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.harm.engine)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.harm.tank)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        break;
+
+    case EventKind::PlayerEnteringVehicle:
+    case EventKind::PlayerEnteredVehicle:
+    case EventKind::PlayerLeftVehicle:
+        // Порядок доводов — alt:V: игрок, машина, место. Место переводится в
+        // его нумерацию здесь же (alt_seat.hpp): у alt:V водитель — единица, у
+        // нас и у игры — минус единица.
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(v8::Number::New(isolate, toAltSeat(event.seat)));
+        break;
+
+    case EventKind::PlayerChangedVehicleSeat:
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(wrapVehicle(*this, context, event.vehicle.id()));
+        arguments.push_back(v8::Number::New(isolate, toAltSeat(event.seatWas)));
+        arguments.push_back(v8::Number::New(isolate, toAltSeat(event.seat)));
+        break;
+
+    case EventKind::PlayerWeaponChange:
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weaponWas)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        break;
+
+    case EventKind::PlayerDamage:
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+
+        // Ударившего может не быть вовсе — падение, утопление, огонь. Пустота
+        // честнее игрока с недействительным номером, ровно как в смерти.
+        arguments.push_back(event.killer.valid()
+                                ? wrapPlayer(*this, context, event.killer.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.healthHarm)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armourHarm)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        break;
+
     case EventKind::ClientEvent:
         arguments.push_back(wrapPlayer(*this, context, event.player.id()));
         arguments.push_back(toJs(isolate, event.text));
         break;
 
+    case EventKind::WeaponDamage:
+        // Порядок доводов — alt:V: стрелявший, жертва, оружие, урон, смещение
+        // попадания, часть тела, сущность-источник.
+        //
+        // Смещения и части тела у нас нет: клиент их не присылает — в
+        // свидетельстве о попадании их и не было никогда. Место за ними
+        // держится, потому что режим читает доводы по счёту, а вместо выдумки
+        // ставится честное «неизвестно»: нулевая точка и `BodyPart.Unknown`,
+        // который у alt:V равен минус единице и заведён ровно для этого.
+        //
+        // Седьмым доводом идёт тот же игрок, что и первым: у alt:V там
+        // сущность, из которой стреляли, — она отличается от стрелявшего
+        // только когда стреляет машина, а у нас стреляют люди.
+        arguments.push_back(event.killer.valid()
+                                ? wrapPlayer(*this, context, event.killer.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.healthHarm)));
+        arguments.push_back(toJs(context, shared::Vec3{}));
+        arguments.push_back(v8::Number::New(isolate, -1));
+        arguments.push_back(event.killer.valid()
+                                ? wrapPlayer(*this, context, event.killer.id())
+                                : v8::Local<v8::Value>{v8::Null(isolate)});
+        break;
+
+    case EventKind::ConsoleCommand:
+        // Имя команды первым, доводы россыпью следом — так же, как у alt:V:
+        // `consoleCommand(name, ...args)`. Массивом их отдавать нельзя,
+        // обработчик написан под россыпь.
+        arguments.push_back(toJs(isolate, event.name));
+
+        for (const std::string& word : event.arguments) {
+            arguments.push_back(toJs(isolate, word));
+        }
+        break;
+
+    case EventKind::ServerStarted:
     case EventKind::Tick:
         break;
     }

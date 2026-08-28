@@ -149,6 +149,28 @@ void writeSessionFile(const std::string& server, const std::string& nickname) {
     }
 }
 
+/// Закрывает лаунчер Rockstar, если о том просили настройки.
+///
+/// Одним местом на оба пути внедрения — обычный запуск и `--attach`: правило у
+/// них одно, и разойтись ему нельзя.
+void dismissRockstarLauncher(bool wanted) {
+    if (!wanted) {
+        return;
+    }
+
+    std::string note;
+
+    // Успех и неуспех одинаково не беда: игра уже идёт, а лишний лаунчер
+    // человек закроет и сам. В журнал они всё же уходят, и разными уровнями —
+    // закрытие это то, чего игрок не просил у самой игры, и объяснить исчезнувшее
+    // окно должно быть по чему.
+    if (closeRockstarLauncher(note)) {
+        spdlog::info("{}", note);
+    } else {
+        spdlog::debug("{}", note);
+    }
+}
+
 } // namespace
 
 std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Reporter& report) {
@@ -198,6 +220,8 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
             report(Progress::Failed, text::kErrFailedToInject);
             return nullptr;
         }
+
+        dismissRockstarLauncher(settings.closeRockstarLauncher);
 
         report(Progress::Ready, "Injected");
         return game;
@@ -448,6 +472,11 @@ std::unique_ptr<GameProcess> Session::run(const Settings& settings, const Report
         report(Progress::Failed, text::kErrFailedToInject);
         return nullptr;
     }
+
+    // Лаунчер Rockstar закрывается здесь, а не раньше: до удавшегося внедрения
+    // он ещё может понадобиться — игра спрашивает у него права по именованному
+    // каналу, и спрашивает при запуске. Внедрились — значит спросила и получила.
+    dismissRockstarLauncher(settings.closeRockstarLauncher);
 
     // Слой поднимается сразу после внедрения, а не по готовности игры: смысл
     // его в том, чтобы заслонить собой заставку и страницу выбора режима, а они

@@ -287,6 +287,15 @@ public:
     /// Сообщает серверу о попадании по чужому игроку.
     void reportDamage(shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon);
 
+    /// Сообщает серверу о попадании по чужой машине.
+    ///
+    /// Отдельно от попадания по человеку, а не одним сообщением на оба: у машины
+    /// три прочности, а не одна, и ведут они себя по-разному. Да и путь у них
+    /// разный — урон человеку сервер применяет сам, а прочность машины отнимает
+    /// её ведущий.
+    void reportVehicleDamage(shared::VehicleId vehicle, const shared::VehicleHarm& harm,
+                             std::uint32_t weapon);
+
     /// Сообщает о своём выстреле.
     ///
     /// Выстрел — событие, и снимком его не передать: между двумя снимками
@@ -315,6 +324,9 @@ public:
     /// что-либо может только она.
     [[nodiscard]] std::vector<shared::VehicleTeleport> takeVehicleTeleports();
     [[nodiscard]] std::vector<shared::VehicleRepair> takeVehicleRepairs();
+
+    /// Попадания по машинам, которые ведём мы.
+    [[nodiscard]] std::vector<shared::VehicleDamaged> takeVehicleDamage();
 
     /// Метки на карте: какими их задал сервер и какие он убрал.
     ///
@@ -541,6 +553,8 @@ private:
     /// поток кладёт сюда в любой момент кадра, а отправка идёт своим чередом.
     std::vector<shared::ChatSay> outgoingChat_;
     std::vector<shared::DamageReport> outgoingDamage_;
+    std::vector<shared::VehicleDamageReport> outgoingVehicleDamage_;
+    std::vector<shared::VehicleDamaged> vehicleDamage_;
     std::vector<shared::WeaponFired> outgoingShots_;
     std::vector<shared::ClientEvent> outgoingEvents_;
 

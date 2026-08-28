@@ -7,6 +7,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <chrono>
 #include <unordered_map>
@@ -78,6 +79,28 @@ public:
     /// В какой машине и на каком месте сидит персонаж. Пусто — идёт пешком.
     [[nodiscard]] std::optional<Seat> seatOf(int ped) const;
 
+    /// Куда сообщать о попадании по чужой машине.
+    using DamageSink = std::function<void(shared::VehicleId vehicle,
+                                          const shared::VehicleHarm& harm,
+                                          std::uint32_t weapon)>;
+
+    /// Куда отправлять замеченные попадания. Без этого они просто не считаются.
+    void reportDamageTo(DamageSink sink) { onDamage_ = std::move(sink); }
+
+    /// Чем игрок держит в руках прямо сейчас.
+    ///
+    /// Нужно ради одного — назвать оружие в сообщении о попадании по машине.
+    /// Разбирать причину урона игра наружу не отдаёт, и ствол в руках здесь
+    /// ближе всего к правде.
+    [[nodiscard]] std::uint32_t weaponInHand(int localPed) const;
+
+    /// Отнимает у машины прочность по распоряжению сервера.
+    ///
+    /// Только у той, которую ведём мы: прочность живёт в игре у ведущего, и
+    /// отнять её может только он. Остальным о новой прочности расскажет его же
+    /// снимок.
+    void harm(shared::VehicleId id, const shared::VehicleHarm& harm) const;
+
     /// Заводит недостающие машины и обновляет уже показанные. Раз в кадр.
     ///
     /// Убирать лишние — забота sweep, и разделение это не формальное. Машины
@@ -87,7 +110,11 @@ public:
     /// дальше он живёт указателем в никуда.
     ///
     /// self — наш номер на сервере: по нему машина отличается от чужой.
-    void sync(const std::vector<View>& vehicles, shared::PlayerId self);
+    ///
+    /// localPed нужен, чтобы отличить наши попадания по чужой машине от чужих:
+    /// сообщать серверу о попадании, которого мы не наносили, — значит отнимать
+    /// у машины прочность дважды.
+    void sync(const std::vector<View>& vehicles, shared::PlayerId self, int localPed);
 
     /// Убирает машины, которых в последнем присланном списке не было.
     ///
@@ -174,6 +201,9 @@ public:
     [[nodiscard]] std::size_t shown() const noexcept { return vehicles_.size(); }
 
 private:
+    /// Куда уходят замеченные попадания по чужим машинам.
+    DamageSink onDamage_;
+
     /// Машина сессии и всё, что мы о ней помним.
     struct Entry {
         int vehicle = 0;
@@ -280,7 +310,7 @@ private:
     NativeHandler doesExist_ = nullptr;
     NativeHandler asMissionEntity_ = nullptr;
     NativeHandler lodDistance_ = nullptr;
-    NativeHandler invincible_ = nullptr;
+    NativeHandler selectedWeapon_ = nullptr;
     NativeHandler freezePosition_ = nullptr;
     NativeHandler onGroundProperly_ = nullptr;
     NativeHandler engineOn_ = nullptr;

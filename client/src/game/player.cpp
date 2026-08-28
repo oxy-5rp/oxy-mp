@@ -45,7 +45,6 @@ Player::Player(const NativeTable& table) noexcept
       setCollision_(table.handlerFor(natives::kSetEntityCollision)),
       clearTasks_(table.handlerFor(natives::kClearPedTasksImmediately)),
       selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)),
-      forwardVector_(table.handlerFor(natives::kGetEntityForwardVector)),
       applyDamage_(table.handlerFor(natives::kApplyDamageToPed)),
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
       setArmour_(table.handlerFor(natives::kSetPedArmour)),
@@ -175,30 +174,11 @@ void Player::freeze(int ped, bool frozen) const {
     invokeNative<void>(freeze_, ped, frozen);
 }
 
-shared::Vec3 Player::aimPoint(int ped) const {
+shared::Vec3 Player::cameraPoint(int ped, float range) const {
     const shared::Vec3 position = coords(ped);
 
-    if (forwardVector_ == nullptr) {
-        return position;
-    }
-
-    NativeContext context;
-    context.push(ped);
-    forwardVector_(context.address());
-
-    const shared::Vec3 forward{context.result<float>(0), context.result<float>(1),
-                               context.result<float>(2)};
-
-    return shared::Vec3{position.x + forward.x * kAimDistance,
-                        position.y + forward.y * kAimDistance,
-                        position.z + forward.z * kAimDistance};
-}
-
-shared::Vec3 Player::lookPoint(int ped) const {
-    const shared::Vec3 position = coords(ped);
-
-    // Точка отсчёта — голова, а не подошвы: взгляд, пущенный от земли, уводит
-    // шею вверх тем сильнее, чем ближе цель.
+    // Точка отсчёта — голова, а не подошвы: луч, пущенный от земли, уводит шею
+    // и ствол вверх тем сильнее, чем ближе цель.
     const shared::Vec3 head{position.x, position.y, position.z + shared::kLookHeight};
 
     if (camRotation_ == nullptr) {
@@ -214,14 +194,34 @@ shared::Vec3 Player::lookPoint(int ped) const {
     const float pitch = context.result<float>(0) * shared::kRadians;
     const float yaw = context.result<float>(2) * shared::kRadians;
 
-    // Направление взгляда из двух углов. Знак у горизонтали такой, а не иной,
-    // потому что у GTA ось Y смотрит на север, а угол растёт против часовой:
-    // при нулевом рыскании взгляд направлен на север.
+    // Направление из двух углов. Знак у горизонтали такой, а не иной, потому
+    // что у GTA ось Y смотрит на север, а угол растёт против часовой: при
+    // нулевом рыскании взгляд направлен на север.
     const float flat = std::cos(pitch);
 
-    return shared::Vec3{head.x - std::sin(yaw) * flat * shared::kLookRange,
-                        head.y + std::cos(yaw) * flat * shared::kLookRange,
-                        head.z + std::sin(pitch) * shared::kLookRange};
+    return shared::Vec3{head.x - std::sin(yaw) * flat * range,
+                        head.y + std::cos(yaw) * flat * range,
+                        head.z + std::sin(pitch) * range};
+}
+
+shared::Vec3 Player::aimPoint(int ped) const {
+    // Тем же лучом, что и взгляд, — и это правка, а не наведение порядка.
+    //
+    // Прежде точка прицела бралась из направления тела
+    // (GET_ENTITY_FORWARD_VECTOR) от подошв персонажа. У стоящего человека это
+    // направление горизонтально всегда: целясь вверх или вниз, он поворачивает
+    // камеру и верхнюю часть тела, а само тело остаётся стоять прямо. Значит
+    // наклона в точке прицела не было вовсе — ни у кого и никогда.
+    //
+    // Видно это было дважды. Чужой игрок целился строго перед собой, куда бы ни
+    // наводил его хозяин. И присланные выстрелы летели туда же: стреляющий с
+    // балкона или по балкону слал пули в горизонт, и попасть у него не могло
+    // получиться ни разу.
+    return cameraPoint(ped, kAimDistance);
+}
+
+shared::Vec3 Player::lookPoint(int ped) const {
+    return cameraPoint(ped, shared::kLookRange);
 }
 
 shared::PlayerState Player::snapshot(int player, int ped, bool dead) {

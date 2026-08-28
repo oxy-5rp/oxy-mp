@@ -28,6 +28,61 @@ namespace {
 /// обычной машине.
 constexpr int kBackgroundThreads = 4;
 
+/// Строка в вид, годный для JSON.
+///
+/// Доводы событий между ресурсами ходят строкой JSON (см. `Resource::deliver` и
+/// `decodeLocal` в слое alt:V), и имя ресурса, попавшее туда как есть, развалило
+/// бы разбор на первой же кавычке в имени. Имена ресурсов — это имена каталогов,
+/// и кавычка в них законна.
+///
+/// Свой, а не nlohmann: здесь укладывается одна строка, а тянуть ради неё
+/// заголовок на десять тысяч строк в модуль, который и так собирается вместе с
+/// V8, не за что.
+///
+/// Названа не `quoted`, и это не вкусовщина: у стандартной библиотеки есть
+/// `std::quoted`, и поиск по доводу находит её вместе с нашей — довод-то
+/// `std::string` из `std`. Побеждала при этом она: её перегрузка принимает
+/// `const std::string&` без преобразования, а наша — `string_view` с
+/// преобразованием. Наружу это выходило непонятной руганью внутри `<format>` на
+/// то, что у типа нет `parse`.
+[[nodiscard]] std::string asJsonString(std::string_view value) {
+    std::string out;
+    out.reserve(value.size() + 2);
+    out.push_back('"');
+
+    for (const char symbol : value) {
+        switch (symbol) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            // Управляющие символы JSON запрещает голыми. В именах каталогов их
+            // не бывает, но разбор на них всё равно споткнулся бы.
+            if (static_cast<unsigned char>(symbol) < 0x20U) {
+                out += std::format("\\u{:04x}", static_cast<unsigned>(symbol));
+            } else {
+                out.push_back(symbol);
+            }
+            break;
+        }
+    }
+
+    out.push_back('"');
+    return out;
+}
+
 /// Node поднимается один раз на процесс — это его правило, не наше.
 ///
 /// Отсюда и глобальные: платформа переживает все ресурсы и не разбирается до
@@ -223,11 +278,45 @@ public:
             announce(name, payload);
         });
 
+        Resource& started = *resource;
         resources_.emplace(key, std::move(resource));
+
+        // Жизнь ресурса объявляется ему самому и соседям — четырьмя событиями
+        // alt:V, которых у нас не было вовсе.
+        //
+        // Порядок здесь значим. Сперва ресурс кладётся в список, потом ему
+        // объявляют `resourceStart`: обработчик первым делом спрашивает
+        // `alt.Resource.current`, и не окажись он к тому мгновению в списке —
+        // получил бы пустоту. Затем `anyResourceStart` слышат все, включая его
+        // самого: так же поступает и alt:V.
+        //
+        // Довод `resourceStart` — «поднялся ли с ошибкой». У нас он всегда
+        // ложь: ресурс, отказавший при запуске, до этого места не доходит
+        // вовсе — `start` вернул бы false выше. Место за доводом держится
+        // затем, что режим читает его по счёту.
+        started.deliver("resourceStart", "[false]");
+        announce("anyResourceStart", std::format("[{}]", asJsonString(key)));
+
         return true;
     }
 
-    void stop(std::string_view name) override { resources_.erase(std::string{name}); }
+    void stop(std::string_view name) override {
+        const std::string key{name};
+        const auto found = resources_.find(key);
+
+        if (found == resources_.end()) {
+            return;
+        }
+
+        // Объявляется до разбора, а не после: обработчик застаёт свой ресурс
+        // ещё живым — с окнами, таймерами и подписками, — и убрать за собой ему
+        // есть чем. Объяви мы это после, объявлять было бы уже нечему: изолята
+        // не осталось бы. То же правило и у `playerDisconnect`.
+        found->second->deliver("resourceStop", "[]");
+        announce("anyResourceStop", std::format("[{}]", asJsonString(key)));
+
+        resources_.erase(found);
+    }
 
     [[nodiscard]] std::size_t running() const noexcept override { return resources_.size(); }
 

@@ -564,6 +564,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::VehicleDamaged:
+        if (const auto hit = shared::decode<shared::VehicleDamaged>(packet)) {
+            vehicleDamage_.push_back(*hit);
+        }
+        return;
+
     case shared::MessageId::BlipState:
         if (auto blip = shared::decode<shared::BlipState>(packet)) {
             blips_.push_back(std::move(*blip));
@@ -677,6 +683,7 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
     case shared::MessageId::Ping:
     case shared::MessageId::ChatSay:
     case shared::MessageId::DamageReport:
+    case shared::MessageId::VehicleDamageReport:
     case shared::MessageId::ClientEvent:
         spdlog::debug("the server sent a client-only message");
         return;
@@ -1033,6 +1040,20 @@ void Connection::reportDamage(shared::PlayerId victim, std::uint16_t amount,
     outgoingDamage_.push_back(report);
 }
 
+void Connection::reportVehicleDamage(shared::VehicleId vehicle, const shared::VehicleHarm& harm,
+                                     std::uint32_t weapon) {
+    if (vehicle == shared::kInvalidVehicleId || !harm.any()) {
+        return;
+    }
+
+    shared::VehicleDamageReport report;
+    report.vehicle = vehicle;
+    report.harm = harm;
+    report.weapon = weapon;
+
+    outgoingVehicleDamage_.push_back(report);
+}
+
 void Connection::reportShot(std::uint32_t weapon, const shared::Vec3& target) {
     if (weapon == 0) {
         return;
@@ -1067,6 +1088,10 @@ std::vector<shared::Vec3> Connection::takeTeleports() {
 
 std::vector<shared::VehicleTeleport> Connection::takeVehicleTeleports() {
     return std::exchange(vehicleTeleports_, {});
+}
+
+std::vector<shared::VehicleDamaged> Connection::takeVehicleDamage() {
+    return std::exchange(vehicleDamage_, {});
 }
 
 std::vector<shared::VehicleRepair> Connection::takeVehicleRepairs() {
@@ -1240,6 +1265,7 @@ void Connection::sendQueued() {
         // минуту после переподключения, уже никому не нужна.
         outgoingChat_.clear();
         outgoingDamage_.clear();
+        outgoingVehicleDamage_.clear();
         outgoingEvents_.clear();
         return;
     }
@@ -1257,6 +1283,13 @@ void Connection::sendQueued() {
         host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
     }
     outgoingDamage_.clear();
+
+    // И попадания по машинам — тем же каналом и по той же причине.
+    for (const shared::VehicleDamageReport& report : outgoingVehicleDamage_) {
+        const auto packet = shared::encode(report);
+        host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
+    }
+    outgoingVehicleDamage_.clear();
 
     // Тем же каналом и по той же причине: потерянный выстрел не повторится.
     for (const shared::WeaponFired& fired : outgoingShots_) {
@@ -1306,6 +1339,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     removedObjects_.clear();
     vehicleTeleports_.clear();
     vehicleRepairs_.clear();
+    vehicleDamage_.clear();
     blips_.clear();
     removedBlips_.clear();
     animations_.clear();

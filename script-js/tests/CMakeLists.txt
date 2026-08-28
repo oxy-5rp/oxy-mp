@@ -36,8 +36,39 @@ foreach(case
     absent-name-is-refused
     whole-resource-rises-after-broken-one
     missing-entry-is-named
-    escaping-entry-is-refused)
+    escaping-entry-is-refused
+    a-resource-hears-its-own-start
+    a-resource-hears-about-its-neighbours)
 
     add_test(NAME "script-js: ${case}"
              COMMAND oxymp_script_js_tests "${case}")
+endforeach()
+
+# Перевод мест в машине — своим исполняемым файлом.
+#
+# Node ему не нужен вовсе: проверяется арифметика на заголовке. Поднимать ради
+# двух чисел изолят V8 значило бы платить секундами за то, что считается за
+# наносекунду, — и заодно потерять проверку там, где Node не собран.
+add_executable(oxymp_alt_seat_tests
+    alt_seat_tests.cpp
+)
+
+target_link_libraries(oxymp_alt_seat_tests PRIVATE
+    oxymp::script_js
+    oxymp::options
+)
+
+set_target_properties(oxymp_alt_seat_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${OXYMP_DYNAMIC_RUNTIME}")
+
+foreach(case
+    a-driver-is-seat-one-for-altv
+    passengers-start-at-two-for-altv
+    being-nowhere-is-zero-for-altv
+    translation-survives-a-round-trip
+    nonsense-from-a-script-means-nowhere
+    an-unnamed-seat-means-the-driver)
+
+    add_test(NAME "script-js: ${case}"
+             COMMAND oxymp_alt_seat_tests "${case}")
 endforeach()

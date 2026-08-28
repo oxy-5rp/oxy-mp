@@ -5,6 +5,8 @@
 
 #include <oxymp/client/interpolation.hpp>
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -77,6 +79,13 @@ constexpr float kCorrectionRate = 26.0F;
 
 /// Целая прочность в нумерации игры.
 constexpr float kFullHealth = 1000.0F;
+
+/// Насколько прочность вправе разойтись с присланной, прежде чем её вернут.
+///
+/// По сети прочность едет целым числом, а игра держит её дробной: возвращать её
+/// на место из-за долей — значит звать натив каждый кадр на каждую машину
+/// вокруг. Единица здесь — половина того, что вообще различимо в протоколе.
+constexpr float kHealthTolerance = 1.0F;
 
 /// С какого угла дверь считается открытой.
 ///
@@ -170,7 +179,9 @@ VehicleSnapshot::VehicleSnapshot(const NativeTable& table) noexcept
       trailerAttached_(table.handlerFor(natives::kIsVehicleAttachedToTrailer)),
       wrecked_(table.handlerFor(natives::kIsEntityDead)),
       explode_(table.handlerFor(natives::kExplodeVehicle)),
-      invincible_(table.handlerFor(natives::kSetEntityInvincible)),
+      setProofs_(table.handlerFor(natives::kSetEntityProofs)),
+      damagedBy_(table.handlerFor(natives::kHasEntityBeenDamagedByEntity)),
+      clearDamage_(table.handlerFor(natives::kClearEntityLastDamageEntity)),
       hornActive_(table.handlerFor(natives::kIsHornActive)),
       startHorn_(table.handlerFor(natives::kStartVehicleHorn)),
       roofState_(table.handlerFor(natives::kGetConvertibleRoofState)),
@@ -683,11 +694,13 @@ void VehicleSnapshot::applyMotion(int vehicle, const shared::VehicleState& state
                        state.velocity.z);
 }
 
-void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& state,
+bool VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& state,
                                     const shared::VehicleState& previous) const {
     if (vehicle == 0) {
-        return;
+        return false;
     }
+
+    bool repaired = false;
 
     // Руль и тормоз задаются каждый кадр: они меняются непрерывно, пока машина
     // едет, и сравнивать их с прошлым значением дороже, чем задать заново.
@@ -696,7 +709,12 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
     // не было: сама машина его не выведет — её ведём мы, задавая положение, а
     // не поворачивая руль.
     if (setSteerBias_ != nullptr) {
-        invokeNative<void>(setSteerBias_, vehicle, state.steer);
+        // Со знаком минус, и это не описка. По сети едет ввод водителя, а у
+        // игры оси ввода и руля смотрят в разные стороны: у органа управления
+        // «влево-вправо» минус единица означает «влево», а у SET_VEHICLE_STEER_BIAS
+        // минус единица — «до упора вправо». Без этого знака колёса у чужой
+        // машины выворачивались ровно в сторону, противоположную повороту.
+        invokeNative<void>(setSteerBias_, vehicle, -state.steer);
     }
 
     if (setBrakeLights_ != nullptr) {
@@ -747,14 +765,20 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
     // Возвращать её обратно незачем: машина уже разбита.
     if (shared::has(state.flags, shared::VehicleFlag::Destroyed) &&
         !shared::has(previous.flags, shared::VehicleFlag::Destroyed) && explode_ != nullptr) {
-        if (invincible_ != nullptr) {
-            invokeNative<void>(invincible_, vehicle, false);
-        }
+        // Защита снимается целиком: взрыв объявил хозяин, и не взорваться
+        // здесь машина не имеет права. Взрывоустойчивая, она его бы и не
+        // услышала.
+        protect(vehicle, false);
 
         // Со звуком и на виду: взрыв, случившийся у хозяина, обязан выглядеть
         // так же и здесь.
         invokeNative<void>(explode_, vehicle, true, false);
-        return;
+
+        // Взорванной машине ни свет, ни сирена, ни прочности уже не нужны —
+        // потому и выходим отсюда, не доводя остального. Починкой это не
+        // считается: наложенное с неё снялось вместе с ней самой, и накладывать
+        // его обратно некуда.
+        return false;
     }
 
     // Обратный переход — и он такой же обязательный. Разбитую машину поставленные
@@ -772,12 +796,12 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
             invokeNative<void>(fixDeformation_, vehicle);
         }
 
-        // И неуязвимость обратно: перед взрывом мы её сняли, а починенная машина
-        // снова чужая. Оставленная снятой, она взорвалась бы здесь от первого же
+        // И защита обратно: перед взрывом мы её сняли, а починенная машина снова
+        // чужая. Оставленная снятой, она взорвалась бы здесь от первого же
         // взрыва по соседству — и осталась бы целой у того, кто в ней едет.
-        if (invincible_ != nullptr) {
-            invokeNative<void>(invincible_, vehicle, true);
-        }
+        protect(vehicle, true);
+
+        repaired = true;
     }
 
     // Гудок — не на изменение, а пока признак стоит, и это не оплошность.
@@ -809,15 +833,129 @@ void VehicleSnapshot::applyControls(int vehicle, const shared::VehicleState& sta
         invokeNative<void>(setLandingGear_, vehicle, up ? kGearRetract : kGearDeploy);
     }
 
-    if (state.bodyHealth != previous.bodyHealth && setBodyHealth_ != nullptr) {
-        invokeNative<void>(setBodyHealth_, vehicle, static_cast<float>(state.bodyHealth));
+    return repaired;
+}
+
+void VehicleSnapshot::takeHealth(int vehicle, const shared::VehicleHarm& harm) const {
+    if (vehicle == 0 || !harm.any()) {
+        return;
     }
-    if (state.engineHealth != previous.engineHealth && setEngineHealth_ != nullptr) {
-        invokeNative<void>(setEngineHealth_, vehicle, static_cast<float>(state.engineHealth));
+
+    const auto take = [this, vehicle](NativeHandler get, NativeHandler set, std::uint16_t lost) {
+        if (lost == 0 || get == nullptr || set == nullptr) {
+            return;
+        }
+
+        // Ниже нуля не опускаем, хотя игра прочность двигателя туда пускает:
+        // по сети она едет беззнаковой, и ноль на обоих концах означает одно и
+        // то же — сломан. Пустить её в минус здесь значило бы завести число,
+        // которого никто, кроме нас, не увидит.
+        const float left = invokeNative<float>(get, vehicle) - static_cast<float>(lost);
+
+        invokeNative<void>(set, vehicle, std::max(left, 0.0F));
+    };
+
+    take(getBodyHealth_, setBodyHealth_, harm.body);
+    take(getEngineHealth_, setEngineHealth_, harm.engine);
+    take(getTankHealth_, setTankHealth_, harm.tank);
+}
+
+void VehicleSnapshot::protect(int vehicle, bool remote) const {
+    if (vehicle == 0 || setProofs_ == nullptr) {
+        return;
     }
-    if (state.tankHealth != previous.tankHealth && setTankHealth_ != nullptr) {
-        invokeNative<void>(setTankHealth_, vehicle, static_cast<float>(state.tankHealth));
+
+    // Пуля и удар — единственное, что чужая машина принимает здесь: только их
+    // мы и можем засвидетельствовать, потому что наносит их игрок, стоящий
+    // рядом с нами. Всё прочее считает не эта сторона — см. описание.
+    //
+    // Последние три довода назначения не имеют ни в открытой базе, ни в
+    // скриптах игры: там на их месте ложь, и здесь тоже.
+    invokeNative<void>(setProofs_, vehicle, false, remote, remote, remote, false, false, false,
+                       remote);
+}
+
+shared::VehicleHarm VehicleSnapshot::settleHealth(int vehicle, const shared::VehicleState& state,
+                                                  int localPed) const {
+    shared::VehicleHarm harm;
+
+    if (vehicle == 0) {
+        return harm;
     }
+
+    // Сюда приходят за тем, чего не предусмотрели.
+    //
+    // Чужая машина принимает у нас пули и удары, а от взрыва, огня и
+    // столкновения закрыта — см. protect. Но закрыта она распоряжением игре, а
+    // распоряжение может и не подействовать: у иной модели, у машины на буксире,
+    // у той, что уже горела. Догоревшая до конца, она осталась бы у нас
+    // остовом, тогда как у своего ведущего цела и едет.
+    //
+    // Поднимается она тем же способом, что и кукла убитого, которая выжила:
+    // сверкой с тем, что сказал хозяин. Дешевле одного вызова это не сделать, а
+    // случай редкий — потому и проверка идёт первой, до всякого счёта прочности.
+    if (wrecked_ != nullptr && fix_ != nullptr &&
+        !shared::has(state.flags, shared::VehicleFlag::Destroyed) &&
+        invokeNative<bool>(wrecked_, vehicle)) {
+        invokeNative<void>(fix_, vehicle);
+
+        if (fixDeformation_ != nullptr) {
+            invokeNative<void>(fixDeformation_, vehicle);
+        }
+
+        // Защиту вернуть обязательно: сгореть она могла ровно потому, что
+        // распоряжение не подействовало, и без повтора сгорит снова.
+        protect(vehicle, true);
+
+        spdlog::debug("vehicle {} burned out here but is whole at its owner, repaired", vehicle);
+    }
+
+    // Присланное — то, какой машина обязана быть. Настоящее — какой она стала
+    // здесь: пуля могла отнять у неё прочность, и отнять её мог кто угодно.
+    const auto settle = [this, vehicle](NativeHandler get, NativeHandler set, std::uint16_t wanted,
+                                        std::uint16_t& lost) {
+        if (get == nullptr || set == nullptr) {
+            return;
+        }
+
+        const float actual = invokeNative<float>(get, vehicle);
+        const auto target = static_cast<float>(wanted);
+
+        if (std::abs(actual - target) < kHealthTolerance) {
+            return;
+        }
+
+        if (actual < target) {
+            lost = static_cast<std::uint16_t>(std::min(target - actual, kFullHealth));
+        }
+
+        invokeNative<void>(set, vehicle, target);
+    };
+
+    settle(getBodyHealth_, setBodyHealth_, state.bodyHealth, harm.body);
+    settle(getEngineHealth_, setEngineHealth_, state.engineHealth, harm.engine);
+    settle(getTankHealth_, setTankHealth_, state.tankHealth, harm.tank);
+
+    if (!harm.any()) {
+        return harm;
+    }
+
+    // Убыль замечена — но нашей она считается только тогда, когда по машине
+    // попали мы. Иначе это чужая пуля, чужой взрыв или собственная выдумка игры,
+    // и рассказывать о них серверу значило бы отнять у машины прочность за
+    // того, кто её уже отнял у себя.
+    const bool ours = damagedBy_ != nullptr && localPed != 0 &&
+                      invokeNative<bool>(damagedBy_, vehicle, localPed, true);
+
+    if (!ours) {
+        return {};
+    }
+
+    if (clearDamage_ != nullptr) {
+        invokeNative<void>(clearDamage_, vehicle);
+    }
+
+    return harm;
 }
 
 void VehicleSnapshot::applyDamage(int vehicle, const shared::VehicleState& state,

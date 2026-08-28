@@ -40,7 +40,7 @@ Vehicles::Vehicles(const NativeTable& table) noexcept
       doesExist_(table.handlerFor(natives::kDoesEntityExist)),
       asMissionEntity_(table.handlerFor(natives::kSetEntityAsMissionEntity)),
       lodDistance_(table.handlerFor(natives::kSetEntityLodDist)),
-      invincible_(table.handlerFor(natives::kSetEntityInvincible)),
+      selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)),
       freezePosition_(table.handlerFor(natives::kFreezeEntityPosition)),
       onGroundProperly_(table.handlerFor(natives::kSetVehicleOnGroundProperly)),
       engineOn_(table.handlerFor(natives::kSetVehicleEngineOn)),
@@ -109,6 +109,14 @@ std::optional<Vehicles::Seat> Vehicles::seatOf(int ped) const {
     // Сидит, но места не нашлось: такое бывает у мест, которых у этой модели нет
     // в обычной нумерации. Считаем пассажиром на первом месте — это лучше, чем
     // объявить идущим пешком того, кто едет.
+    //
+    // Но это догадка, и она уходит на сервер наравне с правдой: остальные усадят
+    // нашего персонажа туда, куда мы им скажем. Поэтому догадка не молчит — с
+    // неё начинается разбор всякой жалобы вида «у меня я за рулём, а у него я
+    // пассажир».
+    spdlog::debug("seat of ped {} in vehicle {} is not in the usual numbering, calling it 0", ped,
+                  vehicle);
+
     seat.index = 0;
     return seat;
 }
@@ -288,9 +296,7 @@ void Vehicles::answerTo(Entry& entry, shared::PlayerId owner, bool ours, bool to
     // Что при этом теряется, стоит знать: вмятины. Их форма нативами не
     // читается и не задаётся вовсе. Выбитые стёкла, оторванные двери, пробитые
     // колёса и прочности передаются — они задаются явно.
-    if (invincible_ != nullptr) {
-        invokeNative<void>(invincible_, entry.vehicle, !ours);
-    }
+    snapshot_.protect(entry.vehicle, !ours);
 
     // Зажигание: заглушить машину, оставшуюся без ведущего. У ведомой им
     // распоряжаются снимки, а ничью снимками не поправить — их больше не будет.
@@ -445,7 +451,27 @@ void Vehicles::sweep() {
     }
 }
 
-void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
+std::uint32_t Vehicles::weaponInHand(int localPed) const {
+    if (selectedWeapon_ == nullptr || localPed == 0) {
+        return 0;
+    }
+
+    return invokeNative<std::uint32_t>(selectedWeapon_, localPed);
+}
+
+void Vehicles::harm(shared::VehicleId id, const shared::VehicleHarm& harm) const {
+    const auto known = vehicles_.find(id);
+
+    if (known == vehicles_.end() || !known->second.ours) {
+        // Машина не наша либо её у нас нет вовсе. Отнимать прочность не у чего:
+        // у чужой она принадлежит её ведущему, и он же о ней расскажет.
+        return;
+    }
+
+    snapshot_.takeHealth(known->second.vehicle, harm);
+}
+
+void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, int localPed) {
     if (!ready()) {
         return;
     }
@@ -545,6 +571,14 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
             snapshot_.applyMotion(entry.vehicle, state, seconds);
         }
 
+        // Прочность — здесь, а не в applyControls, и сверяется она с тем, что у
+        // машины есть на самом деле. Пуля, попавшая по ней здесь, прошлому
+        // снимку не видна: у того, кто его прислал, прочность не менялась.
+        if (const shared::VehicleHarm hit = snapshot_.settleHealth(entry.vehicle, state, localPed);
+            hit.any() && onDamage_) {
+            onDamage_(state.id, hit, weaponInHand(localPed));
+        }
+
         // Сцепка — по снимку тягача, и только по нему: прицеп о ней не знает.
         // Номер сцепленного в игре ищется по номеру сессии; не нашёлся — его у
         // нас ещё нет, и сцепим в следующем кадре.
@@ -556,10 +590,23 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self) {
                 .onHook = shared::has(state.flags, shared::VehicleFlag::TowHook)},
             entry.applied.trailer != shared::kInvalidVehicleId);
 
-        snapshot_.applyControls(entry.vehicle, state, entry.applied);
+        const bool repaired = snapshot_.applyControls(entry.vehicle, state, entry.applied);
+
         snapshot_.applyDamage(entry.vehicle, state, entry.applied);
 
         entry.applied = state;
+
+        // Починенная машина вышла из-под ремонта заводской, и вместе с вмятинами
+        // с неё снялось всё, что мы накладывали когда-то: свет, сирена,
+        // зажигание, крыша. Накладывается это только на изменение, а изменения
+        // не будет — у приславшего снимок ничего не поменялось.
+        //
+        // Поэтому наложенное объявляется забытым: следующий кадр наложит его
+        // заново. Заводское состояние здесь берётся не с потолка — ровно таким
+        // машина и выходит из-под SET_VEHICLE_FIXED.
+        if (repaired) {
+            entry.applied = shared::VehicleState{};
+        }
     }
 }
 

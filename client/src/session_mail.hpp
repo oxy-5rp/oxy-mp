@@ -76,6 +76,42 @@ public:
         return std::exchange(outgoingShots_, {});
     }
 
+    /// Попадание по чужой машине.
+    ///
+    /// Тем же путём, что и попадание по человеку, и по той же причине: заметил
+    /// его игровой поток, а отправляет сетевой.
+    void postVehicleDamage(shared::VehicleId vehicle, const shared::VehicleHarm& harm,
+                           std::uint32_t weapon) {
+        shared::VehicleDamageReport report;
+        report.vehicle = vehicle;
+        report.harm = harm;
+        report.weapon = weapon;
+
+        const std::lock_guard guard{mutex_};
+        outgoingVehicleDamage_.push_back(report);
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleDamageReport> takeOutgoingVehicleDamage() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(outgoingVehicleDamage_, {});
+    }
+
+    /// Попадания по машинам, которые ведём мы. Пришли от сервера, применить их
+    /// у себя обязаны мы: прочность машины живёт в игре у ведущего.
+    void deliverVehicleDamage(std::vector<shared::VehicleDamaged> hits) {
+        if (hits.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        incomingVehicleDamage_.insert(incomingVehicleDamage_.end(), hits.begin(), hits.end());
+    }
+
+    [[nodiscard]] std::vector<shared::VehicleDamaged> takeIncomingVehicleDamage() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(incomingVehicleDamage_, {});
+    }
+
     /// Клавиша, нажатая или отпущенная игроком.
     ///
     /// Кладёт её перехват ввода — он живёт в потоке слоя интерфейса, — а
@@ -713,6 +749,8 @@ private:
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::WeaponFired> outgoingShots_;
+    std::vector<shared::VehicleDamageReport> outgoingVehicleDamage_;
+    std::vector<shared::VehicleDamaged> incomingVehicleDamage_;
     std::vector<shared::PlayerWeapon> weaponLooks_;
     std::vector<shared::PedState> peds_;
     std::vector<shared::PedId> removedPeds_;

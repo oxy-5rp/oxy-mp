@@ -157,3 +157,29 @@ TEST_CASE("an event carries live references", "[script]") {
     CHECK(death.player.valid());
     CHECK_FALSE(death.killer.valid());
 }
+
+TEST_CASE("a hit on a vehicle names the shooter and each of the three healths", "[script]") {
+    FakeCore core;
+    core.join(1, "стрелявший");
+
+    Event damage;
+    damage.kind = EventKind::VehicleDamage;
+    damage.killer = Player{core, 1};
+    damage.weapon = 0x1B06D571;
+    damage.harm.body = 90;
+    damage.harm.engine = 40;
+    damage.harm.tank = 5;
+
+    // Стрелявший стоит в killer, а не в player, и это не натяжка: у обоих
+    // событий про урон второй участник — тот, кто его нанёс. Своего игрока у
+    // попадания по машине нет вовсе — в ней мог не сидеть никто.
+    CHECK(damage.killer.nickname() == "стрелявший");
+    CHECK_FALSE(damage.player.valid());
+
+    // Три прочности идут порознь: режим, решающий, заглох ли двигатель или
+    // потёк ли бак, по сумме не решил бы ничего.
+    CHECK(damage.harm.body == 90);
+    CHECK(damage.harm.engine == 40);
+    CHECK(damage.harm.tank == 5);
+    CHECK(damage.harm.any());
+}

@@ -102,6 +102,14 @@ public:
     virtual void vehicleRemoved(shared::VehicleId id) = 0;
 
     virtual void objectAdded(shared::ObjectId id) = 0;
+
+    /// Предмет переехал.
+    ///
+    /// Отдельным поводом от появления, а не общим «что-то с ним стало»:
+    /// появление лишь просит раздачу пройтись заново, а переезд обязан дойти до
+    /// тех, у кого предмет уже стоит, — их раздача больше не тронет.
+    virtual void objectMoved(shared::ObjectId id) = 0;
+
     virtual void objectRemoved(shared::ObjectId id) = 0;
 
     /// Прохожий заведён или поправлен.
@@ -194,6 +202,8 @@ public:
     bool setHealth(shared::PlayerId id, std::uint16_t health, std::uint16_t armour) override;
     bool giveWeapon(shared::PlayerId id, std::uint32_t weapon, std::uint16_t ammo) override;
     bool clearWeapons(shared::PlayerId id) override;
+    bool removeWeapon(shared::PlayerId id, std::uint32_t weapon) override;
+    [[nodiscard]] std::vector<shared::WeaponSlot> loadout(shared::PlayerId id) const override;
     bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
                             std::uint32_t component) override;
     bool removeWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
@@ -206,6 +216,18 @@ public:
                     std::uint8_t texture, std::uint8_t palette) override;
     bool setProp(shared::PlayerId id, std::uint8_t index, std::int8_t drawable,
                  std::int8_t texture) override;
+    bool setHeadBlend(shared::PlayerId id, std::uint8_t shapeFirst, std::uint8_t shapeSecond,
+                      std::uint8_t shapeThird, std::uint8_t skinFirst, std::uint8_t skinSecond,
+                      std::uint8_t skinThird, float shapeMix, float skinMix,
+                      float thirdMix) override;
+    bool setHeadOverlay(shared::PlayerId id, std::uint8_t slot, std::uint8_t index,
+                        float opacity) override;
+    bool setHeadOverlayColour(shared::PlayerId id, std::uint8_t slot, std::uint8_t colourType,
+                              std::uint8_t colour, std::uint8_t secondColour) override;
+    bool setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) override;
+    bool setEyeColour(shared::PlayerId id, std::uint8_t colour) override;
+    [[nodiscard]] std::optional<shared::PlayerAppearance> appearance(
+        shared::PlayerId id) const override;
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
     bool clearTasks(shared::PlayerId id) override;
     void explode(const script::ExplosionInfo& explosion) override;
@@ -261,6 +283,8 @@ public:
                                                 const shared::Vec3& rotation) override;
 
     bool removeObject(shared::ObjectId id) override;
+    bool moveObject(shared::ObjectId id, const shared::Vec3& position,
+                    const shared::Vec3& rotation) override;
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override;
 
     // --- Прохожие --------------------------------------------------------------

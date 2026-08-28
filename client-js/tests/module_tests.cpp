@@ -536,6 +536,52 @@ TEST_CASE("the client knows every player of the session, not only itself", "[cli
     CHECK(said("я 7"));
 }
 
+TEST_CASE("a body that appeared is announced, and so is one that went",
+          "[client][js]") {
+    // Событий об этом не было вовсе, и режим на них опирается: над появившимся
+    // рядом человеком рисуют имя, вешают метку, заводят поведение. Считаются
+    // они сверкой раз в кадр — тело заводит игра, когда ей вздумается, и
+    // сообщения об этом нет ни у кого.
+    Recorder& kept = recorder();
+    kept.selfId = 1;
+    kept.players = {{1, 100}, {2, 0}};
+    kept.names = {{1, "я"}, {2, "далёкий"}};
+
+    REQUIRE(run("bodies", "const alt = require('alt-client');\n"
+                          "alt.on('worldObjectStreamIn', (кто) =>\n"
+                          "    alt.log('приехал ' + кто.id));\n"
+                          "alt.on('worldObjectStreamOut', (кто) =>\n"
+                          "    alt.log('уехал ' + кто.id));\n"
+                          "alt.on('gameEntityCreate', (кто) =>\n"
+                          "    alt.log('тело ' + кто.id));\n"));
+
+    Engine::instance()->dispatchSessionEvent(text("render"));
+
+    // В первом кадре тело есть у одного: второй в сессии числится, а здесь его
+    // ещё нет.
+    CHECK(said("приехал 1"));
+    CHECK(said("тело 1"));
+    CHECK_FALSE(said("приехал 2"));
+
+    // Второму завели тело, у первого — отобрали.
+    kept.lines.clear();
+    kept.players = {{1, 0}, {2, 222}};
+
+    Engine::instance()->dispatchSessionEvent(text("render"));
+
+    CHECK(said("приехал 2"));
+    CHECK(said("уехал 1"));
+
+    // И то же самое ещё раз не объявляется: сверка сравнивает с прошлым кадром,
+    // а не рассказывает о нынешнем. Объявляй она каждый кадр — режим рисовал бы
+    // метку заново шестьдесят раз в секунду.
+    kept.lines.clear();
+    Engine::instance()->dispatchSessionEvent(text("render"));
+
+    CHECK_FALSE(said("приехал"));
+    CHECK_FALSE(said("уехал"));
+}
+
 TEST_CASE("a player of the session without a body is still in the list", "[client][js]") {
     // Игрок в сессии есть, а тела у него здесь ещё нет: он далеко или его модель
     // грузится. У alt:V такой игрок тоже есть — с нулевым scriptID, — и списки

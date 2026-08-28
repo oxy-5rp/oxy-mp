@@ -105,6 +105,60 @@ ALT_ALIASES = {
     # соседей по OBJECT это единственный с целым доводом, у прочих дробный.
     "doorSystemSetDoorState": "_SET_DOOR_ACCELERATION_LIMIT",
     "doorSystemGetDoorState": "0x160AA1B32F6139B8",
+
+    # Внешность персонажа: цвет волос, цвет слоя и цвет глаз.
+    #
+    # У alt:V все три названы «tint» — оттенком, — у базы «color». Смысл один и
+    # тот же: номер в палитре игры, а не цвет тремя байтами. Опознаны по
+    # подписям, сошедшимся довод в довод:
+    #   (Ped, int, int) -> void
+    #   (Ped, int, int, int, int) -> void
+    #   (Ped, int) -> void
+    #
+    # Эти три — не просто пропущенные имена. Без них не собрать редактор
+    # внешности, а он есть у всякого ролевого режима: цвет волос, бровей,
+    # бороды и глаз задаются только ими.
+    "setPedHairTint": "_SET_PED_HAIR_COLOR",
+    "setPedHeadOverlayTint": "_SET_PED_HEAD_OVERLAY_COLOR",
+    "setHeadBlendEyeColor": "_SET_PED_EYE_COLOR",
+
+    # Настоящее разрешение экрана — то, в котором игра рисует, а не то, которое
+    # объявлено в настройках. У базы имя говорит «действующее», у alt:V —
+    # «фактическое». Подпись: (intPtr, intPtr) -> void.
+    "getActualScreenResolution": "_GET_ACTIVE_SCREEN_RESOLUTION",
+
+    # Ширина строки на экране, двумя вызовами. Имена у alt:V длинные и
+    # описывают, что именно меряется; у базы короткие. Подписи: (charPtr) ->
+    # void и (BOOL) -> float.
+    #
+    # Без них нельзя разместить свой текст в кадре: ширину строки игра называет
+    # только так, и всякий интерфейс, считающий её сам, промахнётся.
+    "beginTextCommandGetScreenWidthOfDisplayText": "_BEGIN_TEXT_COMMAND_WIDTH",
+    "endTextCommandGetScreenWidthOfDisplayText": "_END_TEXT_COMMAND_GET_WIDTH",
+
+    # Полноэкранные эффекты. У alt:V имена от RAGE — animpostfx, — у базы от
+    # того, что они делают. Подписи: (charPtr, int, BOOL) -> void, () -> void,
+    # (charPtr) -> void.
+    #
+    # `animpostfxIsRunning` сюда намеренно не вписан: база объявляет доводом
+    # `_GET_SCREEN_EFFECT_IS_ACTIVE` логическое, а alt:V — строку. Одно из
+    # объявлений неверно, и какое именно — отсюда не видно. Ширина ячейки у них
+    # разная (байт против указателя), и ошибка здесь стоила бы вылета игры, а не
+    # строки в журнале. Пусть лучше натива не будет вовсе.
+    "animpostfxPlay": "_START_SCREEN_EFFECT",
+    "animpostfxStopAll": "_STOP_ALL_SCREEN_EFFECTS",
+    "animpostfxStop": "_STOP_SCREEN_EFFECT",
+
+    # Указатель мыши: у alt:V «положение», у базы «место». (float, float) -> BOOL.
+    "setCursorPosition": "_SET_CURSOR_LOCATION",
+
+    # Гасит городское освещение. У alt:V имя описывает, чем управляют, у базы —
+    # как это называется у самой игры. (BOOL) -> void.
+    "setArtificialLightsState": "_SET_BLACKOUT",
+
+    # Набор частиц для следующего вызова. У базы имя длиннее и договаривает, что
+    # действует он ровно один раз. (charPtr) -> void.
+    "useParticleFxAsset": "_USE_PARTICLE_FX_ASSET_NEXT_CALL",
 }
 
 

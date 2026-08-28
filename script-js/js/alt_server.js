@@ -170,6 +170,14 @@
             // вернувший, отменять не собирался.
             if (outcome === false) {
                 proceed = false;
+            } else if (name === 'weaponDamage' && typeof outcome === 'number') {
+                // У alt:V число, возвращённое отсюда, заменяет урон. У нас — нет:
+                // ядро возвращает признак, а не число. Промолчать было бы хуже
+                // всего — режим, правящий урон, решил бы, что правит, а урон шёл
+                // бы прежний, и найти это было бы не по чему.
+                warnOnce('weaponDamage',
+                         'число, возвращённое обработчиком, урон не меняет: ' +
+                         'у oxyMP отсюда можно только отменить попадание (return false)');
             }
         }
 
@@ -639,21 +647,55 @@
         // Обычным объектом, а не набором дескрипторов: так все свойства выходят
         // переопределяемыми сами собой, и заводить их вручную не приходится.
         Object.assign(target.prototype, {
-            setMeta(key, value) { metaFor(kind, this.id).set(key, value); },
+            setMeta(key, value) {
+                const store = metaFor(kind, this.id);
+                const was = store.get(key);
+
+                store.set(key, value);
+                server.fireLocal('metaChange', [this, key, value, was]);
+            },
             getMeta(key) { return metaFor(kind, this.id).get(key); },
             hasMeta(key) { return metaFor(kind, this.id).has(key); },
-            deleteMeta(key) { metaFor(kind, this.id).delete(key); },
+            deleteMeta(key) {
+                const store = metaFor(kind, this.id);
+                const was = store.get(key);
+
+                store.delete(key);
+                server.fireLocal('metaChange', [this, key, undefined, was]);
+            },
             getMetaKeys() { return [...metaFor(kind, this.id).keys()]; },
 
             setSyncedMeta(key, value) {
-                syncedFor(kind, this.id).set(key, value);
+                const store = syncedFor(kind, this.id);
+                const was = store.get(key);
+
+                store.set(key, value);
                 publishSynced(kind, this.id, key, value);
+
+                // Событие объявляется и на сервере, а не только у клиента.
+                //
+                // **Его здесь не было вовсе, и это стоило целого пласта работы
+                // режимов.** На клиенте `syncedMetaChange` объявлялся с самого
+                // начала, а на сервере — нет, хотя alt:V объявляет его на
+                // обеих сторонах и подписываются на него именно на сервере: там
+                // живёт всё, что реагирует на смену состояния — двери, счета,
+                // принадлежность организации.
+                //
+                // Доводы — как у alt:V: сущность, ключ, новое значение,
+                // прежнее. Сущностью идёт `this`, а не пара «род и номер»:
+                // ресурс сравнивает её через `===` со своей, и слепок с теми же
+                // числами не сошёлся бы никогда.
+                server.fireLocal('syncedMetaChange', [this, key, value, was]);
             },
             getSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
             hasSyncedMeta(key) { return syncedFor(kind, this.id).has(key); },
             deleteSyncedMeta(key) {
-                syncedFor(kind, this.id).delete(key);
+                const store = syncedFor(kind, this.id);
+                const was = store.get(key);
+
+                store.delete(key);
                 publishSynced(kind, this.id, key, undefined);
+                server.fireLocal('syncedMetaChange', [this, key, undefined, was]);
             },
             getSyncedMetaKeys() { return [...syncedFor(kind, this.id).keys()]; },
 
@@ -666,10 +708,24 @@
             /// ожидал, но не меньше. Молчать об этом всё же нельзя — потому и
             /// сказано здесь.
             setStreamSyncedMeta(key, value) {
-                syncedFor(kind, this.id).set(key, value);
+                const store = syncedFor(kind, this.id);
+                const was = store.get(key);
+
+                store.set(key, value);
                 publishSynced(kind, this.id, key, value, true);
+                server.fireLocal('streamSyncedMetaChange', [this, key, value, was]);
             },
             getStreamSyncedMeta(key) { return syncedFor(kind, this.id).get(key); },
+            hasStreamSyncedMeta(key) { return syncedFor(kind, this.id).has(key); },
+            deleteStreamSyncedMeta(key) {
+                const store = syncedFor(kind, this.id);
+                const was = store.get(key);
+
+                store.delete(key);
+                publishSynced(kind, this.id, key, undefined, true);
+                server.fireLocal('streamSyncedMetaChange', [this, key, undefined, was]);
+            },
+            getStreamSyncedMetaKeys() { return [...syncedFor(kind, this.id).keys()]; },
         });
     }
 
@@ -688,7 +744,21 @@
     /// радианы, получит поворот в шестьдесят раз меньше нужного и будет искать
     /// причину в нативе.
     function headingToRot(heading) {
-        return new shared.Vector3(0, 0, heading * (Math.PI / 180));
+        return new shared.Vector3(0, 0, toRadians(heading));
+    }
+
+    /// Градусы игры — в радианы alt:V и обратно.
+    ///
+    /// Названы отдельно, потому что перевод понадобился в четырёх местах, а
+    /// расписанный по месту он рано или поздно разъедется: перепутанный
+    /// множитель здесь не даёт ни ошибки, ни строки в журнале — только поворот
+    /// в шестьдесят раз мимо.
+    function toRadians(degrees) {
+        return Number(degrees) * (Math.PI / 180);
+    }
+
+    function toDegrees(radians) {
+        return Number(radians) * (180 / Math.PI);
     }
 
     // --- Привязка сущностей --------------------------------------------------
@@ -800,6 +870,22 @@
         rot: {
             get() { return headingToRot(this.heading); },
         },
+        /// Признаки состояния приходят прямо от ядра: `isDead`, `isAiming`,
+        /// `isShooting`, `isInRagdoll`, `isJumping`, `isCrouching`,
+        /// `isParachuting`, `isReloading`, `isInCover`, `isInMelee`,
+        /// `isEnteringVehicle`, `isLeavingVehicle`, `isInWater`, `isSpawned`.
+        /// Оттуда же `aimPos` и `currentWeapon`. Все они ехали в снимке с
+        /// самого начала — недоставало не сведений, а дороги наружу.
+        ///
+        /// Четырёх признаков alt:V у нас нет, и они отказывают вслух, а не
+        /// отвечают «нет». Правило то же, что и везде здесь: тишина на вопрос —
+        /// это ложь, и ресурс, принявший её за правду, унесёт эту ложь дальше.
+        /// Ответь мы «не крадётся» про того, кто крадётся, — режим со скрытным
+        /// перемещением сломался бы молча и навсегда.
+        isOnLadder: { get: absent('player.isOnLadder') },
+        isOnVehicle: { get: absent('player.isOnVehicle') },
+        isStealthy: { get: absent('player.isStealthy') },
+        isSuperJumpEnabled: { get: absent('player.isSuperJumpEnabled') },
         /// Слой мира, в котором игрок находится. Есть у ядра и работает.
         /// Как игрока зовут. У alt:V это `name`, и оно уже есть в ядре.
         /// alt:V даёт `valid` полем — у ядра оно уже такое.
@@ -856,7 +942,6 @@
         },
         setWeather: { value: unperformed('player.setWeather', 'погода у нас общая на сессию — см. alt.setWeather') },
         setDateTime: { value: unperformed('player.setDateTime', 'часы у нас общие на сессию — см. alt.setTime') },
-        removeWeapon: { value: unperformed('player.removeWeapon', 'отобрать одно оружие нельзя, можно всё — clearWeapons') },
         /// Посадить игрока в машину ядро умеет: просьбой ему самому.
         ///
         /// У alt:V место называется вторым доводом, и минус единица означает
@@ -1028,9 +1113,33 @@
             get() { return new shared.Vector3(this.position); },
             set(value) { this.teleport(new shared.Vector3(value)); },
         },
+        /// Поворот машины.
+        ///
+        /// **Единицы здесь расходились молча, и это та же беда, от которой
+        /// уберегает `headingToRot` у игрока.** `GET_ENTITY_ROTATION` отвечает
+        /// градусами, и градусы же лежат в снимке; у alt:V `rot` — радианы.
+        /// Прежде градусы отдавались как есть, и ресурс, положивший `rot.z` в
+        /// натив, ждущий радианы, получал поворот в шестьдесят раз больше
+        /// нужного — без ошибки и без единой строки в журнале.
+        ///
+        /// Присваивание разворачивает машину по-настоящему. Прежде оно молча не
+        /// делало ничего, хотя дорога для него была готова: распоряжение
+        /// `VehicleTeleport` несёт и точку, и поворот с самого начала, а
+        /// исполняет его ведущий — машина живёт в игре у него.
+        ///
+        /// Разворачивается только вокруг вертикальной оси, и это не урезание:
+        /// больше и не переносится. Ставить машину набок распоряжением незачем,
+        /// а перевернувшуюся поднимет физика.
         rot: {
-            get() { return new shared.Vector3(this.rotation); },
-            set: unperformed('vehicle.rot', 'повернуть машину сервер пока не умеет'),
+            get() {
+                const turn = this.rotation;
+                return new shared.Vector3(toRadians(turn.x), toRadians(turn.y),
+                                          toRadians(turn.z));
+            },
+            set(value) {
+                const turn = new shared.Vector3(value);
+                this.teleport(new shared.Vector3(this.position), toDegrees(turn.z));
+            },
         },
         /// Кто за рулём. У alt:V это `driver`, у ядра — `owner` (ведущий).
         ///
@@ -1471,12 +1580,31 @@
     });
 
     Object.defineProperties(WorldObject.prototype, {
+        /// Где предмет стоит и как повёрнут.
+        ///
+        /// Присваивание переставляет его по-настоящему и сразу у всех: ведущего
+        /// у предмета нет, двигает его сервер. Прежде оно молча не делало
+        /// ничего, и молчание это было дорогим — переставить ящик или рампу
+        /// нужно всякому режиму, а узнать, что просьба ушла в пустоту, было не
+        /// по чему.
+        ///
+        /// Поворот, как и у машины, переводится: в ядре градусы, у alt:V
+        /// радианы.
         pos: {
             get() { return new shared.Vector3(this.position); },
-            set: unperformed('object.pos', 'переставить предмет сервер пока не умеет'),
+            set(value) { this.place(new shared.Vector3(value), null); },
         },
         rot: {
-            get() { return new shared.Vector3(this.rotation); },
+            get() {
+                const turn = this.rotation;
+                return new shared.Vector3(toRadians(turn.x), toRadians(turn.y),
+                                          toRadians(turn.z));
+            },
+            set(value) {
+                const turn = new shared.Vector3(value);
+                this.place(null, new shared.Vector3(toDegrees(turn.x), toDegrees(turn.y),
+                                                    toDegrees(turn.z)));
+            },
         },
         toString: {
             value() { return `Object{ id: ${this.id} }`; },
@@ -1667,14 +1795,48 @@
         stopResource: absent('alt.stopResource'),
         getServerConfig: absent('alt.getServerConfig'),
         /// Метаданные сессии, не привязанные ни к какой сущности.
+        ///
+        /// События у них свои — `globalSyncedMetaChange` и `globalMetaChange`, —
+        /// и сущности в доводах нет вовсе: её у общих метаданных не бывает.
+        /// Различать их с сущностными обязательно: режим, подписанный на оба,
+        /// считал бы всякое изменение дважды.
         setSyncedMeta: (key, value) => {
-            syncedFor('global', 0).set(key, value);
+            const store = syncedFor('global', 0);
+            const was = store.get(key);
+
+            store.set(key, value);
             publishSynced('global', 0, key, value);
+            server.fireLocal('globalSyncedMetaChange', [key, value, was]);
         },
         getSyncedMeta: (key) => syncedFor('global', 0).get(key),
+        hasSyncedMeta: (key) => syncedFor('global', 0).has(key),
+        getSyncedMetaKeys: () => [...syncedFor('global', 0).keys()],
         deleteSyncedMeta: (key) => {
-            syncedFor('global', 0).delete(key);
+            const store = syncedFor('global', 0);
+            const was = store.get(key);
+
+            store.delete(key);
             publishSynced('global', 0, key, undefined);
+            server.fireLocal('globalSyncedMetaChange', [key, undefined, was]);
+        },
+
+        /// Общие метаданные, не покидающие сервер.
+        setMeta: (key, value) => {
+            const store = metaFor('global', 0);
+            const was = store.get(key);
+
+            store.set(key, value);
+            server.fireLocal('globalMetaChange', [key, value, was]);
+        },
+        getMeta: (key) => metaFor('global', 0).get(key),
+        hasMeta: (key) => metaFor('global', 0).has(key),
+        getMetaKeys: () => [...metaFor('global', 0).keys()],
+        deleteMeta: (key) => {
+            const store = metaFor('global', 0);
+            const was = store.get(key);
+
+            store.delete(key);
+            server.fireLocal('globalMetaChange', [key, undefined, was]);
         },
     };
 

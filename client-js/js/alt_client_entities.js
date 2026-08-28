@@ -537,9 +537,80 @@
         return trackedByHandle(kVehicleKind, handle) ?? new Vehicle(handle);
     }
 
+    /// У кого из сущностей сессии тело было в прошлом кадре.
+    ///
+    /// Номера, а не объекты: объект берётся из того же реестра и сравнивать их
+    /// незачем, а хранить их здесь значило бы держать вторую ссылку на то, что
+    /// реестр вправе забыть.
+    const bodied = {
+        [kPlayerKind]: new Set(),
+        [kVehicleKind]: new Set(),
+    };
+
+    /// Сверяет, у кого тело появилось, а у кого пропало.
+    ///
+    /// **Событий об этом не было вовсе, а режим на них опирается.** У alt:V
+    /// `worldObjectStreamIn` и `worldObjectStreamOut` — то, чем клиентская
+    /// половина узнаёт, что рядом появился человек или машина: над ними рисуют
+    /// имя, вешают метку, заводят кукле поведение. У проверенного режима на них
+    /// подписаны пять мест, и не приходило туда ничего.
+    ///
+    /// Считается сверкой раз в кадр, а не приходит сообщением, и по-другому не
+    /// выйдет: тело сущности заводит игра у себя, когда ей вздумается, и сервер
+    /// об этом не знает — у одного игрока модель уже загрузилась, у другого ещё
+    /// нет. Ровно поэтому и `streamedIn` считается так же.
+    ///
+    /// `gameEntityCreate` и `gameEntityDestroy` объявляются тем же поводом и
+    /// теми же доводами: у alt:V они означают ровно это — «у сетевой сущности
+    /// появилось (пропало) тело в игре». Разводить их по двум сверкам значило бы
+    /// ходить по одному списку дважды.
+    function watchBodies(kind) {
+        const flat = native.sessionEntities(kind);
+        const now = new Set();
+
+        for (let i = 0; i + 1 < flat.length; i += 2) {
+            const id = flat[i];
+            const handle = flat[i + 1];
+
+            if (handle === 0) {
+                continue;
+            }
+
+            now.add(id);
+
+            if (!bodied[kind].has(id)) {
+                const entity = tracked(kind, id);
+                alt.client.fireLocal('worldObjectStreamIn', [entity]);
+                alt.client.fireLocal('gameEntityCreate', [entity]);
+            }
+        }
+
+        for (const id of bodied[kind]) {
+            if (now.has(id)) {
+                continue;
+            }
+
+            // Сущность, у которой тело пропало, могла и вовсе уйти из сессии.
+            // Объект под неё берётся всё равно: обработчику нужен тот же самый,
+            // с которым он работал, — сравнивают их через `===`, — а реестр
+            // забудет его сам, на ближайшем полном обходе.
+            const entity = tracked(kind, id);
+            alt.client.fireLocal('worldObjectStreamOut', [entity]);
+            alt.client.fireLocal('gameEntityDestroy', [entity]);
+        }
+
+        bodied[kind] = now;
+    }
+
     // --- Сборка ---------------------------------------------------------------
 
     alt.entities = {
+        /// Кадровая сверка тел. Зовётся слоем клиента раз в кадр.
+        watchBodies() {
+            watchBodies(kPlayerKind);
+            watchBodies(kVehicleKind);
+        },
+
         WorldObject,
         Entity,
         Ped,

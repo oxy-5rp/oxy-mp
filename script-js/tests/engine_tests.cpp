@@ -176,8 +176,80 @@ void escapingEntryIsRefused() {
            "точка входа за пределами ресурса принята");
 }
 
+/// Что ресурс записал о себе на диск. Пусто — не записал ничего.
+///
+/// Через файл, а не через возвращённое значение, и обойти это нельзя: у каждого
+/// ресурса свой изолят, и заглянуть в него отсюда нечем. Файл же он пишет тем
+/// же `fs`, каким пользуются настоящие режимы.
+[[nodiscard]] std::string wrote(const std::filesystem::path& where) {
+    std::ifstream file{where, std::ios::binary};
+    if (!file) {
+        return {};
+    }
+
+    return std::string{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+}
+
+void aResourceHearsItsOwnStart() {
+    // `resourceStart` объявляется самому ресурсу, и объявляется после того, как
+    // он попал в список поднятых: обработчик первым делом спрашивает
+    // `alt.Resource.current`, и до списка ответить ему было бы нечем.
+    const Sandbox resource{"index.js",
+                           "const alt = require('alt-server');\n"
+                           "const fs = require('fs');\n"
+                           "const path = require('path');\n"
+                           "alt.on('resourceStart', (errored) =>\n"
+                           "    fs.writeFileSync(path.join(__dirname, 'started.txt'),\n"
+                           "                     `${errored} ${alt.Resource.current.name}`));\n"};
+
+    std::string error;
+    expect(engine()->start("mine", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    // Довод — «поднялся ли с ошибкой», и он ложь: отказавший ресурс до этого
+    // события не доходит вовсе.
+    expect(wrote(resource.root() / "started.txt") == "false mine",
+           "resourceStart не объявлен или пришёл не с тем: " +
+               wrote(resource.root() / "started.txt"));
+
+    engine()->stop("mine");
+}
+
+void aResourceHearsAboutItsNeighbours() {
+    const Sandbox first{"index.js",
+                        "const alt = require('alt-server');\n"
+                        "const fs = require('fs');\n"
+                        "const path = require('path');\n"
+                        "alt.on('anyResourceStart', (name) =>\n"
+                        "    fs.writeFileSync(path.join(__dirname, 'saw.txt'), name));\n"
+                        "alt.on('anyResourceStop', (name) =>\n"
+                        "    fs.writeFileSync(path.join(__dirname, 'gone.txt'), name));\n"};
+
+    std::string error;
+    expect(engine()->start("first", first.root(), "index.js", error),
+           "первый ресурс не поднялся: " + error);
+
+    const Sandbox second{"index.js", "require('alt-server');\n"};
+    expect(engine()->start("second", second.root(), "index.js", error),
+           "второй ресурс не поднялся: " + error);
+
+    expect(wrote(first.root() / "saw.txt") == "second",
+           "сосед не услышал о поднявшемся: " + wrote(first.root() / "saw.txt"));
+
+    engine()->stop("second");
+
+    // Об уходе соседа тоже говорят, и говорят до разбора: обработчик застаёт
+    // уходящего ещё живым.
+    expect(wrote(first.root() / "gone.txt") == "second",
+           "сосед не услышал об ушедшем: " + wrote(first.root() / "gone.txt"));
+
+    engine()->stop("first");
+}
+
 const std::map<std::string, std::function<void()>>& cases() {
     static const std::map<std::string, std::function<void()>> known{
+        {"a-resource-hears-its-own-start", &aResourceHearsItsOwnStart},
+        {"a-resource-hears-about-its-neighbours", &aResourceHearsAboutItsNeighbours},
         {"broken-entry-is-refused", &brokenEntryIsRefused},
         {"absent-name-is-refused", &absentNameIsRefused},
         {"whole-resource-rises-after-broken-one", &wholeResourceRisesAfterBrokenOne},

@@ -321,6 +321,20 @@ enum class PlayerFlag : std::uint32_t {
     /// переставляет персонажа на сиденье. Куда именно он лезет, сказано в тех же
     /// полях vehicleId и seat.
     EnteringVehicle = 1U << 18U,
+
+    /// Вылезает из машины прямо сейчас.
+    ///
+    /// Пара к EnteringVehicle и появился по той же надобности: выход длится
+    /// секунду с лишним, а в снимке его не было вовсе. Пока хозяин открывал
+    /// дверь и вылезал, он числился сидящим; в тот миг, когда он вставал на
+    /// асфальт, признак InVehicle пропадал разом — и получателю оставалось
+    /// только выдернуть куклу из машины рывком. Выхода со стороны не было видно
+    /// никогда.
+    ///
+    /// Машина здесь не называется: к началу выхода хозяин уже не числится
+    /// сидящим ни в какой (см. Vehicles::seatOf), и vehicleId у него пуст.
+    /// Получателю она и не нужна — он помнит, откуда вылезают.
+    LeavingVehicle = 1U << 19U,
 };
 
 [[nodiscard]] constexpr std::uint32_t operator|(PlayerFlag left, PlayerFlag right) noexcept {
@@ -1915,6 +1929,54 @@ struct VehicleTeleport {
 
     void write(ByteWriter& writer) const;
     [[nodiscard]] static VehicleTeleport read(ByteReader& reader);
+};
+
+/// Сколько прочности машина потеряла от попадания.
+///
+/// Одной тройкой на два сообщения: свидетельство стрелявшего и распоряжение
+/// ведущему несут ровно одно и то же, и разойтись этим двум наборам полей
+/// нельзя — иначе убыль, замеченная у одного, приложилась бы у другого не туда.
+struct VehicleHarm {
+    /// Кузов, двигатель и бак — в нумерации игры, где целое kFullVehicleHealth.
+    ///
+    /// Именно убыль, а не оставшаяся прочность: оставшуюся знает ведущий, и
+    /// присылать ему его же число незачем. Убыль же знает только тот, кто попал.
+    std::uint16_t body = 0;
+    std::uint16_t engine = 0;
+    std::uint16_t tank = 0;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleHarm read(ByteReader& reader);
+
+    /// Было ли попадание вообще. Нулевая убыль по всем трём — это не попадание.
+    [[nodiscard]] bool any() const noexcept { return body != 0 || engine != 0 || tank != 0; }
+};
+
+/// Игрок попал по чужой машине. Только от клиента серверу.
+struct VehicleDamageReport {
+    static constexpr MessageId kId = MessageId::VehicleDamageReport;
+
+    VehicleId vehicle = kInvalidVehicleId;
+
+    VehicleHarm harm;
+
+    /// Хеш оружия, которым попали. Нужен не ведущему, а скриптам.
+    std::uint32_t weapon = 0;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleDamageReport read(ByteReader& reader);
+};
+
+/// По машине попали. Только от сервера и только её ведущему.
+struct VehicleDamaged {
+    static constexpr MessageId kId = MessageId::VehicleDamaged;
+
+    VehicleId vehicle = kInvalidVehicleId;
+
+    VehicleHarm harm;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static VehicleDamaged read(ByteReader& reader);
 };
 
 /// Починить машину. Только от сервера и только её ведущему.

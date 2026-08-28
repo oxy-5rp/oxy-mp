@@ -79,6 +79,7 @@ if(WIN32)
         src/game/raw_input.cpp
         src/game/ped_activity.cpp
         src/game/ped_animation.cpp
+        src/game/puppet_duty.cpp
         src/game/ped_appearance.cpp
         src/game/player.cpp
         src/game/remote_players.cpp

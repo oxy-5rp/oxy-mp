@@ -36,6 +36,62 @@ public:
     /// Что ядру велели сделать. Проверки смотрят сюда вместо сети.
     std::vector<std::string> said;
 
+    /// Внешность лица, каким её назначил скрипт.
+    ///
+    /// Своими наборами, а не одним снимком: проверяют здесь не то, как игра
+    /// нарисует лицо, — игры нет вовсе, — а то, что распоряжение дошло и легло
+    /// туда, куда просили. Порядок доводов в этих трёх вызовах перепутать легче
+    /// всего, и увидеть это можно только так.
+    struct HeadBlend {
+        std::uint8_t shapeFirst = 0;
+        std::uint8_t shapeSecond = 0;
+        std::uint8_t shapeThird = 0;
+        std::uint8_t skinFirst = 0;
+        std::uint8_t skinSecond = 0;
+        std::uint8_t skinThird = 0;
+        float shapeMix = 0.0F;
+        float skinMix = 0.0F;
+        float thirdMix = 0.0F;
+
+        [[nodiscard]] friend bool operator==(const HeadBlend&, const HeadBlend&) = default;
+    };
+
+    struct Overlay {
+        std::uint8_t slot = 0;
+        std::uint8_t index = 0;
+        float opacity = 0.0F;
+
+        [[nodiscard]] friend bool operator==(const Overlay&, const Overlay&) = default;
+    };
+
+    struct OverlayColour {
+        std::uint8_t slot = 0;
+        std::uint8_t colourType = 0;
+        std::uint8_t colour = 0;
+        std::uint8_t secondColour = 0;
+
+        [[nodiscard]] friend bool operator==(const OverlayColour&, const OverlayColour&) = default;
+    };
+
+    struct HairColour {
+        std::uint8_t colour = 0;
+        std::uint8_t highlight = 0;
+
+        [[nodiscard]] friend bool operator==(const HairColour&, const HairColour&) = default;
+    };
+
+    std::unordered_map<shared::PlayerId, HeadBlend> headBlend;
+    std::unordered_map<shared::PlayerId, std::vector<Overlay>> overlays;
+    std::unordered_map<shared::PlayerId, std::vector<OverlayColour>> overlayColours;
+    std::unordered_map<shared::PlayerId, HairColour> hairColour;
+    std::unordered_map<shared::PlayerId, std::uint8_t> eyeColour;
+
+    /// Внешность целиком — то, что отдаётся на вопрос о ней.
+    std::unordered_map<shared::PlayerId, shared::PlayerAppearance> looks;
+
+    /// Чем игроки вооружены.
+    std::unordered_map<shared::PlayerId, std::vector<shared::WeaponSlot>> carried;
+
     shared::VehicleId nextVehicleId = 1;
     shared::ObjectId nextObjectId = 1;
     shared::PedId nextPedId = 1;
@@ -74,6 +130,23 @@ public:
         return it == playerList.end() ? std::nullopt : std::optional{*it};
     }
 
+    bool removeWeapon(shared::PlayerId id, std::uint32_t weapon) override {
+        if (!player(id) || weapon == 0) {
+            return false;
+        }
+
+        said.push_back(std::format("weapon- {} {:#x}", id, weapon));
+        return std::erase_if(carried[id], [weapon](const shared::WeaponSlot& slot) {
+                   return slot.weapon == weapon;
+               }) != 0;
+    }
+
+    [[nodiscard]] std::vector<shared::WeaponSlot> loadout(
+        shared::PlayerId id) const override {
+        const auto found = carried.find(id);
+        return found == carried.end() ? std::vector<shared::WeaponSlot>{} : found->second;
+    }
+
     bool addWeaponComponent(shared::PlayerId id, std::uint32_t weapon,
                             std::uint32_t component) override {
         if (!player(id) || weapon == 0 || component == 0) {
@@ -101,6 +174,48 @@ public:
 
         said.push_back(std::format("tint {} {:#x} {}", id, weapon, tint));
         return true;
+    }
+
+    /// Внешность лица. Складывается в снимок, как и одежда: набор здесь
+    /// проверяет, что распоряжение дошло и легло куда надо, а не то, как игра
+    /// его нарисует.
+    bool setHeadBlend(shared::PlayerId id, std::uint8_t shapeFirst, std::uint8_t shapeSecond,
+                      std::uint8_t shapeThird, std::uint8_t skinFirst, std::uint8_t skinSecond,
+                      std::uint8_t skinThird, float shapeMix, float skinMix,
+                      float thirdMix) override {
+        headBlend[id] = {shapeFirst, shapeSecond, shapeThird, skinFirst,
+                         skinSecond, skinThird, shapeMix,     skinMix,
+                         thirdMix};
+        return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    bool setHeadOverlay(shared::PlayerId id, std::uint8_t slot, std::uint8_t index,
+                        float opacity) override {
+        overlays[id].push_back({slot, index, opacity});
+        return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    bool setHeadOverlayColour(shared::PlayerId id, std::uint8_t slot, std::uint8_t colourType,
+                              std::uint8_t colour, std::uint8_t secondColour) override {
+        overlayColours[id].push_back({slot, colourType, colour, secondColour});
+        return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    bool setHairColour(shared::PlayerId id, std::uint8_t colour, std::uint8_t highlight) override {
+        hairColour[id] = {colour, highlight};
+        return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    bool setEyeColour(shared::PlayerId id, std::uint8_t colour) override {
+        eyeColour[id] = colour;
+        return std::ranges::find(playerList, id, &PlayerInfo::id) != playerList.end();
+    }
+
+    [[nodiscard]] std::optional<shared::PlayerAppearance> appearance(
+        shared::PlayerId id) const override {
+        const auto found = looks.find(id);
+        return found == looks.end() ? std::nullopt
+                                    : std::optional<shared::PlayerAppearance>{found->second};
     }
 
     bool playAnimation(shared::PlayerId id, const AnimationInfo& animation) override {
@@ -437,6 +552,18 @@ public:
         return std::erase_if(objectList, [id](const ObjectInfo& info) {
                    return info.id == id;
                }) != 0;
+    }
+
+    bool moveObject(shared::ObjectId id, const shared::Vec3& position,
+                    const shared::Vec3& rotation) override {
+        const auto it = std::ranges::find(objectList, id, &ObjectInfo::id);
+        if (it == objectList.end()) {
+            return false;
+        }
+
+        it->position = position;
+        it->rotation = rotation;
+        return true;
     }
 
     bool setObjectDimension(shared::ObjectId id, std::int32_t dimension) override {

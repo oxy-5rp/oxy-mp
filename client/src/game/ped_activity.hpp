@@ -67,6 +67,7 @@ private:
 
     NativeHandler isShooting_ = nullptr;
     NativeHandler isAiming_ = nullptr;
+    NativeHandler isTargetting_ = nullptr;
     NativeHandler isRagdoll_ = nullptr;
     NativeHandler isJumping_ = nullptr;
     NativeHandler stealthMovement_ = nullptr;
@@ -83,6 +84,7 @@ private:
     NativeHandler isDrivingBy_ = nullptr;
     NativeHandler isInMelee_ = nullptr;
     NativeHandler gettingIntoVehicle_ = nullptr;
+    NativeHandler inAnyVehicle_ = nullptr;
     NativeHandler vehicleEntering_ = nullptr;
     NativeHandler seatEntering_ = nullptr;
     NativeHandler getArmour_ = nullptr;

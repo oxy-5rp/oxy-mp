@@ -43,6 +43,12 @@ public:
     [[nodiscard]] shared::ObjectId add(std::uint32_t model, const shared::Vec3& position,
                                        const shared::Vec3& rotation, std::size_t limit);
 
+    /// Переставляет предмет в другое место. false — предмета уже нет.
+    ///
+    /// Предмет по-прежнему стоит: двигает его сервер, а не физика, и двигает
+    /// сразу у всех. Тем он и отличается от машины, у которой есть ведущий.
+    bool move(shared::ObjectId id, const shared::Vec3& position, const shared::Vec3& rotation);
+
     /// Переставляет предмет в другой слой мира. false — предмета уже нет.
     bool setDimension(shared::ObjectId id, std::int32_t dimension);
 

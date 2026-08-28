@@ -1,5 +1,6 @@
 #include "rockstar_launcher.hpp"
 
+#include "process_lookup.hpp"
 #include "registry.hpp"
 
 #include <filesystem>
@@ -92,6 +93,39 @@ bool ensureRockstarLauncherReady(std::chrono::seconds timeout, std::string& erro
 
     error = "Rockstar Games Launcher started but never began answering";
     return false;
+}
+
+bool closeRockstarLauncher(std::string& note) {
+    const std::uint32_t pid = findProcessByName(kLauncherExecutableName);
+
+    if (pid == 0) {
+        note = "Rockstar Games Launcher is not running";
+        return false;
+    }
+
+    // Закрывается он именно так, а не сообщением окну, и это не грубость.
+    // Лаунчер на закрытие окна не выходит — он сворачивается в область
+    // уведомлений и продолжает работать; ровно поэтому его и приходится закрывать
+    // человеку через диспетчер задач.
+    const HANDLE process = ::OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+
+    if (process == nullptr) {
+        note = std::format("could not open Rockstar Games Launcher (pid {}): error {}", pid,
+                           ::GetLastError());
+        return false;
+    }
+
+    const bool closed = ::TerminateProcess(process, 0) != FALSE;
+
+    if (!closed) {
+        note = std::format("could not close Rockstar Games Launcher (pid {}): error {}", pid,
+                           ::GetLastError());
+    } else {
+        note = std::format("Rockstar Games Launcher (pid {}) closed", pid);
+    }
+
+    ::CloseHandle(process);
+    return closed;
 }
 
 } // namespace oxymp::launcher

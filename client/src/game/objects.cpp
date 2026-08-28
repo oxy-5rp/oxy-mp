@@ -24,6 +24,7 @@ Objects::Objects(const NativeTable& table) noexcept
       createObject_(table.handlerFor(natives::kCreateObjectNoOffset)),
       deleteObject_(table.handlerFor(natives::kDeleteObject)),
       doesExist_(table.handlerFor(natives::kDoesEntityExist)),
+      setCoords_(table.handlerFor(natives::kSetEntityCoords)),
       setRotation_(table.handlerFor(natives::kSetEntityRotation)),
       freezePosition_(table.handlerFor(natives::kFreezeEntityPosition)),
       asMissionEntity_(table.handlerFor(natives::kSetEntityAsMissionEntity)),
@@ -88,6 +89,25 @@ int Objects::spawn(const Entry& entry) {
     return handle;
 }
 
+void Objects::place(const Entry& entry) const {
+    if (entry.handle == 0) {
+        return;
+    }
+
+    if (setCoords_ != nullptr) {
+        // Последние четыре довода — те же, что и у перестановки игрока:
+        // не смещать по осям и не искать землю под ногами. Предмет ставится
+        // ровно туда, куда сказал сервер.
+        invokeNative<void>(setCoords_, entry.handle, entry.position.x, entry.position.y,
+                           entry.position.z, false, false, false, false);
+    }
+
+    if (setRotation_ != nullptr) {
+        invokeNative<void>(setRotation_, entry.handle, entry.rotation.x, entry.rotation.y,
+                           entry.rotation.z, kRotationOrder, true);
+    }
+}
+
 void Objects::destroy(int handle) const {
     if (handle == 0 || deleteObject_ == nullptr) {
         return;
@@ -107,9 +127,31 @@ void Objects::add(const shared::ObjectAdded& object) {
     }
 
     // Повторное объявление того же предмета — обычное дело: игрок отошёл, потом
-    // вернулся. Заводить второй такой же не нужно.
-    if (objects_.contains(object.id)) {
-        return;
+    // вернулся, либо сервер его переставил. Заводить второй такой же не нужно —
+    // нужно поправить тот, что уже стоит.
+    if (const auto known = objects_.find(object.id); known != objects_.end()) {
+        Entry& entry = known->second;
+
+        // Модель сменить у готового предмета нельзя: модель это и есть его
+        // тело. Присланная другая означает «завести заново».
+        if (entry.model != object.model) {
+            destroy(entry.handle);
+            objects_.erase(known);
+        } else {
+            const bool moved = entry.position != object.position ||
+                               entry.rotation != object.rotation;
+
+            entry.position = object.position;
+            entry.rotation = object.rotation;
+
+            // Незаведённый предмет переставлять нечем: тела у него ещё нет.
+            // Новое место при этом уже записано, и заведётся он сразу на нём.
+            if (moved && entry.handle != 0) {
+                place(entry);
+            }
+
+            return;
+        }
     }
 
     Entry entry;

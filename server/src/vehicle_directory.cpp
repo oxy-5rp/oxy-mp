@@ -151,6 +151,27 @@ VehicleDirectory::Seat VehicleDirectory::seatOf(shared::PlayerId player) const {
     return it == seats_.end() ? Seat{} : it->second;
 }
 
+std::vector<std::pair<std::int8_t, shared::PlayerId>> VehicleDirectory::seatedIn(
+    shared::VehicleId vehicle) const {
+    std::vector<std::pair<std::int8_t, shared::PlayerId>> sitting;
+
+    if (vehicle == shared::kInvalidVehicleId) {
+        return sitting;
+    }
+
+    for (const auto& [player, seat] : seats_) {
+        if (seat.vehicle == vehicle) {
+            sitting.emplace_back(seat.index, player);
+        }
+    }
+
+    // Порядок у хеш-таблицы свой, и наружу он уходил бы разным от запуска к
+    // запуску. Скрипту это встало бы боком не сразу, а в тот день, когда он
+    // возьмёт «первого пассажира»: сегодня им окажется один, завтра другой.
+    std::ranges::sort(sitting);
+    return sitting;
+}
+
 const VehicleDirectory::Vehicle* VehicleDirectory::find(shared::VehicleId id) const {
     const auto it = vehicles_.find(id);
     return it == vehicles_.end() ? nullptr : &it->second;

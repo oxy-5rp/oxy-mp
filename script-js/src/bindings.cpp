@@ -3,6 +3,8 @@
 #include "convert.hpp"
 #include "resource.hpp"
 
+#include <oxymp/script/js/alt_seat.hpp>
+
 #include <oxymp/shared/math/joaat.hpp>
 #include <oxymp/shared/protocol/protocol_version.hpp>
 
@@ -103,6 +105,97 @@ void playerField(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&
     } else {
         info.GetReturnValue().Set(static_cast<double>((*player).*Field));
     }
+}
+
+/// Стоит ли у игрока этот признак состояния.
+///
+/// Отдельным обработчиком на признак, а не одним числом наружу: у alt:V это
+/// два десятка отдельных полей — `isAiming`, `isDead`, `isReloading`, — и
+/// режим спрашивает именно их. Отдай мы число, всякий ресурс начинался бы с
+/// собственного разбора наших битов, которых он не знает.
+///
+/// Признак читается из снимка на каждое обращение, как и всё остальное здесь:
+/// запомненный, он врал бы тем убедительнее, чем дольше его не трогали.
+template<shared::PlayerFlag Flag>
+void playerFlag(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        // Вышедший отвечает пустотой, а не «нет»: «нет» означало бы, что игрок
+        // есть и не целится, — а его нет вовсе.
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(shared::has(player->flags, Flag));
+}
+
+/// В воде ли он.
+///
+/// Своим обработчиком, потому что у нас это два признака, а у alt:V один:
+/// плывущий по поверхности и ушедший под воду для него одинаково `isInWater`.
+void playerInWater(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(shared::has(player->flags, shared::PlayerFlag::Swimming) ||
+                              shared::has(player->flags, shared::PlayerFlag::Diving));
+}
+
+/// Вышел ли игрок в мир.
+///
+/// У alt:V `isSpawned` означает «персонаж заведён и стоит в мире». Ближайшая
+/// правда, которая у нас есть, — объявил ли игрок свою внешность: до этого
+/// мгновения его персонажа нет ни у кого, включая его самого. Догадкой это не
+/// назовёшь: модель приезжает ровно тогда, когда игра завела тело.
+void playerSpawned(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+
+    info.GetReturnValue().Set(player.has_value() && player->model != 0);
+}
+
+/// Место в машине, в нумерации alt:V.
+///
+/// Своим обработчиком, а не через playerField: в снимке место лежит в
+/// нумерации игры, а наружу обязано уйти в нумерации alt:V (alt_seat.hpp).
+void playerSeat(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    if (!player) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(toAltSeat(player->seat)));
 }
 
 /// Есть ли ещё такой игрок.
@@ -231,6 +324,401 @@ void playerSetClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(done);
 }
 
+/// Кладёт поле в объект. Помощник для ответов, состоящих из нескольких чисел.
+void putNumber(v8::Local<v8::Context> context, const v8::Local<v8::Object>& target,
+               const char* name, double value) {
+    (void)target->Set(context, toJs(context->GetIsolate(), std::string{name}),
+                      v8::Number::New(context->GetIsolate(), value));
+}
+
+/// Есть ли у игрока такой ствол.
+void playerHasWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> weapon = argAt(info, 0);
+
+    if (!id || !weapon) {
+        fail(isolate, "hasWeapon ждёт хеш оружия числом");
+        return;
+    }
+
+    const std::vector<shared::WeaponSlot> carried = resourceOf(isolate).core().loadout(*id);
+    const auto hash = static_cast<std::uint32_t>(*weapon);
+
+    info.GetReturnValue().Set(
+        std::ranges::find(carried, hash, &shared::WeaponSlot::weapon) != carried.end());
+}
+
+/// Сколько патронов сервер выдал к этому стволу.
+///
+/// Именно выдал, а не сколько осталось в магазине сию секунду: тратит их игра у
+/// владельца, и сервер узнаёт остаток из снимков. Число здесь — то, что уйдёт
+/// игроку, если вернуть ему снаряжение.
+void playerWeaponAmmo(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> weapon = argAt(info, 0);
+
+    if (!id || !weapon) {
+        fail(isolate, "getWeaponAmmo ждёт хеш оружия числом");
+        return;
+    }
+
+    const std::vector<shared::WeaponSlot> carried = resourceOf(isolate).core().loadout(*id);
+    const auto found =
+        std::ranges::find(carried, static_cast<std::uint32_t>(*weapon), &shared::WeaponSlot::weapon);
+
+    if (found == carried.end()) {
+        // Ствола нет — пустота, а не ноль. Ноль означал бы «есть и пуст», и
+        // режим, решающий по нему выдать патроны, выдал бы их в никуда.
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>(found->ammo));
+}
+
+/// Чем игрок вооружён: список того же вида, что у alt:V.
+void playerWeapons(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::vector<shared::WeaponSlot> carried = resourceOf(isolate).core().loadout(*id);
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(carried.size()));
+
+    for (std::size_t at = 0; at < carried.size(); ++at) {
+        const shared::WeaponSlot& slot = carried[at];
+        const v8::Local<v8::Object> entry = v8::Object::New(isolate);
+
+        // Имена полей — alt:V: `hash`, `tintIndex`, `components`.
+        putNumber(context, entry, "hash", slot.weapon);
+        putNumber(context, entry, "ammo", slot.ammo);
+        putNumber(context, entry, "tintIndex", slot.tint);
+
+        const v8::Local<v8::Array> parts =
+            v8::Array::New(isolate, static_cast<int>(slot.components.size()));
+
+        for (std::size_t which = 0; which < slot.components.size(); ++which) {
+            (void)parts->Set(context, static_cast<std::uint32_t>(which),
+                             v8::Number::New(isolate,
+                                             static_cast<double>(slot.components[which])));
+        }
+
+        (void)entry->Set(context, toJs(isolate, std::string{"components"}), parts);
+        (void)list->Set(context, static_cast<std::uint32_t>(at), entry);
+    }
+
+    info.GetReturnValue().Set(list);
+}
+
+/// Отбирает один ствол.
+void playerRemoveWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> weapon = argAt(info, 0);
+
+    if (!id || !weapon) {
+        fail(isolate, "removeWeapon ждёт хеш оружия числом");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().removeWeapon(*id, static_cast<std::uint32_t>(*weapon)));
+}
+
+/// Дробное из довода по месту. Пусто — довода нет или он не число.
+///
+/// Отдельно от argAt, потому что доли смешения лица дробные, а целочисленное
+/// чтение обратило бы 0.75 в ноль — то есть в другое лицо, без единой жалобы.
+[[nodiscard]] std::optional<double> realAt(const v8::FunctionCallbackInfo<v8::Value>& info,
+                                           int index) {
+    if (info.Length() <= index) {
+        return std::nullopt;
+    }
+
+    double value = 0.0;
+    if (!info[index]->NumberValue(info.GetIsolate()->GetCurrentContext()).To(&value)) {
+        return std::nullopt;
+    }
+
+    return value;
+}
+
+/// Собирает лицо: два родителя, третий вклад и три доли смешения.
+void playerSetHeadBlend(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    // Порядок доводов — alt:V: shapeFirstID, shapeSecondID, shapeThirdID,
+    // skinFirstID, skinSecondID, skinThirdID, shapeMix, skinMix, thirdMix.
+    // Переставить их местами значило бы собрать чужое лицо без единой жалобы.
+    const auto whole = [&](int at) {
+        return static_cast<std::uint8_t>(argAt(info, at).value_or(0));
+    };
+
+    const bool done = resourceOf(isolate).core().setHeadBlend(
+        *id, whole(0), whole(1), whole(2), whole(3), whole(4), whole(5),
+        static_cast<float>(realAt(info, 6).value_or(0.0)),
+        static_cast<float>(realAt(info, 7).value_or(0.0)),
+        static_cast<float>(realAt(info, 8).value_or(0.0)));
+
+    info.GetReturnValue().Set(done);
+}
+
+/// Ставит слой лица: бороду, брови, макияж, шрамы.
+void playerSetHeadOverlay(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> slot = argAt(info, 0);
+    const std::optional<std::int64_t> index = argAt(info, 1);
+
+    if (!slot || !index) {
+        fail(isolate, "setHeadOverlay ждёт слой и его номер числами");
+        return;
+    }
+
+    // Заметность необязательна: у alt:V она с умолчанием в единицу.
+    const double opacity = realAt(info, 2).value_or(1.0);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setHeadOverlay(
+        *id, static_cast<std::uint8_t>(*slot), static_cast<std::uint8_t>(*index),
+        static_cast<float>(opacity)));
+}
+
+/// Красит слой лица.
+void playerSetHeadOverlayColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> slot = argAt(info, 0);
+    const std::optional<std::int64_t> kind = argAt(info, 1);
+    const std::optional<std::int64_t> colour = argAt(info, 2);
+
+    if (!slot || !kind || !colour) {
+        fail(isolate, "setHeadOverlayColor ждёт слой, род цвета и сам цвет числами");
+        return;
+    }
+
+    const std::int64_t second = argAt(info, 3).value_or(*colour);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setHeadOverlayColour(
+        *id, static_cast<std::uint8_t>(*slot), static_cast<std::uint8_t>(*kind),
+        static_cast<std::uint8_t>(*colour), static_cast<std::uint8_t>(second)));
+}
+
+/// Цвет волос и мелирования.
+void playerSetHairColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> colour = argAt(info, 0);
+    if (!colour) {
+        fail(isolate, "setHairColor ждёт цвет числом");
+        return;
+    }
+
+    // Мелирование необязательно: не названное, оно берётся тем же цветом —
+    // тогда его попросту не видно. Ноль здесь означал бы чёрную прядь.
+    const std::int64_t highlight = argAt(info, 1).value_or(*colour);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setHairColour(
+        *id, static_cast<std::uint8_t>(*colour), static_cast<std::uint8_t>(highlight)));
+}
+
+/// Цвет глаз.
+void playerSetEyeColour(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<std::int64_t> colour = argAt(info, 0);
+    if (!colour) {
+        fail(isolate, "setEyeColor ждёт цвет числом");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().setEyeColour(*id, static_cast<std::uint8_t>(*colour)));
+}
+
+/// Что на игроке надето в этом слоте: вещь, расцветка, набор цветов.
+///
+/// Вопрос, а не распоряжение, и потому отсутствие ответа здесь — пустота, а не
+/// молчание: у игрока, не объявившего внешности, одежды нет вовсе, и выдать за
+/// неё нули значило бы соврать про голого как про одетого.
+void playerGetClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> slot = argAt(info, 0);
+
+    if (!id || !slot) {
+        fail(isolate, "getClothes ждёт слот числом");
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+
+    if (!look || *slot < 0 || *slot >= static_cast<std::int64_t>(shared::kPedComponentCount)) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const shared::PedComponent& worn = look->components[static_cast<std::size_t>(*slot)];
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> answer = v8::Object::New(isolate);
+
+    // Имена полей — alt:V: `drawable`, `texture`, `palette`. Своё написание
+    // означало бы, что ответ есть, а читают из него пустоту.
+    putNumber(context, answer, "drawable", worn.drawable);
+    putNumber(context, answer, "texture", worn.texture);
+    putNumber(context, answer, "palette", worn.palette);
+
+    info.GetReturnValue().Set(answer);
+}
+
+/// Что на игроке за аксессуар в этом месте.
+void playerGetProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> slot = argAt(info, 0);
+
+    if (!id || !slot) {
+        fail(isolate, "getProp ждёт место числом");
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+
+    if (!look || *slot < 0 || *slot >= static_cast<std::int64_t>(shared::kPedPropCount)) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const shared::PedProp& worn = look->props[static_cast<std::size_t>(*slot)];
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> answer = v8::Object::New(isolate);
+
+    putNumber(context, answer, "drawable", worn.drawable);
+    putNumber(context, answer, "texture", worn.texture);
+
+    info.GetReturnValue().Set(answer);
+}
+
+/// Из чего собрано лицо.
+void playerGetHeadBlend(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+    if (!look) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> answer = v8::Object::New(isolate);
+
+    // Имена полей взяты у alt:V из `IHeadBlendData` дословно.
+    putNumber(context, answer, "shapeFirstID", look->shapeFirst);
+    putNumber(context, answer, "shapeSecondID", look->shapeSecond);
+    putNumber(context, answer, "shapeThirdID", look->shapeThird);
+    putNumber(context, answer, "skinFirstID", look->skinFirst);
+    putNumber(context, answer, "skinSecondID", look->skinSecond);
+    putNumber(context, answer, "skinThirdID", look->skinThird);
+    putNumber(context, answer, "shapeMix", look->shapeMix);
+    putNumber(context, answer, "skinMix", look->skinMix);
+    putNumber(context, answer, "thirdMix", look->thirdMix);
+
+    info.GetReturnValue().Set(answer);
+}
+
+/// Что за слой стоит на лице и каким он покрашен.
+void playerGetHeadOverlay(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> slot = argAt(info, 0);
+
+    if (!id || !slot) {
+        fail(isolate, "getHeadOverlay ждёт слой числом");
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+
+    if (!look || *slot < 0 || *slot >= static_cast<std::int64_t>(shared::kPedOverlayCount)) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const shared::PedOverlay& layer = look->overlays[static_cast<std::size_t>(*slot)];
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> answer = v8::Object::New(isolate);
+
+    // Имена полей — из `IHeadOverlay` у alt:V.
+    putNumber(context, answer, "index", layer.index);
+    putNumber(context, answer, "opacity", layer.opacity);
+    putNumber(context, answer, "colorType", layer.colourType);
+    putNumber(context, answer, "colorIndex", layer.colour);
+    putNumber(context, answer, "secondColorIndex", layer.secondColour);
+
+    info.GetReturnValue().Set(answer);
+}
+
+/// Отдельные числа внешности: цвет волос, мелирования и глаз.
+template<std::uint8_t shared::PlayerAppearance::* Field>
+void playerLookField(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<shared::PlayerAppearance> look = resourceOf(isolate).core().appearance(*id);
+    if (!look) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(static_cast<double>((*look).*Field));
+}
+
 /// Надевает аксессуар: шляпу, очки, серьги, часы, браслет.
 void playerSetProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -278,6 +766,58 @@ void playerClearProp(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(done);
 }
 
+/// Снимает всю одежду: каждый слот в нулевую вещь.
+///
+/// Нулевая вещь, а не «ничего»: у персонажа нет состояния «без слота» — есть
+/// нулевой рисунок, и именно его игра показывает голым телом. Ровно так же
+/// поступает и `clearClothes` у alt:V.
+void playerClearClothes(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+    bool done = false;
+
+    for (std::uint8_t slot = 0; slot < shared::kPedComponentCount; ++slot) {
+        // Каждый слот отдельным распоряжением, но рассылка от этого не растёт
+        // вдвенадцатеро: уходит наружу вся внешность целиком одним сообщением,
+        // а здесь меняются её поля.
+        done = core.setClothes(*id, slot, 0, 0, 0) || done;
+    }
+
+    info.GetReturnValue().Set(done);
+}
+
+/// Цвет мелирования отдельно от цвета волос.
+///
+/// У alt:V это два метода, а у ядра один вызов на оба цвета: игре они уходят
+/// одним нативом. Поэтому цвет волос здесь спрашивается у самого игрока и
+/// ставится обратно как есть — иначе просьба о мелировании перекрасила бы
+/// заодно и волосы.
+void playerSetHairHighlight(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    const std::optional<std::int64_t> colour = argAt(info, 0);
+
+    if (!id || !colour) {
+        fail(isolate, "setHairHighlightColor ждёт цвет числом");
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    const std::optional<shared::PlayerAppearance> look = core.appearance(*id);
+    const std::uint8_t hair = look ? look->hairColour : 0;
+
+    info.GetReturnValue().Set(
+        core.setHairColour(*id, hair, static_cast<std::uint8_t>(*colour)));
+}
+
 /// Переставляет машину: точка и, необязательно, поворот.
 void vehicleTeleport(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -310,6 +850,128 @@ void vehicleTeleport(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     info.GetReturnValue().Set(
         core.teleportVehicle(*id, *position, static_cast<float>(heading)));
+}
+
+/// Присваивание, которого мы не умеем исполнить.
+///
+/// Говорит о себе один раз в журнал и возвращается — не бросает. Разница не в
+/// громкости, а в цене: присваивание стоит посреди чужого обработчика, и
+/// брошенное отсюда исключение уносит с собой всё, что шло следом. Так уже было
+/// дважды — `player.model` унёс показ интерфейса при входе, `vehicle.repair`
+/// унёс починку машин целиком.
+///
+/// В C++, а не в слое на JavaScript, и это вынужденно: аксессоры ядра ставятся
+/// на **экземпляр** (`InstanceTemplate`), а не на прототип, — и определение
+/// того же имени на прототипе оказалось бы мёртвым кодом. Заметить это можно
+/// было бы только по тому, что отказ молчит.
+template<const char* What, const char* Why>
+void refuseAssignment(v8::Local<v8::Name>, v8::Local<v8::Value>,
+                      const v8::PropertyCallbackInfo<void>&) {
+    static bool told = false;
+
+    if (told) {
+        return;
+    }
+
+    told = true;
+    spdlog::warn("{}: {}", What, Why);
+}
+
+// Строки для отказов. Отдельными переменными, потому что доводом шаблона
+// строковый литерал быть не может, а внешняя связь у них нужна затем, чтобы имя
+// годилось в довод шаблона.
+extern const char kBodyHealthWhat[] = "vehicle.bodyHealth";
+extern const char kEngineHealthWhat[] = "vehicle.engineHealth";
+extern const char kTankHealthWhat[] = "vehicle.petrolTankHealth";
+extern const char kEngineOnWhat[] = "vehicle.engineOn";
+extern const char kSirenWhat[] = "vehicle.sirenActive";
+
+extern const char kLeaderOwnsIt[] =
+    "машина живёт в игре у своего ведущего, и это назначает он, а не сервер; "
+    "починить её целиком умеет vehicle.repair()";
+
+/// Стоит ли у машины этот признак. Пара к playerFlag, и по той же причине.
+template<shared::VehicleFlag Flag>
+void vehicleFlag(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<VehicleInfo> vehicle = resourceOf(isolate).core().vehicle(*id);
+    if (!vehicle) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    info.GetReturnValue().Set(shared::has(vehicle->flags, Flag));
+}
+
+/// Кто в машине сидит: объект «место — игрок», как у alt:V.
+///
+/// Места в его нумерации: единица — водитель. У alt:V это `passengers`, и он
+/// же приводит в описании пример с `Object.entries` — значит объект, а не
+/// массив, и ключи в нём строки.
+void vehiclePassengers(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        return;
+    }
+
+    const std::optional<VehicleInfo> vehicle = resourceOf(isolate).core().vehicle(*id);
+    if (!vehicle) {
+        info.GetReturnValue().SetUndefined();
+        return;
+    }
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> answer = v8::Object::New(isolate);
+
+    for (const auto& [seat, player] : vehicle->passengers) {
+        (void)answer->Set(context, toJs(isolate, std::to_string(toAltSeat(seat))),
+                          wrapPlayer(resourceOf(isolate), context, player));
+    }
+
+    info.GetReturnValue().Set(answer);
+}
+
+/// Переставляет предмет: точка и, если названа, поворот.
+///
+/// Одним действием на то и другое, а не двумя свойствами: до клиента и то и
+/// другое доходит одним объявлением, и разделять их значило бы слать два там,
+/// где хватает одного. Свойства `pos` и `rot` слой alt:V строит поверх этого.
+void objectPlace(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::ObjectId> id = idOf<shared::ObjectId>(info.This());
+    if (!id) {
+        fail(isolate, "place зовётся у предмета");
+        return;
+    }
+
+    Core& core = resourceOf(isolate).core();
+
+    const std::optional<ObjectInfo> object = core.object(*id);
+    if (!object) {
+        info.GetReturnValue().Set(false);
+        return;
+    }
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    // Не названное берётся у самого предмета: перестановка не должна
+    // разворачивать его на север, а разворот — утаскивать в начало координат.
+    const std::optional<shared::Vec3> position =
+        info.Length() >= 1 ? vec3FromJs(context, info[0]) : std::nullopt;
+    const std::optional<shared::Vec3> rotation =
+        info.Length() >= 2 ? vec3FromJs(context, info[1]) : std::nullopt;
+
+    info.GetReturnValue().Set(core.moveObject(*id, position.value_or(object->position),
+                                              rotation.value_or(object->rotation)));
 }
 
 /// Чинит машину: кузов, двигатель, стёкла, двери, колёса и вмятины.
@@ -357,10 +1019,14 @@ void playerSetIntoVehicle(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     // Место необязательно: не названное, оно означает «за руль» — так же
     // толкует его и alt:V.
-    const std::int64_t seat = argAt(info, 1).value_or(shared::kNoSeat);
+    //
+    // Число здесь в нумерации alt:V, а не игры: единица — водитель. Перевод —
+    // alt_seat.hpp, и до него просьба «посади за руль» усаживала на второе
+    // пассажирское место молча.
+    const std::int64_t seat = argAt(info, 1).value_or(kAltDriverSeat);
 
-    info.GetReturnValue().Set(resourceOf(isolate).core().setIntoVehicle(
-        *id, *vehicle, static_cast<std::int8_t>(seat)));
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().setIntoVehicle(*id, *vehicle, fromAltSeat(seat)));
 }
 
 /// В каком слое мира игрок. Ставится числом; всё, что не число, пропускается.
@@ -2007,8 +2673,32 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "health", playerField<&PlayerInfo::health>, setPlayerHealth);
     addGetter(isolate, shape, "armour", playerField<&PlayerInfo::armour>, setPlayerArmour);
     addGetter(isolate, shape, "model", playerField<&PlayerInfo::model>, setPlayerModel);
-    addGetter(isolate, shape, "seat", playerField<&PlayerInfo::seat>);
+    addGetter(isolate, shape, "seat", playerSeat);
     addGetter(isolate, shape, "admin", playerField<&PlayerInfo::admin>);
+
+    // Что у него в руках и куда он целится. Имена — alt:V, поля — те же, что
+    // ехали в снимке с самого начала.
+    addGetter(isolate, shape, "currentWeapon", playerField<&PlayerInfo::weapon>);
+    addGetter(isolate, shape, "aimPos", playerField<&PlayerInfo::aimAt>);
+
+    // Признаки состояния. Имена и их набор взяты у alt:V дословно, порядок —
+    // его же; наши имена признаков (Melee, ExitingVehicle, Ragdoll) с ними не
+    // совпадают, и перевод живёт ровно здесь.
+    addGetter(isolate, shape, "isDead", playerFlag<shared::PlayerFlag::Dead>);
+    addGetter(isolate, shape, "isAiming", playerFlag<shared::PlayerFlag::Aiming>);
+    addGetter(isolate, shape, "isShooting", playerFlag<shared::PlayerFlag::Shooting>);
+    addGetter(isolate, shape, "isInRagdoll", playerFlag<shared::PlayerFlag::Ragdoll>);
+    addGetter(isolate, shape, "isJumping", playerFlag<shared::PlayerFlag::Jumping>);
+    addGetter(isolate, shape, "isCrouching", playerFlag<shared::PlayerFlag::Crouching>);
+    addGetter(isolate, shape, "isParachuting", playerFlag<shared::PlayerFlag::Parachuting>);
+    addGetter(isolate, shape, "isReloading", playerFlag<shared::PlayerFlag::Reloading>);
+    addGetter(isolate, shape, "isInCover", playerFlag<shared::PlayerFlag::InCover>);
+    addGetter(isolate, shape, "isInMelee", playerFlag<shared::PlayerFlag::Melee>);
+    addGetter(isolate, shape, "isEnteringVehicle",
+              playerFlag<shared::PlayerFlag::EnteringVehicle>);
+    addGetter(isolate, shape, "isLeavingVehicle", playerFlag<shared::PlayerFlag::LeavingVehicle>);
+    addGetter(isolate, shape, "isInWater", playerInWater);
+    addGetter(isolate, shape, "isSpawned", playerSpawned);
     addGetter(isolate, shape, "dimension", playerField<&PlayerInfo::dimension>,
               setPlayerDimension);
     addGetter(isolate, shape, "vehicle", playerVehicle);
@@ -2017,12 +2707,43 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "teleport", playerTeleport);
     addMethod(isolate, shape, "giveWeapon", playerGiveWeapon);
     addMethod(isolate, shape, "clearWeapons", playerClearWeapons);
+
+    // Снаряжение: спросить и отобрать. Имена — alt:V; `removeAllWeapons` у него
+    // делает то же, что у ядра `clearWeapons`, и потому идёт вторым именем, а не
+    // вторым действием.
+    addGetter(isolate, shape, "weapons", playerWeapons);
+    addMethod(isolate, shape, "hasWeapon", playerHasWeapon);
+    addMethod(isolate, shape, "getWeaponAmmo", playerWeaponAmmo);
+    addMethod(isolate, shape, "removeWeapon", playerRemoveWeapon);
+    addMethod(isolate, shape, "removeAllWeapons", playerClearWeapons);
     addMethod(isolate, shape, "addWeaponComponent", playerAddWeaponComponent);
     addMethod(isolate, shape, "removeWeaponComponent", playerRemoveWeaponComponent);
     addMethod(isolate, shape, "setWeaponTintIndex", playerSetWeaponTint);
     addMethod(isolate, shape, "setClothes", playerSetClothes);
     addMethod(isolate, shape, "setProp", playerSetProp);
+
+    // Внешность лица. Имена — alt:V, вплоть до американского написания цвета:
+    // ресурсы написаны под `setHeadOverlayColor`, и своё написание здесь
+    // означало бы, что метод есть, а зовут его мимо.
+    addMethod(isolate, shape, "getClothes", playerGetClothes);
+    addMethod(isolate, shape, "getProp", playerGetProp);
+    addMethod(isolate, shape, "getHeadBlendData", playerGetHeadBlend);
+    addMethod(isolate, shape, "getHeadOverlay", playerGetHeadOverlay);
+    addMethod(isolate, shape, "getHairColor",
+              playerLookField<&shared::PlayerAppearance::hairColour>);
+    addMethod(isolate, shape, "getHairHighlightColor",
+              playerLookField<&shared::PlayerAppearance::hairHighlight>);
+    addMethod(isolate, shape, "getEyeColor",
+              playerLookField<&shared::PlayerAppearance::eyeColour>);
+
+    addMethod(isolate, shape, "setHeadBlendData", playerSetHeadBlend);
+    addMethod(isolate, shape, "setHeadOverlay", playerSetHeadOverlay);
+    addMethod(isolate, shape, "setHeadOverlayColor", playerSetHeadOverlayColour);
+    addMethod(isolate, shape, "setHairColor", playerSetHairColour);
+    addMethod(isolate, shape, "setEyeColor", playerSetEyeColour);
     addMethod(isolate, shape, "clearProp", playerClearProp);
+    addMethod(isolate, shape, "clearClothes", playerClearClothes);
+    addMethod(isolate, shape, "setHairHighlightColor", playerSetHairHighlight);
     addMethod(isolate, shape, "setIntoVehicle", playerSetIntoVehicle);
     addMethod(isolate, shape, "emit", playerEmit);
     addMethod(isolate, shape, "tell", playerTell);
@@ -2044,6 +2765,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "valid", objectValid);
 
     addMethod(isolate, shape, "destroy", objectDestroy);
+    addMethod(isolate, shape, "place", objectPlace);
 
     return shape;
 }
@@ -2060,6 +2782,35 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "dimension", vehicleField<&VehicleInfo::dimension>,
               setVehicleDimension);
     addGetter(isolate, shape, "valid", vehicleValid);
+
+    // Прочность, скорость, признаки и сидящие. Имена — alt:V; всё это ехало в
+    // снимке машины с самого начала и не было видно скрипту.
+    //
+    // Прочность, двигатель и сирена у alt:V назначаются, а у нас — нет: машина
+    // живёт в игре у ведущего, и «поставь ровно столько» протоколом не
+    // переносится. Поэтому у них стоит отказ, а не пустое место: без него
+    // присваивание из строгого модуля бросило бы TypeError посреди чужого
+    // обработчика.
+    addGetter(isolate, shape, "velocity", vehicleField<&VehicleInfo::velocity>);
+    addGetter(isolate, shape, "bodyHealth", vehicleField<&VehicleInfo::bodyHealth>,
+              refuseAssignment<kBodyHealthWhat, kLeaderOwnsIt>);
+    addGetter(isolate, shape, "engineHealth", vehicleField<&VehicleInfo::engineHealth>,
+              refuseAssignment<kEngineHealthWhat, kLeaderOwnsIt>);
+    addGetter(isolate, shape, "petrolTankHealth", vehicleField<&VehicleInfo::tankHealth>,
+              refuseAssignment<kTankHealthWhat, kLeaderOwnsIt>);
+    addGetter(isolate, shape, "engineOn", vehicleFlag<shared::VehicleFlag::EngineOn>,
+              refuseAssignment<kEngineOnWhat, kLeaderOwnsIt>);
+    addGetter(isolate, shape, "handbrakeActive", vehicleFlag<shared::VehicleFlag::Handbrake>);
+    // `lightState` сюда не попал нарочно: у alt:V это число, а не признак, и
+    // отдать под его именем логическое значило бы соврать в другую сторону —
+    // ресурс, сравнивший его с числом, не сошёлся бы ни разу.
+    addGetter(isolate, shape, "daylightOn", vehicleFlag<shared::VehicleFlag::LightsOn>);
+    addGetter(isolate, shape, "nightlightOn", vehicleFlag<shared::VehicleFlag::HighBeams>);
+    addGetter(isolate, shape, "sirenActive", vehicleFlag<shared::VehicleFlag::SirenOn>,
+              refuseAssignment<kSirenWhat, kLeaderOwnsIt>);
+    addGetter(isolate, shape, "hornActive", vehicleFlag<shared::VehicleFlag::HornOn>);
+    addGetter(isolate, shape, "destroyed", vehicleFlag<shared::VehicleFlag::Destroyed>);
+    addGetter(isolate, shape, "passengers", vehiclePassengers);
 
     addGetter(isolate, shape, "appearance", vehicleAppearance);
 

@@ -33,13 +33,22 @@ constexpr float kBlendOut = -8.0F;
 /// Сколько движению отведено, в миллисекундах. Минус единица — до конца.
 constexpr int kUntilDone = -1;
 
-/// Признаки проигрывания.
+/// Признаки проигрывания, числами самой игры (eAnimationFlags).
 ///
-/// Восьмёрка — «только верхняя часть тела, поверх остального»: персонаж бьёт, не
-/// переставая при этом идти. Единица к ней — не возвращать тело в исходное
-/// положение по окончании: возвращённое, оно дёрнулось бы обратно к тому месту,
-/// где удар начался, а мы это место задаём сами каждый кадр.
-constexpr int kUpperBodyOverlay = 8 | 1;
+/// Шестнадцать — «только верхняя часть тела»: персонаж бьёт, не переставая при
+/// этом идти. Тридцать два — «не отнимать управление телом»: без него движение
+/// становится единственным, что персонаж делает, и наша задача ходьбы с ним
+/// спорит.
+///
+/// Стояло здесь `8 | 1`, и оба числа были неверны. Восьмёрки среди признаков
+/// игры нет вовсе, а всё, что меньше шестнадцати, означает «всем телом», — то
+/// есть удар отыгрывался не поверх походки, а вместо неё. Единица же означает
+/// не «оставить позу», как было написано рядом, а «повторять без конца»: удар,
+/// начатый стоящим человеком, шёл по кругу до тех пор, пока его не отменяла
+/// какая-нибудь другая задача. У стоящего отменять было нечему.
+constexpr int kAnimUpperBody = 16;
+constexpr int kAnimKeepControl = 32;
+constexpr int kUpperBodyOverlay = kAnimUpperBody | kAnimKeepControl;
 
 /// Скорость проигрывания. Единица — обычная.
 constexpr float kNormalRate = 1.0F;
@@ -50,6 +59,11 @@ constexpr int kLoadPatience = 5000;
 /// Крадётся ли персонаж, в нумерации игры.
 constexpr bool kStealthOn = true;
 constexpr bool kStealthOff = false;
+
+/// То же самое, каким его возвращает GET_PED_STEALTH_MOVEMENT: числом, а не
+/// признаком. Отдельной величиной, потому что смешивать в сравнении число с
+/// признаком — предупреждение сборки, а не мелочь слога.
+constexpr int kStealthAnswerOn = 1;
 
 /// Состояния движения игры, названные её же именами.
 ///
@@ -80,6 +94,7 @@ PedAnimation::PedAnimation(const NativeTable& table) noexcept
       hasDict_(table.handlerFor(natives::kHasAnimDictLoaded)),
       playAnim_(table.handlerFor(natives::kTaskPlayAnim)),
       stealthMovement_(table.handlerFor(natives::kSetPedStealthMovement)),
+      getStealth_(table.handlerFor(natives::kGetPedStealthMovement)),
       gameTimer_(table.handlerFor(natives::kGetGameTimer)),
       clearTasks_(table.handlerFor(natives::kClearPedTasks)),
       taskJump_(table.handlerFor(natives::kTaskJump)),
@@ -87,6 +102,7 @@ PedAnimation::PedAnimation(const NativeTable& table) noexcept
       taskReload_(table.handlerFor(natives::kTaskReloadWeapon)),
       taskCover_(table.handlerFor(natives::kTaskStayInCover)),
       taskDriveBy_(table.handlerFor(natives::kTaskDriveBy)),
+      taskVehicleAim_(table.handlerFor(natives::kTaskVehicleAimAtCoord)),
       motionState_(table.handlerFor(natives::kForcePedMotionState)) {}
 
 PedAnimation::Clip PedAnimation::clipFor(shared::PedAction action) {
@@ -142,12 +158,22 @@ void PedAnimation::applyPosture(int ped, std::uint32_t flags, std::uint32_t prev
         return;
     }
 
-    // Присед — положение тела: длится, пока признак стоит, и задаётся один раз
-    // на переходе.
+    // Присед — положение тела: длится, пока признак стоит, и сверяется с тем,
+    // что у персонажа на самом деле, а не с прошлым снимком.
+    //
+    // Прежде он задавался ровно на переходе признака, и этого было мало.
+    // Присед сбрасывает у персонажа всякая зачистка задач — а она случается и
+    // при подъёме после смерти, и при остановке, и при посадке в машину, — и
+    // сброшенный, он не возвращался до тех пор, пока хозяин не присядет заново.
+    // То есть, скорее всего, не возвращался вовсе.
     if (stealthMovement_ != nullptr) {
         const bool crouching = shared::has(flags, shared::PlayerFlag::Crouching);
 
-        if (crouching != shared::has(previous, shared::PlayerFlag::Crouching)) {
+        const bool crouched = getStealth_ != nullptr
+                                  ? invokeNative<int>(getStealth_, ped) == kStealthAnswerOn
+                                  : shared::has(previous, shared::PlayerFlag::Crouching);
+
+        if (crouching != crouched) {
             // Последний довод — имя набора движений для крадущейся походки.
             // Пустая строка означает «взять обычный», и другого нам не нужно:
             // своей походки мы персонажу не придумываем, а повторяем ту,
@@ -211,25 +237,38 @@ void PedAnimation::applyPosture(int ped, std::uint32_t flags, std::uint32_t prev
         // значит укрытие рядом либо есть у обоих, либо нет ни у кого.
         invokeNative<void>(taskCover_, ped);
     }
-}
 
-bool PedAnimation::busy(std::uint32_t flags) noexcept {
-    // Ровно те признаки, которым отвечает задача. Пока она идёт, задача ходьбы
-    // выдаваться не должна: выданная поверх, она отменяет начатое.
+    // Укрытие приходится снимать явно, и оно здесь единственное такое.
     //
-    // Плавания и погружения здесь нет намеренно: это состояние движения, а не
-    // задача, и плывущего вести к цели по-прежнему нужно — иначе он поплывёт на
-    // месте.
-    return shared::has(flags, shared::PlayerFlag::Jumping) ||
-           shared::has(flags, shared::PlayerFlag::Climbing) ||
-           shared::has(flags, shared::PlayerFlag::Vaulting) ||
-           shared::has(flags, shared::PlayerFlag::InCover) ||
-           shared::has(flags, shared::PlayerFlag::Parachuting) ||
-           shared::has(flags, shared::PlayerFlag::GettingUp);
+    // Прыжок, лазание и перезарядка кончаются сами: отыграли своё движение — и
+    // задачи не стало. Задача укрытия не кончается никогда, на то она и «сиди в
+    // укрытии». Пока её не снять, персонаж остаётся прижатым к стене — а
+    // хозяин, вышедший из укрытия и стоящий на месте, ничем её снять и не мог:
+    // задачу ходьбы ему не выдают, снимать её некому. Со стороны это выглядело
+    // так, что вставший из-за угла человек навсегда остаётся за углом.
+    if (clearTasks_ != nullptr && !shared::has(flags, shared::PlayerFlag::InCover) &&
+        shared::has(previous, shared::PlayerFlag::InCover)) {
+        invokeNative<void>(clearTasks_, ped);
+    }
 }
 
-void PedAnimation::applyDriveBy(int ped, const shared::Vec3& target) const {
-    if (ped == 0 || taskDriveBy_ == nullptr) {
+void PedAnimation::applyDriveBy(int ped, const shared::Vec3& target, bool firing) const {
+    if (ped == 0) {
+        return;
+    }
+
+    // Только целится. Стреляет за неё присланный выстрел — тот самый, что
+    // прилетает отдельным сообщением и уходит пулей из её же руки. Дай мы ей
+    // вдобавок стрелять самой, очередь вышла бы двойной, и половина её летела бы
+    // не туда, куда целился хозяин, а куда попадёт кукла со своей меткостью.
+    //
+    // Ровно это правило уже есть у пешей стрельбы, и здесь его недоставало.
+    if (!firing && taskVehicleAim_ != nullptr) {
+        invokeNative<void>(taskVehicleAim_, ped, target.x, target.y, target.z);
+        return;
+    }
+
+    if (taskDriveBy_ == nullptr) {
         return;
     }
 

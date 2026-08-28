@@ -82,6 +82,9 @@ struct LauncherSettings {
 
     /// Писать ли в журнал подробности. Настройка `debug`, та же, что у alt:V.
     bool verbose = false;
+
+    /// Закрывать ли Rockstar Games Launcher после удавшегося внедрения.
+    bool closeRockstarLauncher = true;
 };
 
 LauncherSettings readLauncherSettings(const oxymp::launcher::Paths& paths) {
@@ -90,6 +93,7 @@ LauncherSettings readLauncherSettings(const oxymp::launcher::Paths& paths) {
 
     LauncherSettings chosen;
     chosen.verbose = settings.flag("debug");
+    chosen.closeRockstarLauncher = settings.flag("closeRockstarLauncher");
 
     const std::string language = settings.text("gameLanguage");
 
@@ -128,6 +132,7 @@ int main(int argc, char** argv) {
 
     settings.gameLanguage = chosen.gameLanguage;
     settings.verbose = chosen.verbose;
+    settings.closeRockstarLauncher = chosen.closeRockstarLauncher;
 
     // Подробности в журнале включаются настройкой, а не сборкой, и это не
     // мелочь: строки уровня `debug` в коде были всегда, а увидеть их не мог

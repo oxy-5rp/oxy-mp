@@ -135,12 +135,16 @@ public:
     [[nodiscard]] std::optional<shared::WeaponFired> shot(const shared::PlayerState& state);
 
 private:
-    /// Точка, куда направлено оружие.
+    /// Точка на луче камеры, в range метрах от головы персонажа.
     ///
-    /// Оружие смотрит туда же, куда камера, поэтому точка берётся впереди
-    /// персонажа по направлению взгляда. Настоящий луч прицела игра наружу не
-    /// отдаёт, а для чужой стороны важно направление, а не попадание: попадания
+    /// Один расчёт на две надобности, и это не совмещение ради экономии: и
+    /// взгляд, и прицел идут туда, куда повёрнута камера, — разные у них только
+    /// дальность и то, как они едут по сети. Настоящий луч прицела игра наружу
+    /// не отдаёт, а чужой стороне важно направление, а не попадание: попадания
     /// считает стрелявший у себя.
+    [[nodiscard]] shared::Vec3 cameraPoint(int ped, float range) const;
+
+    /// Точка, куда направлено оружие.
     [[nodiscard]] shared::Vec3 aimPoint(int ped) const;
 
     /// Куда смотрит игрок — то есть куда повёрнута его камера.
@@ -167,7 +171,6 @@ private:
     NativeHandler setCollision_ = nullptr;
     NativeHandler clearTasks_ = nullptr;
     NativeHandler selectedWeapon_ = nullptr;
-    NativeHandler forwardVector_ = nullptr;
     NativeHandler applyDamage_ = nullptr;
     NativeHandler setHealth_ = nullptr;
     NativeHandler setArmour_ = nullptr;

@@ -558,13 +558,40 @@ PostgreSQL с TypeORM, Redis, Fastify, собранный интерфейс н�
 | `entity.attachTo`, `entity.detach` | У всех родов; кость — номером или именем |
 | `alt.Ped` | Куклы, поставленные сервером: стоят, лечатся, вооружаются |
 | `player.kick` | Причина уходит игроку до разрыва |
+| `vehicleDamage` | Доводы и их порядок как у alt:V; второе число кузова он считает, а мы нет — на его месте ноль |
 | `alt.addExplosion` | Своего у alt:V нет — там взрыв клиентский; у нас серверный, как погода |
+| Места в машине | В нумерации alt:V: водитель — единица, пассажиры со двойки. Перевод — `alt_seat.hpp` |
+| `entityEnterColshape`, `entityLeaveColshape` | Нынешние имена alt:V; старые (`enterColshape`) объявляются тоже |
+| Признаки состояния игрока | Четырнадцать штук: `isDead`, `isAiming`, `isShooting`, `isInRagdoll`, `isJumping`, `isCrouching`, `isParachuting`, `isReloading`, `isInCover`, `isInMelee`, `isEnteringVehicle`, `isLeavingVehicle`, `isInWater`, `isSpawned` |
+| `player.aimPos`, `player.currentWeapon` | Оттуда же — из снимка |
+| Внешность лица | `setHeadBlendData`, `setHeadOverlay`, `setHeadOverlayColor`, `setHairColor`, `setEyeColor` и чтение к ним: `getClothes`, `getProp`, `getHeadBlendData`, `getHeadOverlay`, `getHairColor`, `getHairHighlightColor`, `getEyeColor` |
+| `playerEnteredVehicle` и родня | Плюс `playerEnteringVehicle`, `playerLeftVehicle`, `playerChangedVehicleSeat` — выводятся из снимка сравнением |
+| `playerWeaponChange`, `playerDamage` | Первое из снимка, второе — там же, где урон разводится по броне и здоровью |
+| `syncedMetaChange` и родня | Теперь и на сервере: плюс `streamSyncedMetaChange`, `globalSyncedMetaChange`, `globalMetaChange`, `metaChange` |
+| `resourceStart`, `resourceStop` | И `anyResourceStart` / `anyResourceStop` соседям, и `serverStarted` всем |
+| `weaponDamage` | Объявляется до применения урона и отменяется возвратом `false`; числом урон не правится — об этом говорится один раз |
+| `consoleCommand` | Сервер читает своё окно своим потоком; имя команды первым доводом, слова следом |
+| Машина: прочность и признаки | `bodyHealth`, `engineHealth`, `petrolTankHealth`, `velocity`, `engineOn`, `handbrakeActive`, `daylightOn`, `nightlightOn`, `sirenActive`, `hornActive`, `destroyed`, `passengers` |
+| `object.pos`, `object.rot` | Переставляют предмет по-настоящему: сервер двигает его сразу у всех |
+| `vehicle.rot` | Разворачивает машину; поворот переводится из градусов ядра в радианы alt:V |
 
 **Есть на сервере, но игрок не видит** (говорится в журнал один раз): голосовые
 каналы.
 
 **Отказывает вслух:** `NetworkObject`, `VirtualEntity`, `resource.exports`,
-`vehicle.getModsCount`, цвет салона и панели, раскраска крыши.
+`vehicle.getModsCount`, цвет салона и панели, раскраска крыши,
+`player.isOnLadder`, `isOnVehicle`, `isStealthy`, `isSuperJumpEnabled`.
+
+Четыре последних — признаки, которых нет в снимке вовсе. Ответить «нет» про
+крадущегося значило бы соврать, и режим со скрытным перемещением сломался бы
+молча; отказ хотя бы виден. Появятся они тогда же, когда появятся в снимке, —
+места под них там ещё есть.
+
+**Говорит один раз и возвращается:** `vehicle.bodyHealth`, `engineHealth`,
+`petrolTankHealth`, `engineOn`, `sirenActive` на запись. Читаются они
+по-настоящему — приходят в снимке от ведущего, — а назначить их нельзя: машина
+живёт в игре у него, и «поставь ровно столько» протоколом не переносится. Есть
+«отними столько-то» (`VehicleDamaged`) и «почини целиком» (`vehicle.repair`).
 
 Цвет салона, панели и раскраска крыши не появятся, пока их нативов нет в
 открытой базе имён: подставлять хеш по памяти — верный способ уронить игру, а

@@ -71,20 +71,18 @@ public:
     /// единицу.
     void applyPosture(int ped, std::uint32_t flags, std::uint32_t previous) const;
 
-    /// Занят ли персонаж собственным движением.
-    ///
-    /// Пока занят, вести его задачей ходьбы нельзя: выданная поверх, она
-    /// отменяет и прыжок, и лазание, и уход в укрытие — то есть ровно то, ради
-    /// чего они и заказаны. Именно поэтому раньше из всех признаков было видно
-    /// только бег: задача ходьбы выдавалась каждый кадр и сносила всё.
-    [[nodiscard]] static bool busy(std::uint32_t flags) noexcept;
-
-    /// Отыгрывает стрельбу из машины.
+    /// Отыгрывает прицел и стрельбу из машины.
     ///
     /// Отдельно от прочего, потому что сидящий персонаж ведётся не задачами
     /// ходьбы, а машиной: у него нет ни походки, ни направления движения, и
     /// единственное, что он может показать, — это куда он целится из окна.
-    void applyDriveBy(int ped, const shared::Vec3& target) const;
+    ///
+    /// firing различает два случая, и различать их обязательно — ровно по той
+    /// же причине, по которой они различаются у пешего (см. Puppet::firedAt).
+    /// Когда присланные выстрелы идут, кукла только целится: стрелять она будет
+    /// вдобавок к ним, и очередь выйдет двойной. Когда не идут — стреляет сама:
+    /// старый клиент выстрелов не шлёт вовсе.
+    void applyDriveBy(int ped, const shared::Vec3& target, bool firing) const;
 
     /// Проигрывает короткое движение.
     ///
@@ -142,6 +140,7 @@ private:
     NativeHandler hasDict_ = nullptr;
     NativeHandler playAnim_ = nullptr;
     NativeHandler stealthMovement_ = nullptr;
+    NativeHandler getStealth_ = nullptr;
     NativeHandler gameTimer_ = nullptr;
     NativeHandler clearTasks_ = nullptr;
     NativeHandler taskJump_ = nullptr;
@@ -149,6 +148,7 @@ private:
     NativeHandler taskReload_ = nullptr;
     NativeHandler taskCover_ = nullptr;
     NativeHandler taskDriveBy_ = nullptr;
+    NativeHandler taskVehicleAim_ = nullptr;
     NativeHandler motionState_ = nullptr;
 
     /// Наборы, о которых уже сказано в журнал, что они не загружаются.

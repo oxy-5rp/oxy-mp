@@ -321,6 +321,14 @@ private:
     /// залить журнал.
     bool scriptsTried_ = false;
 
+    /// Объявлен ли ресурсам вход в сессию (`connectionComplete`).
+    ///
+    /// Ровно один раз за сессию. Ресурсы могут приезжать не все сразу — сервер
+    /// вправе прислать добавку позже, — а входим мы однажды, и повторное
+    /// объявление режим принял бы за второй вход: показал бы окно входа заново
+    /// поверх уже идущей игры.
+    bool connectionAnnounced_ = false;
+
     Settings settings_;
     const SessionStatus& status_;
     const RemoteRoster& roster_;

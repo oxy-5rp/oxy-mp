@@ -119,7 +119,14 @@ void Attachments::sync(const Resolve& resolve) {
         // isPed важен не для порядка: без него у привязанного не работает
         // наклон вперёд, а крен — только в отрицательную сторону. Так это
         // описано у самой игры.
-        const bool isPed = wanted.kind == shared::EntityKind::Player;
+        //
+        // Родов персонажа два, а не один, и второй здесь долго не значился.
+        // Игрок — это персонаж, но и кукла сервера (`alt.Ped`) тоже персонаж:
+        // разница между ними в том, кто ими распоряжается, а не в том, из чего
+        // они сделаны. Привязанная кукла из-за этого висела с перекошенным
+        // поворотом, а объяснить это было нечем.
+        const bool isPed = wanted.kind == shared::EntityKind::Player ||
+                           wanted.kind == shared::EntityKind::Ped;
         const int bone = boneOf(wanted, target);
 
         invokeNative<void>(attach_, self, target, bone, wanted.position.x, wanted.position.y,

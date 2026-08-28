@@ -6,12 +6,14 @@
 add_executable(oxymp_server_tests
     attachment_directory_tests.cpp
     config_file_tests.cpp
+    console_tests.cpp
     resource_catalog_tests.cpp
     server_core_tests.cpp
     state_bundler_tests.cpp
     vehicle_directory_tests.cpp
     world_clock_tests.cpp
     ../src/config_file.cpp
+    ../src/console.cpp
     ../src/object_directory.cpp
     ../src/ped_directory.cpp
     ../src/resource_catalog.cpp
