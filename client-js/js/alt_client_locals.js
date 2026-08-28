@@ -78,6 +78,14 @@
 
             this.#id = nextId++;
             locals.set(this.#id, this);
+
+            // Местная сущность — тоже объект слоя, и об её рождении говорится
+            // так же, как о рождении метки (`alt_client_objects.js`). Двумя
+            // местами, а не одним, потому что основания у них разные: у метки
+            // это `BaseObject`, у зоны и у местного тела — `Entity`. Молчать
+            // здесь было бы хуже, чем не объявлять вовсе: обработчик, ведущий
+            // учёт объектов, недосчитался бы половины и не узнал бы об этом.
+            alt.client.emit('baseObjectCreate', this);
         }
 
         /// Номер местной сущности. Свой, клиентский: серверу его слать нельзя.
@@ -102,7 +110,11 @@
                 natives.deleteEntity(дескриптор);
             }
 
-            locals.delete(this.#id);
+            if (locals.delete(this.#id)) {
+                // Только если она в реестре и была: `destroy` зовут дважды, и
+                // второе объявление о смерти было бы враньём.
+                alt.client.emit('baseObjectRemove', this);
+            }
         }
 
         /// Сущность по её местному номеру, если она нужного рода.
@@ -362,7 +374,9 @@
                 natives.deleteCheckpoint(дескриптор);
             }
 
-            locals.delete(this.id);
+            if (locals.delete(this.id)) {
+                alt.client.emit('baseObjectRemove', this);
+            }
         }
 
         toString() { return `Checkpoint{ id: ${this.id} }`; }
@@ -412,7 +426,10 @@
 
         destroy() {
             shapes.delete(this);
-            locals.delete(this.id);
+
+            if (locals.delete(this.id)) {
+                alt.client.emit('baseObjectRemove', this);
+            }
         }
     }
 
