@@ -416,6 +416,7 @@ RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles)
       isInVehicle_(table.handlerFor(natives::kIsPedInVehicle)),
       pedInSeat_(table.handlerFor(natives::kGetPedInVehicleSeat)),
       playingAnim_(table.handlerFor(natives::kIsEntityPlayingAnim)),
+      usingScenario_(table.handlerFor(natives::kIsPedUsingScenario)),
       giveComponent_(table.handlerFor(natives::kGiveWeaponComponentToPed)),
       setWeaponTint_(table.handlerFor(natives::kSetPedWeaponTintIndex)),
       shootBullet_(table.handlerFor(natives::kShootSingleBulletBetweenCoords)),
@@ -1394,8 +1395,13 @@ bool RemotePlayers::animate(shared::PlayerId player, const shared::PlayerAnimati
 
     // Запоминаем не ради памяти, а ради задач: пока это движение идёт, кукле
     // нельзя выдавать ни походку, ни прицел — они его отменят.
+    // Сценарий запоминается там же, где движение, и в том же поле имени: занят
+    // персонаж одинаково — задачей, которую выдали не мы. Отличает их пустой
+    // набор: у сценария его нет вовсе.
     known->second.scriptedDictionary = animation.dictionary;
-    known->second.scriptedName = animation.name;
+    known->second.scriptedName =
+        animation.scenario.empty() ? animation.name : animation.scenario;
+    known->second.scriptedScenario = !animation.scenario.empty();
     known->second.scriptedAt = gameTimer_ != nullptr
                                    ? invokeNative<std::int32_t>(gameTimer_)
                                    : 0;
@@ -1413,6 +1419,7 @@ bool RemotePlayers::stopAnimating(shared::PlayerId player) {
 
     known->second.scriptedDictionary.clear();
     known->second.scriptedName.clear();
+    known->second.scriptedScenario = false;
     known->second.scriptedAt = 0;
     known->second.taskedAt = 0;
 
@@ -1420,7 +1427,7 @@ bool RemotePlayers::stopAnimating(shared::PlayerId player) {
 }
 
 bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
-    if (puppet.scriptedDictionary.empty()) {
+    if (puppet.scriptedDictionary.empty() && !puppet.scriptedScenario) {
         return false;
     }
 
@@ -1431,9 +1438,17 @@ bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
         return true;
     }
 
-    if (playingAnim_ != nullptr &&
-        invokeNative<bool>(playingAnim_, puppet.ped, puppet.scriptedDictionary.c_str(),
-                           puppet.scriptedName.c_str(), kPlayingAnimTaskFlag)) {
+    // Идёт ли оно ещё, спрашивается у игры, а не считается по времени. У
+    // сценария вопрос свой: набора движений у него нет, и `IS_ENTITY_PLAYING_ANIM`
+    // о нём не знает ничего.
+    if (puppet.scriptedScenario) {
+        if (usingScenario_ != nullptr &&
+            invokeNative<bool>(usingScenario_, puppet.ped, puppet.scriptedName.c_str())) {
+            return true;
+        }
+    } else if (playingAnim_ != nullptr &&
+               invokeNative<bool>(playingAnim_, puppet.ped, puppet.scriptedDictionary.c_str(),
+                                  puppet.scriptedName.c_str(), kPlayingAnimTaskFlag)) {
         return true;
     }
 
@@ -1441,6 +1456,7 @@ bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
     // движение, которого нет, значит не вести её вовсе.
     puppet.scriptedDictionary.clear();
     puppet.scriptedName.clear();
+    puppet.scriptedScenario = false;
     puppet.scriptedAt = 0;
 
     return false;

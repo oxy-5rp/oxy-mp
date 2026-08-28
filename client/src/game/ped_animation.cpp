@@ -91,6 +91,7 @@ constexpr std::uint32_t kFiringPatternFullAuto = 0xC6EE6B4CU;
 
 PedAnimation::PedAnimation(const NativeTable& table) noexcept
     : requestDict_(table.handlerFor(natives::kRequestAnimDict)),
+      startScenario_(table.handlerFor(natives::kTaskStartScenarioInPlace)),
       hasDict_(table.handlerFor(natives::kHasAnimDictLoaded)),
       playAnim_(table.handlerFor(natives::kTaskPlayAnim)),
       stealthMovement_(table.handlerFor(natives::kSetPedStealthMovement)),
@@ -283,8 +284,27 @@ void PedAnimation::applyDriveBy(int ped, const shared::Vec3& target, bool firing
 }
 
 bool PedAnimation::playNamed(int ped, const shared::PlayerAnimation& animation) {
-    if (ped == 0 || playAnim_ == nullptr || animation.dictionary.empty() ||
-        animation.name.empty()) {
+    if (ped == 0) {
+        return false;
+    }
+
+    // Сценарий — раньше движения и вместо него: у alt:V это разные вызовы, и
+    // одновременно их не просят. Набор движений ему не нужен вовсе — сценарий
+    // игра держит у себя целиком, — и потому ждать загрузки здесь нечего.
+    if (!animation.scenario.empty()) {
+        if (startScenario_ == nullptr) {
+            return false;
+        }
+
+        // Доводы: задержка перед началом и играть ли вступление. Задержки нет,
+        // вступление есть — персонаж должен опуститься на скамейку на глазах, а
+        // не оказаться на ней сидящим.
+        invokeNative<void>(startScenario_, ped, animation.scenario.c_str(), 0, true);
+
+        return true;
+    }
+
+    if (playAnim_ == nullptr || animation.dictionary.empty() || animation.name.empty()) {
         return false;
     }
 

@@ -348,6 +348,10 @@ private:
         /// кадре, в котором завели.
         std::string scriptedDictionary;
         std::string scriptedName;
+
+        /// Сценарий это или движение. У сценария набора движений нет вовсе, и
+        /// спрашивается он у игры другим нативом.
+        bool scriptedScenario = false;
         std::int32_t scriptedAt = 0;
     };
 
@@ -565,6 +569,7 @@ private:
     NativeHandler isInVehicle_ = nullptr;
     NativeHandler pedInSeat_ = nullptr;
     NativeHandler playingAnim_ = nullptr;
+    NativeHandler usingScenario_ = nullptr;
     NativeHandler giveComponent_ = nullptr;
     NativeHandler setWeaponTint_ = nullptr;
     NativeHandler shootBullet_ = nullptr;

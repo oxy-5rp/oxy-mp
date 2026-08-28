@@ -137,6 +137,7 @@ private:
     [[nodiscard]] bool ready(std::string_view dictionary);
 
     NativeHandler requestDict_ = nullptr;
+    NativeHandler startScenario_ = nullptr;
     NativeHandler hasDict_ = nullptr;
     NativeHandler playAnim_ = nullptr;
     NativeHandler stealthMovement_ = nullptr;

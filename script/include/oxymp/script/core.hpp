@@ -421,6 +421,9 @@ struct AnimationInfo {
     std::string dictionary;
     std::string name;
 
+    /// Сценарий игры вместо движения. Непустой сильнее набора движений.
+    std::string scenario;
+
     float blendIn = 8.0F;
     float blendOut = 8.0F;
 

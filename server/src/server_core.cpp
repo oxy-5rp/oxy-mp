@@ -922,6 +922,7 @@ bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo&
     message.playerId = id;
     message.dictionary = animation.dictionary;
     message.name = animation.name;
+    message.scenario = animation.scenario;
     message.blendIn = animation.blendIn;
     message.blendOut = animation.blendOut;
     message.duration = animation.duration;

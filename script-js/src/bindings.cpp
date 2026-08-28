@@ -2091,6 +2091,34 @@ private:
 
 // --- Движения персонажа -----------------------------------------------------
 
+/// Велит персонажу отыграть сценарий игры: сесть, закурить, облокотиться.
+///
+/// Отдельным вызовом, как у alt:V (`player.playScenario(name)`), но по сети едет
+/// тем же распоряжением, что и движение: занят персонаж одинаково — задачей,
+/// которую выдали не мы, — и вся обвязка вокруг движения достаётся сценарию
+/// даром.
+void playerPlayScenario(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::string name =
+        info.Length() >= 1 ? fromJs(isolate, info[0]) : std::string{};
+
+    if (name.empty()) {
+        fail(isolate, "playScenario ждёт имя сценария строкой");
+        return;
+    }
+
+    AnimationInfo animation;
+    animation.scenario = name;
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().playAnimation(*id, animation));
+}
+
 void playAnimation(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3316,6 +3344,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "getWeaponAmmo", playerWeaponAmmo);
     addMethod(isolate, shape, "removeWeapon", playerRemoveWeapon);
     addMethod(isolate, shape, "removeAllWeapons", playerClearWeapons);
+    addMethod(isolate, shape, "playScenario", playerPlayScenario);
     addMethod(isolate, shape, "setWeaponAmmo", playerSetWeaponAmmo);
     addMethod(isolate, shape, "hasWeaponComponent", playerHasWeaponComponent);
     addGetter(isolate, shape, "currentWeaponComponents", playerHeldWeaponDetail<true>);

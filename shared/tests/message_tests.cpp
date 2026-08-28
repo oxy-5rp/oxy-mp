@@ -2044,6 +2044,22 @@ TEST_CASE("markers and checkpoints are recognised by their message id", "[messag
     CHECK(peekMessageId(encode(CheckpointRemoved{})) == MessageId::CheckpointRemoved);
 }
 
+TEST_CASE("a scenario travels by the same command as an animation", "[messages]") {
+    // Своим сообщением сценарий не поехал нарочно: занят персонаж одинаково —
+    // задачей, которую выдали не мы, — и вся обвязка вокруг движения (доставка
+    // кукле, срок ожидания, признак «сейчас распоряжается сервер») достаётся
+    // ему даром. Отличает их пустой набор движений: у сценария его нет вовсе.
+    PlayerAnimation sent;
+    sent.playerId = 3;
+    sent.scenario = "WORLD_HUMAN_SMOKING";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->scenario == "WORLD_HUMAN_SMOKING");
+    CHECK(received->dictionary.empty());
+}
+
 TEST_CASE("an animation survives the round trip", "[messages]") {
     PlayerAnimation sent;
     sent.playerId = 4;

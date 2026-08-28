@@ -1266,6 +1266,7 @@ void PlayerAnimation::write(ByteWriter& writer) const {
     writer.writeU32(playerId);
     writer.writeString(dictionary);
     writer.writeString(name);
+    writer.writeString(scenario);
     writer.writeFloat(blendIn);
     writer.writeFloat(blendOut);
     writer.writeU32(static_cast<std::uint32_t>(duration));
@@ -1279,6 +1280,7 @@ PlayerAnimation PlayerAnimation::read(ByteReader& reader) {
     message.playerId = reader.readU32();
     message.dictionary = reader.readString();
     message.name = reader.readString();
+    message.scenario = reader.readString();
     message.blendIn = reader.readFloat();
     message.blendOut = reader.readFloat();
     message.duration = static_cast<std::int32_t>(reader.readU32());
