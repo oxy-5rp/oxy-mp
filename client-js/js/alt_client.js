@@ -724,6 +724,100 @@
         }
     }
 
+    /// Что вокруг игрока переменилось: окно, интерьер, посадка в машину.
+    ///
+    /// Всё это alt:V объявляет своими событиями, и всё это выводится наблюдением
+    /// за ответами игры: своего источника ни у одного из них нет. Считается
+    /// только пока кто-то слушает — иначе за них платили бы нативами каждый
+    /// кадр без нужды.
+    ///
+    /// Первое чтение переменой не считается: до него сравнивать не с чем, и
+    /// объявленная «перемена» из ничего в нынешнее была бы ложью.
+    let ownInterior = null;
+    let ownEntering = null;
+    let ownFocused = null;
+    let ownWidth = 0;
+    let ownHeight = 0;
+
+    function watchOwnState() {
+        const слушают = (имя) => listenersFor(имя).length !== 0;
+
+        if (слушают('windowResolutionChange')) {
+            const [, ширина, высота] = alt.natives.getActualScreenResolution(0, 0);
+
+            if (ширина !== ownWidth || высота !== ownHeight) {
+                const было = new shared.Vector2(ownWidth, ownHeight);
+
+                ownWidth = ширина;
+                ownHeight = высота;
+
+                if (было.x !== 0 || было.y !== 0) {
+                    fire('windowResolutionChange', [было, new shared.Vector2(ширина, высота)]);
+                }
+            }
+        }
+
+        if (слушают('windowFocusChange')) {
+            // Меню паузы у игры открывается само, когда окно теряет внимание, —
+            // и это единственный признак потери внимания, который игра отдаёт
+            // изнутри себя. Спрашивать окно у Windows отсюда нельзя: слой на
+            // JavaScript живёт в кадре игры и о её окне ничего не знает.
+            const внимание = alt.natives.isPauseMenuActive() !== true;
+
+            if (внимание !== ownFocused) {
+                const было = ownFocused;
+
+                ownFocused = внимание;
+
+                if (было !== null) {
+                    fire('windowFocusChange', [внимание]);
+                }
+            }
+        }
+
+        const тело = alt.natives.playerPedId();
+
+        if (слушают('playerInteriorChange')) {
+            const внутри = alt.natives.getInteriorFromEntity(тело);
+
+            if (внутри !== ownInterior) {
+                const было = ownInterior;
+
+                ownInterior = внутри;
+
+                if (было !== null) {
+                    fire('playerInteriorChange', [alt.Player.local, было, внутри]);
+                }
+            }
+        }
+
+        if (слушают('startEnteringVehicle')) {
+            // Машина, в которую человек полез, а не та, в которой он сидит:
+            // событие объявляется в начале посадки, а к её концу оно уже не
+            // новость.
+            const куда = alt.natives.getVehiclePedIsTryingToEnter(тело);
+
+            if (куда !== ownEntering) {
+                ownEntering = куда;
+
+                if (куда !== 0) {
+                    const машина = alt.Vehicle.getByScriptID(куда);
+
+                    fire('startEnteringVehicle',
+                         [machineOr(машина, куда), -1, alt.Player.local]);
+                }
+            }
+        }
+    }
+
+    /// Машина сущностью, а если её у слоя нет — хотя бы её номер в игре.
+    ///
+    /// Пустоту сюда отдавать нельзя: обработчик, написанный под alt:V,
+    /// начинается с `vehicle.model`, и `null` уронил бы его на первой же строке.
+    function machineOr(entity, handle) {
+        return entity ?? alt.entities.fromScriptID(handle);
+    }
+
     // Кадровая работа слоя: маркеры, курсор, запрет управления.
     //
     // Подписка своя, а не через everyTick: она принадлежит самому слою и не
@@ -748,6 +842,7 @@
         }
 
         watchOwnShots();
+        watchOwnState();
 
         fire('render', []);
     });

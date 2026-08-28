@@ -234,7 +234,9 @@ launcher  запуск игры и внедрение             webui, config
 Не помогло ничего из испробованного: `SHUTDOWN_LOADING_SCREEN`,
 `DO_SCREEN_FADE_IN`, `RENDER_SCRIPT_CAMS(false)`, `DESTROY_ALL_CAMS`,
 `SET_RADAR_BIGMAP_ENABLED(false)`, `NETWORK_SET_IN_SPECTATOR_MODE(false)`,
-`SET_FOCUS_ENTITY`, `CLEAR_FOCUS`, `NETWORK_BAIL_TRANSITION`.
+`SET_FOCUS_ENTITY`, `CLEAR_FOCUS`, `NETWORK_BAIL_TRANSITION`, а также
+`NETWORK_SESSION_LEAVE_SINGLE_PLAYER` перед подъёмом — догадка, что подъём
+ложится поверх недоразобранной сессии, не подтвердилась.
 
 Отсюда вывод: рисует игра своей внутренней переходной камерой — той, что
 показывает город сверху при входе в сетевую сессию. Игровая камера под ней цела,

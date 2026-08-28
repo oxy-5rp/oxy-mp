@@ -134,6 +134,11 @@ void NetSession::rehostIfDropped(Mode mode, bool sessionStarted) {
                      std::chrono::duration_cast<std::chrono::seconds>(kStartupGrace).count());
     }
 
+    // Выход из сессии перед подъёмом здесь не зовётся, и это проверено, а не
+    // упущено: `NETWORK_SESSION_LEAVE_SINGLE_PLAYER` перед подъёмом не меняет
+    // ничего — игра всё равно остаётся в переходной камере, показывающей город
+    // сверху. Догадка была в том, что подъём ложится поверх недоразобранной
+    // сессии; не подтвердилась.
     asked_ = false;
     host(mode);
 }
