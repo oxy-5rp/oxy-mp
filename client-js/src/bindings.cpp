@@ -160,11 +160,15 @@ void sessionEntities(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     const std::uint32_t shown = total < capacity ? total : capacity;
 
-    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(shown) * 2);
+    // Тройками: номер, тело, ведущий. Плоским списком, а не объектами: список
+    // этот собирается каждый кадр на всякую сущность, и объект на каждую стоил
+    // бы уборки за собой.
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(shown) * 3);
 
     for (std::uint32_t i = 0; i < shown; ++i) {
-        (void)list->Set(context, i * 2, v8::Integer::New(isolate, entities[i].id));
-        (void)list->Set(context, i * 2 + 1, v8::Integer::New(isolate, entities[i].handle));
+        (void)list->Set(context, i * 3, v8::Integer::New(isolate, entities[i].id));
+        (void)list->Set(context, i * 3 + 1, v8::Integer::New(isolate, entities[i].handle));
+        (void)list->Set(context, i * 3 + 2, v8::Integer::New(isolate, entities[i].owner));
     }
 
     info.GetReturnValue().Set(list);

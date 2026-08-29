@@ -188,6 +188,15 @@
             return handle !== 0 && natives.doesEntityExist(handle) === true;
         }
 
+        /// Кто эту сущность ведёт — то есть у кого она живёт в игре.
+        ///
+        /// У машины это её ведущий, у игрока — он сам, у прохожего — никто:
+        /// прохожими целиком распоряжается сервер. Заведённое клиентом тоже
+        /// отвечает «никто»: сервер о нём не знает вовсе.
+        get netOwner() {
+            return ownerOf(this);
+        }
+
         get pos() {
             if (!this.valid) {
                 return shared.Vector3.zero;
@@ -1025,17 +1034,21 @@
     /// рядом. Первое нужно для списка игроков, второе — для всего, что рисуется
     /// над головой.
     function listOf(kind, streamedOnly) {
-        // Плоский список «номер, тело, номер, тело» — так его отдаёт мостик.
+        // Плоский список тройками «номер, тело, ведущий» — так его отдаёт
+        // мостик. Плоским, а не объектами: собирается он каждый кадр на всякую
+        // сущность, и объект на каждую стоил бы уборки за собой.
         const flat = native.sessionEntities(kind);
 
         const list = [];
         const present = new Set();
 
-        for (let i = 0; i + 1 < flat.length; i += 2) {
+        for (let i = 0; i + 2 < flat.length; i += 3) {
             const id = flat[i];
             const handle = flat[i + 1];
+            const owner = flat[i + 2];
 
             present.add(id);
+            noteOwner(kind, id, owner);
 
             if (!streamedOnly || handle !== 0) {
                 list.push(tracked(kind, id));
@@ -1064,6 +1077,66 @@
     ///
     /// Пусто — дескриптор принадлежит игре: случайный прохожий, машина из
     /// трафика, дерево.
+    /// Кто ведёт каждую сущность, по роду и номеру. −1 — никто.
+    ///
+    /// Помнится здесь, а не спрашивается при обращении: смену ведущего ищут
+    /// сравнением с прошлым кадром, и прошлое нужно где-то держать. Приходит оно
+    /// тем же списком, что и тела, — отдельного вопроса на сущность не бывает.
+    const owners = {
+        [kPlayerKind]: new Map(),
+        [kVehicleKind]: new Map(),
+        [kPedKind]: new Map(),
+    };
+
+    /// Записывает ведущего и объявляет смену, если она была.
+    ///
+    /// Первое наблюдение сменой не считается: до него мы о сущности не знали
+    /// ничего, и объявленная тогда «смена» означала бы «она появилась», о чём
+    /// говорят другие события.
+    function noteOwner(kind, id, owner) {
+        const known = owners[kind];
+        const был = known.get(id);
+
+        if (был === owner) {
+            return;
+        }
+
+        known.set(id, owner);
+
+        // Первое наблюдение сменой не считается — но записать его надо было,
+        // и потому проверка стоит после записи.
+        if (был === undefined) {
+            return;
+        }
+
+        alt.client.emit('netOwnerChange', tracked(kind, id),
+                        owner < 0 ? null : tracked(kPlayerKind, owner),
+                        был < 0 ? null : tracked(kPlayerKind, был));
+    }
+
+    /// Кто ведёт эту сущность. null — никто.
+    function ownerOf(entity) {
+        // Свой игрок лежит в реестре с номером −1, а не с настоящим: заводится
+        // он раньше, чем сервер называет наш номер (`new LocalPlayer()` зовёт
+        // `super(-1)`), и с тех пор номер там так и остаётся минус единицей.
+        //
+        // Проверять поэтому нужно сам объект, а не пустоту записи: первая
+        // написанная здесь проверка искала «нет записи» и до своего игрока не
+        // доходила — он отвечал «никем не ведётся», хотя ведёт себя сам.
+        const свой = entity === localPlayer() ? { kind: kPlayerKind, id: selfId() }
+                                              : numbers.get(entity);
+
+        if (свой === undefined) {
+            // Не сущность сессии вовсе: заведённое клиентом сервер не знает, и
+            // ведущего у него нет.
+            return null;
+        }
+
+        const owner = owners[свой.kind]?.get(свой.id);
+
+        return owner === undefined || owner < 0 ? null : tracked(kPlayerKind, owner);
+    }
+
     function trackedByHandle(kind, handle) {
         const id = native.sessionId(kind, handle);
         return id < 0 ? null : tracked(kind, id);
@@ -1118,9 +1191,15 @@
         const flat = native.sessionEntities(kind);
         const now = new Set();
 
-        for (let i = 0; i + 1 < flat.length; i += 2) {
+        for (let i = 0; i + 2 < flat.length; i += 3) {
             const id = flat[i];
             const handle = flat[i + 1];
+
+            // Ведущий сверяется здесь же, а не при обращении к спискам: сверка
+            // эта идёт каждым кадром, а списки режим спрашивает когда захочет —
+            // и `netOwnerChange` у режима, который их не спрашивает, не пришло
+            // бы ни разу.
+            noteOwner(kind, id, flat[i + 2]);
 
             if (handle === 0) {
                 continue;
@@ -1235,6 +1314,11 @@
         watchBodies() {
             watchBodies(kPlayerKind);
             watchBodies(kVehicleKind);
+
+            // Прохожие тоже: у них есть тело, оно появляется и пропадает по
+            // подгрузке, и события об этом режим слушает так же, как о машинах.
+            watchBodies(kPedKind);
+
             watchOwnVehicle();
         },
 

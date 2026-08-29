@@ -218,7 +218,8 @@ std::uint32_t onListEntities(void*, OxympJsEntityKind kind, OxympJsEntity* entit
     const std::vector<ScriptHost::Hooks::Entity> found = (*source)();
 
     for (std::size_t i = 0; i < found.size() && i < capacity; ++i) {
-        entities[i] = OxympJsEntity{.id = found[i].id, .handle = found[i].handle};
+        entities[i] = OxympJsEntity{
+            .id = found[i].id, .owner = found[i].owner, .handle = found[i].handle};
     }
 
     return static_cast<std::uint32_t>(found.size());

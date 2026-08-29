@@ -51,6 +51,9 @@ public:
         struct Entity {
             std::int32_t id = -1;
 
+            /// Кто её ведёт. −1 — никто.
+            std::int32_t owner = -1;
+
             /// Ноль — сущность в сессии есть, а тела у неё здесь ещё нет.
             std::int32_t handle = 0;
         };

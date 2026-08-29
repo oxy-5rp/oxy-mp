@@ -1283,8 +1283,12 @@ void GameSession::runScripts() {
             const shared::PlayerId self = status_.snapshot().playerId;
 
             if (self != shared::kInvalidPlayerId) {
+                // Игрок ведёт сам себя, и это не формальность: у alt:V
+                // `player.netOwner` у своего игрока — он сам, и режим, рисующий
+                // «кто чем распоряжается», ждёт именно этого.
                 found.push_back(ScriptHost::Hooks::Entity{
                     .id = static_cast<std::int32_t>(self),
+                    .owner = static_cast<std::int32_t>(self),
                     .handle = player_.ped(),
                 });
             }
@@ -1296,6 +1300,7 @@ void GameSession::runScripts() {
             for (const RemoteView& player : roster_.snapshot()) {
                 found.push_back(ScriptHost::Hooks::Entity{
                     .id = static_cast<std::int32_t>(player.id),
+                    .owner = static_cast<std::int32_t>(player.id),
                     .handle = remotePlayers_.handleFor(player.id),
                 });
             }
@@ -1309,6 +1314,9 @@ void GameSession::runScripts() {
             for (const SessionVehicleView& vehicle : roster_.vehicles()) {
                 found.push_back(ScriptHost::Hooks::Entity{
                     .id = static_cast<std::int32_t>(vehicle.state.id),
+                    .owner = vehicle.owner == shared::kInvalidPlayerId
+                                 ? -1
+                                 : static_cast<std::int32_t>(vehicle.owner),
                     .handle = vehicles_.handleFor(vehicle.state.id),
                 });
             }
@@ -1320,8 +1328,10 @@ void GameSession::runScripts() {
             std::vector<ScriptHost::Hooks::Entity> found;
 
             for (const auto& [id, handle] : peds_.all()) {
+                // Ведущего у прохожего нет: им целиком распоряжается сервер.
                 found.push_back(ScriptHost::Hooks::Entity{
                     .id = static_cast<std::int32_t>(id),
+                    .owner = -1,
                     .handle = handle,
                 });
             }
