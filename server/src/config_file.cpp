@@ -392,6 +392,8 @@ std::vector<std::string> apply(const Entries& entries, Config& config) {
             config.gameFilesDirectory = value;
         } else if (key == "resourcedirectory") {
             config.resourceDirectory = value;
+        } else if (key == "gamedata") {
+            config.gameDataFile = value;
         } else if (key == "pausemenu") {
             config.pausemenuPath = value;
         } else if (key == "spawn") {

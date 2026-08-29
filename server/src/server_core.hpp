@@ -3,6 +3,7 @@
 #include "attachment_directory.hpp"
 #include "config.hpp"
 #include "drawn_directory.hpp"
+#include "game_data.hpp"
 #include "object_directory.hpp"
 #include "ped_directory.hpp"
 #include "player_registry.hpp"
@@ -212,8 +213,8 @@ public:
     ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles, ObjectDirectory& objects,
                PedDirectory& peds, BlipDirectory& blips, MarkerDirectory& markers,
                CheckpointDirectory& checkpoints, AttachmentDirectory& attachments,
-               WorldClock& world, const Config& config, script::Events& events,
-               CoreSink& sink) noexcept;
+               WorldClock& world, const Config& config, const GameData& models,
+               script::Events& events, CoreSink& sink) noexcept;
 
     // --- Игроки ----------------------------------------------------------------
 
@@ -273,6 +274,15 @@ public:
     [[nodiscard]] script::ServerConfigInfo config() const override;
 
     bool askResource(std::string_view name, script::ResourceAction action) override;
+
+    [[nodiscard]] bool knowsModels() const override;
+    [[nodiscard]] const script::VehicleModelInfo* vehicleModel(
+        std::uint32_t hash) const override;
+    [[nodiscard]] const script::PedModelInfo* pedModel(std::uint32_t hash) const override;
+    [[nodiscard]] const script::WeaponModelInfo* weaponModel(
+        std::uint32_t hash) const override;
+    [[nodiscard]] std::int32_t vehicleModsCount(shared::VehicleId id,
+                                                std::uint8_t slot) const override;
     bool setDimension(shared::PlayerId id, std::int32_t dimension) override;
     bool teleport(shared::PlayerId id, const shared::Vec3& position) override;
     bool kick(shared::PlayerId id, std::string_view reason) override;
@@ -392,6 +402,10 @@ private:
     AttachmentDirectory* attachments_ = nullptr;
     WorldClock* world_ = nullptr;
     const Config* config_ = nullptr;
+
+    /// Справочники моделей. Пустые, если файла рядом с сервером нет: четыре
+    /// вопроса о моделях тогда отказывают вслух.
+    const GameData* models_ = nullptr;
     script::Events* events_ = nullptr;
     CoreSink* sink_ = nullptr;
 };

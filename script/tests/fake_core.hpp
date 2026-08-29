@@ -316,6 +316,42 @@ public:
     /// на любое.
     std::vector<std::string> catalogued;
 
+    /// Справочники подставного ядра. Пусто — «справочника нет вовсе».
+    std::vector<VehicleModelInfo> vehicleModels;
+    std::vector<PedModelInfo> pedModels;
+    std::vector<WeaponModelInfo> weaponModels;
+
+    /// Сколько деталей отвечать на всякий вопрос о тюнинге.
+    std::int32_t modsPerSlot = -1;
+
+    [[nodiscard]] bool knowsModels() const override {
+        return !vehicleModels.empty() || !pedModels.empty() || !weaponModels.empty();
+    }
+
+    [[nodiscard]] const VehicleModelInfo* vehicleModel(std::uint32_t hash) const override {
+        const auto found = std::ranges::find(vehicleModels, hash, &VehicleModelInfo::modelHash);
+        return found == vehicleModels.end() ? nullptr : &*found;
+    }
+
+    [[nodiscard]] const PedModelInfo* pedModel(std::uint32_t hash) const override {
+        const auto found = std::ranges::find(pedModels, hash, &PedModelInfo::hash);
+        return found == pedModels.end() ? nullptr : &*found;
+    }
+
+    [[nodiscard]] const WeaponModelInfo* weaponModel(std::uint32_t hash) const override {
+        const auto found = std::ranges::find(weaponModels, hash, &WeaponModelInfo::hash);
+        return found == weaponModels.end() ? nullptr : &*found;
+    }
+
+    [[nodiscard]] std::int32_t vehicleModsCount(shared::VehicleId id,
+                                                std::uint8_t) const override {
+        if (std::ranges::find(vehicleList, id, &VehicleInfo::id) == vehicleList.end()) {
+            return -1;
+        }
+
+        return modsPerSlot;
+    }
+
     bool askResource(std::string_view name, ResourceAction action) override {
         if (!catalogued.empty()
             && std::ranges::find(catalogued, name) == catalogued.end()) {

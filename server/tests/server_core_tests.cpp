@@ -226,8 +226,12 @@ struct Session {
 
     PedDirectory peds;
     AttachmentDirectory attachments;
-    ServerCore core{players,      vehicles,     objects, peds,    blips,  markers,
-                    checkpoints,  attachments,  world,   config,  events, sink};
+    /// Справочники моделей. Пустые: файла у проверок нет и быть не должно —
+    /// они не читают с диска ничего.
+    GameData models;
+
+    ServerCore core{players,     vehicles,    objects, peds,   blips,  markers,
+                    checkpoints, attachments, world,   config, models, events, sink};
 
     Player& join(net::PeerId peer, std::string nickname) {
         players.add(peer, std::move(nickname), 0, Identity{});

@@ -3,6 +3,7 @@
 #include "attachment_directory.hpp"
 #include "config.hpp"
 #include "console.hpp"
+#include "game_data.hpp"
 #include "http_server.hpp"
 #include "player_registry.hpp"
 #include "resource_catalog.hpp"
@@ -381,6 +382,10 @@ private:
     }
 
     Config config_;
+
+    /// Справочники моделей. Читаются один раз при запуске; нет файла — четыре
+    /// вопроса alt:V о моделях отказывают вслух, а сервер работает как прежде.
+    GameData models_;
     std::unique_ptr<net::Host> host_;
     PlayerRegistry players_;
 
@@ -467,8 +472,9 @@ private:
     ///
     /// Собрано на тех же реестрах, что и всё остальное: своих списков у него нет
     /// и быть не должно — они разошлись бы с настоящими молча.
-    ServerCore core_{players_,  vehicles_, objects_,     peds_,   blips_,   markers_,
-                     checkpoints_, attachments_, world_, config_, events_, *this};
+    ServerCore core_{players_,     vehicles_,    objects_, peds_,    blips_,  markers_,
+                     checkpoints_,  attachments_, world_,   config_,  models_, events_,
+                     *this};
 
     /// Что за ресурсы хозяин велел поднять и что о них сказано в их описаниях.
     ResourceCatalog catalog_;

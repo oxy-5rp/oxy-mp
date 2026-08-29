@@ -287,6 +287,100 @@ struct PedInfo {
     std::int32_t dimension = kDefaultDimension;
 };
 
+/// Кость модели: чем она зовётся и под каким номером её знает игра.
+///
+/// Номер и место в списке — разные числа, и оба нужны: нативы игры принимают то
+/// одно, то другое, и путать их нельзя.
+struct BoneInfo {
+    std::uint32_t id = 0;
+    std::uint32_t index = 0;
+    std::string name;
+};
+
+/// Что известно о модели машины.
+///
+/// Состав — `IVehicleModel` alt:V поле в поле. Знает это не игра у клиента и не
+/// реестры сервера, а справочник рядом с сервером: это свойства самой модели.
+struct VehicleModelInfo {
+    std::uint32_t modelHash = 0;
+    std::string title;
+
+    /// Род машины в нумерации alt:V (`ModelType`).
+    std::uint8_t type = 0;
+
+    std::uint8_t wheelsCount = 0;
+    bool hasArmouredWindows = false;
+
+    /// Цвета, с которыми машина выезжает с завода.
+    std::uint8_t primaryColour = 0;
+    std::uint8_t secondaryColour = 0;
+    std::uint8_t pearlColour = 0;
+    std::uint8_t wheelColour = 0;
+    std::uint8_t interiorColour = 0;
+    std::uint8_t dashboardColour = 0;
+
+    /// Номера наборов тюнинга; kNoModKit — набора нет.
+    std::uint16_t modKit = 0;
+    std::uint16_t secondModKit = 0;
+
+    /// Какие дополнения кузова у модели есть и какие стоят по умолчанию —
+    /// по биту на номер с первого по четырнадцатый.
+    std::uint16_t extras = 0;
+    std::uint16_t defaultExtras = 0;
+
+    /// Цепляет ли прицеп сама и можно ли цеплять к ней машины.
+    bool hasAutoAttachTrailer = false;
+    bool canAttachCars = false;
+
+    std::uint32_t handlingNameHash = 0;
+
+    std::string dlc;
+
+    std::vector<BoneInfo> bones;
+};
+
+/// Значение, которым справочник метит «набора тюнинга нет».
+inline constexpr std::uint16_t kNoModKit = 0xFFFFU;
+
+/// Что известно о модели человека. Состав — `IPedModel` alt:V поле в поле.
+struct PedModelInfo {
+    std::uint32_t hash = 0;
+    std::string name;
+    std::string type;
+    std::string dlc;
+
+    /// Чем этот человек дерётся, когда у него ничего нет в руках.
+    std::string defaultUnarmedWeapon;
+
+    std::string movementClipSet;
+
+    std::vector<BoneInfo> bones;
+};
+
+/// Что известно об оружии. Состав — `IWeaponModel` alt:V поле в поле.
+struct WeaponModelInfo {
+    std::uint32_t hash = 0;
+    std::string name;
+
+    /// Модель самого ствола: та, которую заказывают, чтобы положить его в мир.
+    std::string modelName;
+    std::uint32_t modelHash = 0;
+
+    std::uint32_t ammoTypeHash = 0;
+    std::string ammoType;
+    std::string ammoModelName;
+    std::uint32_t ammoModelHash = 0;
+
+    /// Сколько патронов игрок может носить: обычно, с навыком выше половины, с
+    /// полным навыком и сверх того.
+    std::uint32_t defaultMaxAmmo = 0;
+    std::uint32_t skillAbove50MaxAmmo = 0;
+    std::uint32_t maxSkillMaxAmmo = 0;
+    std::uint32_t bonusMaxAmmo = 0;
+
+    std::string damageType;
+};
+
 /// Что скрипт просит сделать с ресурсом.
 enum class ResourceAction : std::uint8_t {
     Start = 0,
@@ -1084,6 +1178,26 @@ public:
     /// сейчас нельзя, а соврать «сделано» хуже, чем сказать «принято».
     /// false — ресурса с таким именем нет вовсе.
     virtual bool askResource(std::string_view name, ResourceAction action) = 0;
+
+    /// Что известно о модели машины, человека или оружия.
+    ///
+    /// Пусто по двум разным поводам, и различить их снаружи нужно: справочника
+    /// у сервера нет вовсе или модели с таким хешем в нём нет. Первое —
+    /// «спросите иначе», второе — «такой модели не бывает», и отвечать на них
+    /// одинаково нельзя. Отсюда `knowsModels`.
+    [[nodiscard]] virtual bool knowsModels() const = 0;
+
+    [[nodiscard]] virtual const VehicleModelInfo* vehicleModel(std::uint32_t hash) const = 0;
+    [[nodiscard]] virtual const PedModelInfo* pedModel(std::uint32_t hash) const = 0;
+    [[nodiscard]] virtual const WeaponModelInfo* weaponModel(std::uint32_t hash) const = 0;
+
+    /// Сколько деталей есть у этой машины в этом месте тюнинга.
+    ///
+    /// Минус единица — ответа нет: справочника нет или машины с таким номером
+    /// уже нет в сессии. Ноль — есть и означает «в этом месте тюнинга не
+    /// бывает»: пустое меню, а не отсутствие ответа.
+    [[nodiscard]] virtual std::int32_t vehicleModsCount(shared::VehicleId id,
+                                                        std::uint8_t slot) const = 0;
 
 protected:
     Core() = default;

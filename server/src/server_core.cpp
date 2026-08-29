@@ -375,10 +375,44 @@ ServerCore::ServerCore(PlayerRegistry& players, VehicleDirectory& vehicles,
                        ObjectDirectory& objects, PedDirectory& peds, BlipDirectory& blips,
                        MarkerDirectory& markers, CheckpointDirectory& checkpoints,
                        AttachmentDirectory& attachments, WorldClock& world, const Config& config,
-                       script::Events& events, CoreSink& sink) noexcept
+                       const GameData& models, script::Events& events, CoreSink& sink) noexcept
     : players_(&players), vehicles_(&vehicles), objects_(&objects), peds_(&peds), blips_(&blips),
       markers_(&markers), checkpoints_(&checkpoints), attachments_(&attachments), world_(&world),
-      config_(&config), events_(&events), sink_(&sink) {}
+      config_(&config), models_(&models), events_(&events), sink_(&sink) {}
+
+bool ServerCore::knowsModels() const {
+    return models_ != nullptr && models_->loaded();
+}
+
+const script::VehicleModelInfo* ServerCore::vehicleModel(std::uint32_t hash) const {
+    return models_ == nullptr ? nullptr : models_->vehicle(hash);
+}
+
+const script::PedModelInfo* ServerCore::pedModel(std::uint32_t hash) const {
+    return models_ == nullptr ? nullptr : models_->ped(hash);
+}
+
+const script::WeaponModelInfo* ServerCore::weaponModel(std::uint32_t hash) const {
+    return models_ == nullptr ? nullptr : models_->weapon(hash);
+}
+
+std::int32_t ServerCore::vehicleModsCount(shared::VehicleId id, std::uint8_t slot) const {
+    if (models_ == nullptr) {
+        return -1;
+    }
+
+    // Модель спрашивается у реестра, а не у скрипта: тот назвал номер машины в
+    // сессии, а справочник знает модели. Ушедшей машины в реестре уже нет, и
+    // ответ на неё — «не знаю», а не ноль: ноль означал бы пустое меню тюнинга
+    // у машины, которой не существует.
+    const VehicleDirectory::Vehicle* const one = vehicles_->find(id);
+
+    if (one == nullptr) {
+        return -1;
+    }
+
+    return models_->modsCount(one->state.model, slot);
+}
 
 std::vector<script::PlayerInfo> ServerCore::players() const {
     std::vector<script::PlayerInfo> everyone;

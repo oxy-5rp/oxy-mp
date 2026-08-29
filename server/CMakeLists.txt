@@ -1,6 +1,7 @@
 add_executable(oxymp_server
     src/config_file.cpp
     src/console.cpp
+    src/game_data.cpp
     src/http_server.cpp
     src/main.cpp
     src/player_registry.cpp

@@ -442,6 +442,15 @@ void putNumber(v8::Local<v8::Context> context, const v8::Local<v8::Object>& targ
                       v8::Number::New(context->GetIsolate(), value));
 }
 
+/// То же для признака. Своим помощником, а не через putNumber: единица и ноль
+/// вместо true и false — законные числа, и ресурс, сравнивший их через `===`,
+/// не сошёлся бы ни разу.
+void putFlag(v8::Local<v8::Context> context, const v8::Local<v8::Object>& target,
+             const char* name, bool value) {
+    (void)target->Set(context, toJs(context->GetIsolate(), std::string{name}),
+                      v8::Boolean::New(context->GetIsolate(), value));
+}
+
 /// Ставит признак распоряжения о теле: заморозку или неуязвимость.
 ///
 /// Шаблоном на оба, потому что отличаются они одним вызовом ядра: подпись,
@@ -3282,6 +3291,197 @@ void askResource(const v8::FunctionCallbackInfo<v8::Value>& info) {
         resourceOf(isolate).core().askResource(fromJs(isolate, info[0]), Action));
 }
 
+/// Кости модели, разложенные в список объектов alt:V.
+///
+/// Имена полей — его же: `id`, `index`, `name`. Всякий раз заново, а не
+/// запомненным списком: обращений к костям единицы, а живущий рядом с изолятом
+/// список пришлось бы отпускать вместе с ним.
+[[nodiscard]] v8::Local<v8::Array> bonesToJs(v8::Local<v8::Context> context,
+                                             const std::vector<script::BoneInfo>& bones) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Array> out = v8::Array::New(isolate, static_cast<int>(bones.size()));
+
+    for (std::size_t at = 0; at < bones.size(); ++at) {
+        const v8::Local<v8::Object> one = v8::Object::New(isolate);
+
+        putNumber(context, one, "id", bones[at].id);
+        putNumber(context, one, "index", bones[at].index);
+        (void)one->Set(context, toJs(isolate, std::string{"name"}),
+                       toJs(isolate, bones[at].name));
+
+        (void)out->Set(context, static_cast<std::uint32_t>(at), one);
+    }
+
+    return out;
+}
+
+/// Общее для трёх вопросов о моделях: разбор довода и отказ.
+///
+/// Отказ здесь громкий и разный по поводу, и различать поводы обязательно.
+/// «Справочника нет» означает «положите его рядом с сервером», а «модели нет» —
+/// «такой модели не бывает». Ответь мы на оба одинаково — хозяин сервера искал
+/// бы опечатку в имени модели там, где не хватает файла.
+template<typename Info, const Info* (script::Core::*Ask)(std::uint32_t) const,
+         typename Shape>
+void modelInfo(const v8::FunctionCallbackInfo<v8::Value>& info, Shape shape) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    script::Core& core = resourceOf(isolate).core();
+
+    if (!core.knowsModels()) {
+        fail(isolate, "справочника моделей у сервера нет: положите рядом gamedata.bin, "
+                      "он собирается tools/gamedata");
+        return;
+    }
+
+    // Хеш числом или имя строкой — так же, как у `player.model` и у татуировок:
+    // режимы сплошь пишут `getVehicleModelInfoByHash(alt.hash('sultan'))`, но и
+    // саму строку туда передают не реже.
+    const std::optional<std::uint32_t> hash = hashAt(info, 0);
+
+    if (!hash) {
+        fail(isolate, "вопрос о модели ждёт её хеш или имя");
+        return;
+    }
+
+    const Info* const known = (core.*Ask)(*hash);
+
+    if (known == nullptr) {
+        // Ноль, а не отказ: у alt:V «нет такой модели» — законный ответ, и
+        // режимы проверяют его через `if (!info)`. Бросать здесь значило бы
+        // требовать try/catch вокруг всякой проверки имени модели.
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    info.GetReturnValue().Set(shape(isolate->GetCurrentContext(), *known));
+}
+
+[[nodiscard]] v8::Local<v8::Object> vehicleModelToJs(v8::Local<v8::Context> context,
+                                                     const script::VehicleModelInfo& one) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Object> out = v8::Object::New(isolate);
+
+    putNumber(context, out, "modelHash", one.modelHash);
+    (void)out->Set(context, toJs(isolate, std::string{"title"}), toJs(isolate, one.title));
+    putNumber(context, out, "type", one.type);
+    putNumber(context, out, "wheelsCount", one.wheelsCount);
+    putFlag(context, out, "hasArmoredWindows", one.hasArmouredWindows);
+    putNumber(context, out, "primaryColor", one.primaryColour);
+    putNumber(context, out, "secondaryColor", one.secondaryColour);
+    putNumber(context, out, "pearlColor", one.pearlColour);
+    putNumber(context, out, "wheelsColor", one.wheelColour);
+    putNumber(context, out, "interiorColor", one.interiorColour);
+    putNumber(context, out, "dashboardColor", one.dashboardColour);
+    putFlag(context, out, "hasAutoAttachTrailer", one.hasAutoAttachTrailer);
+    putFlag(context, out, "canAttachCars", one.canAttachCars);
+    putNumber(context, out, "handlingNameHash", one.handlingNameHash);
+    (void)out->Set(context, toJs(isolate, std::string{"dlcName"}), toJs(isolate, one.dlc));
+
+    // Наборы тюнинга и дополнения кузова отдаются числами, а слой alt:V делает
+    // из них то, что объявлено: `availableModkits` списком признаков и
+    // `hasExtra` вопросом. Разбор битов живёт там, а не здесь: здесь он был бы
+    // вторым разбором того же, и второй разошёлся бы с первым.
+    putNumber(context, out, "modKit", one.modKit);
+    putNumber(context, out, "secondModKit", one.secondModKit);
+    putNumber(context, out, "extras", one.extras);
+    putNumber(context, out, "defaultExtras", one.defaultExtras);
+
+    (void)out->Set(context, toJs(isolate, std::string{"bones"}), bonesToJs(context, one.bones));
+    return out;
+}
+
+[[nodiscard]] v8::Local<v8::Object> pedModelToJs(v8::Local<v8::Context> context,
+                                                 const script::PedModelInfo& one) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Object> out = v8::Object::New(isolate);
+
+    putNumber(context, out, "hash", one.hash);
+    (void)out->Set(context, toJs(isolate, std::string{"name"}), toJs(isolate, one.name));
+    (void)out->Set(context, toJs(isolate, std::string{"type"}), toJs(isolate, one.type));
+    (void)out->Set(context, toJs(isolate, std::string{"dlcName"}), toJs(isolate, one.dlc));
+    (void)out->Set(context, toJs(isolate, std::string{"defaultUnarmedWeapon"}),
+                   toJs(isolate, one.defaultUnarmedWeapon));
+    (void)out->Set(context, toJs(isolate, std::string{"movementClipSet"}),
+                   toJs(isolate, one.movementClipSet));
+
+    (void)out->Set(context, toJs(isolate, std::string{"bones"}), bonesToJs(context, one.bones));
+    return out;
+}
+
+[[nodiscard]] v8::Local<v8::Object> weaponModelToJs(v8::Local<v8::Context> context,
+                                                    const script::WeaponModelInfo& one) {
+    v8::Isolate* const isolate = context->GetIsolate();
+    const v8::Local<v8::Object> out = v8::Object::New(isolate);
+
+    putNumber(context, out, "hash", one.hash);
+    (void)out->Set(context, toJs(isolate, std::string{"name"}), toJs(isolate, one.name));
+    (void)out->Set(context, toJs(isolate, std::string{"modelName"}),
+                   toJs(isolate, one.modelName));
+    putNumber(context, out, "modelHash", one.modelHash);
+    putNumber(context, out, "ammoTypeHash", one.ammoTypeHash);
+    (void)out->Set(context, toJs(isolate, std::string{"ammoType"}), toJs(isolate, one.ammoType));
+    (void)out->Set(context, toJs(isolate, std::string{"ammoModelName"}),
+                   toJs(isolate, one.ammoModelName));
+    putNumber(context, out, "ammoModelHash", one.ammoModelHash);
+    putNumber(context, out, "defaultMaxAmmoMp", one.defaultMaxAmmo);
+    putNumber(context, out, "skillAbove50MaxAmmoMp", one.skillAbove50MaxAmmo);
+    putNumber(context, out, "maxSkillMaxAmmoMp", one.maxSkillMaxAmmo);
+    putNumber(context, out, "bonusMaxAmmoMp", one.bonusMaxAmmo);
+    (void)out->Set(context, toJs(isolate, std::string{"damageType"}),
+                   toJs(isolate, one.damageType));
+
+    return out;
+}
+
+void vehicleModelInfo(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    modelInfo<script::VehicleModelInfo, &script::Core::vehicleModel>(info, vehicleModelToJs);
+}
+
+void pedModelInfo(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    modelInfo<script::PedModelInfo, &script::Core::pedModel>(info, pedModelToJs);
+}
+
+void weaponModelInfo(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    modelInfo<script::WeaponModelInfo, &script::Core::weaponModel>(info, weaponModelToJs);
+}
+
+/// Сколько деталей есть у машины в этом месте тюнинга.
+///
+/// Спрашивается по номеру машины в сессии, а не по модели: так это объявлено у
+/// alt:V (`vehicle.getModsCount`), и оттуда же берётся её модель.
+void vehicleModsCount(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+
+    if (!id || info.Length() < 1) {
+        fail(isolate, "getModsCount ждёт место тюнинга");
+        return;
+    }
+
+    const std::optional<std::int64_t> slot = intFromJs(context, info[0]);
+
+    if (!slot) {
+        fail(isolate, "getModsCount ждёт место тюнинга числом");
+        return;
+    }
+
+    const std::int32_t known =
+        resourceOf(isolate).core().vehicleModsCount(*id, static_cast<std::uint8_t>(*slot));
+
+    if (known < 0) {
+        // Отказ вслух, а не ноль: ноль означает «в этом месте деталей нет», то
+        // есть пустое меню тюнинга, и отдать его вместо «не знаю» значило бы
+        // сказать про всякую машину, что тюнинговать её нечем.
+        fail(isolate, "справочника моделей у сервера нет либо машины уже нет в сессии: "
+                      "gamedata.bin собирается tools/gamedata");
+        return;
+    }
+
+    info.GetReturnValue().Set(known);
+}
+
 void setTime(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3546,6 +3746,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "destroy", vehicleDestroy);
     addMethod(isolate, shape, "teleport", vehicleTeleport);
     addMethod(isolate, shape, "repair", vehicleRepair);
+    addMethod(isolate, shape, "getModsCount", vehicleModsCount);
     addMethod(isolate, shape, "setAppearance", vehicleSetAppearance);
 
     return shape;
@@ -3676,6 +3877,9 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "setWeather", setWeather);
     addFunction(context, oxymp, "setTime", setTime);
     addFunction(context, oxymp, "serverConfig", serverConfig);
+    addFunction(context, oxymp, "vehicleModelInfo", vehicleModelInfo);
+    addFunction(context, oxymp, "pedModelInfo", pedModelInfo);
+    addFunction(context, oxymp, "weaponModelInfo", weaponModelInfo);
     addFunction(context, oxymp, "startResource", askResource<script::ResourceAction::Start>);
     addFunction(context, oxymp, "stopResource", askResource<script::ResourceAction::Stop>);
     addFunction(context, oxymp, "restartResource",
