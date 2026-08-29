@@ -114,8 +114,17 @@
 
             // Модель обязана быть загружена до создания: игра молча вернёт ноль,
             // если её нет в памяти, и предмет не появится без единой жалобы.
+            //
+            // Заказ здесь синхронный только по видимости: подгрузка занимает
+            // кадры, и заказавший в этом же кадре её не дождётся. Отказ поэтому
+            // говорит, что делать, — так же, как у местных машин и кукол.
             if (natives.hasModelLoaded(хеш) !== true) {
                 natives.requestModel(хеш);
+
+                if (natives.hasModelLoaded(хеш) !== true) {
+                    throw new Error(`LocalObject: модель ${хеш} ещё не загружена — закажите её `
+                                    + 'через alt.Utils.requestModel и дождитесь');
+                }
             }
 
             const дескриптор = natives.createObject(хеш, точка.x, точка.y, точка.z,
@@ -125,6 +134,10 @@
             if (дескриптор === 0) {
                 throw new Error(`предмет модели ${хеш} не завёлся: игра отказала`);
             }
+
+            // Заказ отпускается сразу: заведённый предмет игра держит и без
+            // него, а заказ держит модель в памяти сам по себе.
+            natives.setModelAsNoLongerNeeded(хеш);
 
             super(дескриптор);
 
@@ -137,6 +150,165 @@
         }
 
         static all = [];
+
+        static get count() { return LocalObject.all.length; }
+
+        /// Предметы самого мира — те, что расставила игра, а не мы.
+        ///
+        /// Отказ, а не пустой список: пустой означал бы «в мире нет ни одного
+        /// предмета», и режим, ищущий среди них дверь или мусорку, решил бы,
+        /// что их нет, вместо того чтобы узнать, что мы их не считаем.
+        static get allWorld() {
+            throw new Error('LocalObject.allWorld: предметы самого мира мы не перечисляем — '
+                            + 'их находят нативом getClosestObjectOfType');
+        }
+
+        /// Заведён ли этот предмет самим миром. Всегда «нет»: заводим их здесь
+        /// мы, и это не заглушка, а правда о них.
+        get isWorldObject() { return false; }
+
+        get alpha() {
+            return this.valid ? natives.getEntityAlpha(this.scriptID) : 0;
+        }
+
+        set alpha(value) {
+            if (this.valid) {
+                // Последний довод — «постепенно», и он выключен: у alt:V
+                // прозрачность ставится разом.
+                natives.setEntityAlpha(this.scriptID, Number(value) || 0, false);
+            }
+        }
+
+        resetAlpha() {
+            if (this.valid) {
+                natives.resetEntityAlpha(this.scriptID);
+            }
+        }
+
+        get lodDistance() {
+            return this.valid ? natives.getEntityLodDist(this.scriptID) : 0;
+        }
+
+        set lodDistance(value) {
+            if (this.valid) {
+                natives.setEntityLodDist(this.scriptID, Number(value) || 0);
+            }
+        }
+
+        /// Действует ли на предмет тяжесть.
+        ///
+        /// Только запись: вопроса у игры нет — есть один натив, и тот
+        /// распоряжение. Отказ вслух, а не «да»: предмет, которому тяжесть
+        /// отключили, ответил бы «падает», и режим, качающий её туда-сюда,
+        /// сбился бы на первом же чтении.
+        get hasGravity() {
+            throw new Error('object.hasGravity: у игры об этом не спросить — натив только ставит');
+        }
+
+        set hasGravity(value) {
+            if (this.valid) {
+                natives.setEntityHasGravity(this.scriptID, value === true);
+            }
+        }
+
+        /// Столкновения. Та же беда, что и с тяжестью: натив только ставит.
+        get isCollisionEnabled() {
+            throw new Error('object.isCollisionEnabled: у игры об этом не спросить — '
+                            + 'натив только ставит');
+        }
+
+        toggleCollision(toggle, keepPhysics) {
+            if (this.valid) {
+                natives.setEntityCollision(this.scriptID, toggle === true, keepPhysics === true);
+            }
+        }
+
+        /// Заморожен ли предмет на месте. Снова только запись.
+        get positionFrozen() {
+            throw new Error('object.positionFrozen: у игры об этом не спросить — '
+                            + 'натив только ставит');
+        }
+
+        set positionFrozen(value) {
+            if (this.valid) {
+                natives.freezeEntityPosition(this.scriptID, value === true);
+            }
+        }
+
+        /// Какой из вариантов раскраски модели надет. Опять только запись.
+        get textureVariation() {
+            throw new Error('object.textureVariation: у игры об этом не спросить — '
+                            + 'натив только ставит');
+        }
+
+        set textureVariation(value) {
+            if (this.valid) {
+                natives.setObjectTextureVariant(this.scriptID, Number(value) || 0);
+            }
+        }
+
+        /// Ставит предмет на землю под ним.
+        placeOnGroundProperly() {
+            if (this.valid) {
+                natives.placeObjectOnGroundProperly(this.scriptID);
+            }
+        }
+
+        activatePhysics() {
+            if (this.valid) {
+                natives.activatePhysics(this.scriptID);
+            }
+        }
+
+        /// Привязывает предмет к сущности. Доводы — как у alt:V.
+        ///
+        /// Первым принимается и сущность, и голый дескриптор: у alt:V объявлены
+        /// обе формы, и режимы пользуются обеими.
+        attachToEntity(entity, boneIndex, offset, rot, useSoftPinning, collision, fixedRot) {
+            if (!this.valid) {
+                return;
+            }
+
+            const кому = typeof entity === 'object' && entity !== null
+                ? entity.scriptID : Number(entity) || 0;
+
+            if (кому === 0) {
+                throw new Error('object.attachToEntity: первым доводом нужна сущность или её '
+                                + 'дескриптор');
+            }
+
+            const смещение = new shared.Vector3(offset ?? shared.Vector3.zero);
+            const поворот = new shared.Vector3(rot ?? shared.Vector3.zero).toDegrees();
+
+            // Последние доводы игры: «мягкое крепление», «столкновения»,
+            // «неподвижный поворот», ось поворота и «привязка к физике». Три
+            // первых называет режим, остальные — умолчания самой игры.
+            natives.attachEntityToEntity(
+                this.scriptID, кому, Number(boneIndex) || 0,
+                смещение.x, смещение.y, смещение.z,
+                поворот.x, поворот.y, поворот.z,
+                useSoftPinning !== false, collision === true, fixedRot !== false,
+                false, 2, true);
+        }
+
+        detach(dynamic) {
+            if (this.valid) {
+                // Доводы игры: «применить скорость» и «собрать столкновения».
+                // Второй здесь всегда да — отцепленный предмет обязан снова
+                // сталкиваться с миром.
+                natives.detachEntity(this.scriptID, dynamic !== false, true);
+            }
+        }
+
+        /// Дождаться появления предмета.
+        ///
+        /// У alt:V это обещание: там предмет может появиться позже, потому что
+        /// его подгружает стриминг. Здесь он появляется в конструкторе или не
+        /// появляется вовсе, и обещание исполняется сразу — не заглушкой, а по
+        /// существу: ждать нечего.
+        waitForSpawn() {
+            return Promise.resolve();
+        }
 
         destroy() {
             const дескриптор = this.scriptID;
