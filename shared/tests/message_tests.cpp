@@ -853,6 +853,53 @@ TEST_CASE("a player climbing out of a vehicle says so apart from sitting in it",
     CHECK_FALSE(has(received->flags, PlayerFlag::EnteringVehicle));
 }
 
+TEST_CASE("a blip carries its flashing, its number and its second colour",
+          "[messages]") {
+    // Признаки едут одним числом, а не полем на каждый: полтора десятка `bool`
+    // заняли бы полтора десятка байт в каждом снимке метки, а меток у режима
+    // бывают сотни.
+    BlipState sent;
+    sent.id = 4;
+    sent.flags = BlipFlag::Flashes | BlipFlag::ShowCone | BlipFlag::Tick;
+    sent.flashInterval = 250;
+    sent.flashTimer = 5000;
+    sent.number = 7;
+    sent.hasSecondaryColour = true;
+    sent.secondaryRed = 10;
+    sent.secondaryGreen = 20;
+    sent.secondaryBlue = 30;
+    sent.gxtName = "BLIP_INFO_ICON";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, BlipFlag::Flashes));
+    CHECK(has(received->flags, BlipFlag::ShowCone));
+    CHECK(has(received->flags, BlipFlag::Tick));
+    CHECK_FALSE(has(received->flags, BlipFlag::Bright));
+    CHECK(received->flashInterval == 250);
+    CHECK(received->flashTimer == 5000);
+    CHECK(received->number == 7);
+    CHECK(received->hasSecondaryColour);
+    CHECK(received->secondaryGreen == 20);
+    CHECK(received->gxtName == "BLIP_INFO_ICON");
+}
+
+TEST_CASE("a blip without a second colour says so apart from being black",
+          "[messages]") {
+    // Признак отдельно, потому что чёрный — законный цвет обводки, и «нет
+    // второго» им не выразить. Без признака всякая метка приезжала бы с чёрной
+    // обводкой.
+    BlipState sent;
+    sent.id = 5;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK_FALSE(received->hasSecondaryColour);
+    CHECK(received->secondaryRed == 0);
+}
+
 TEST_CASE("a hit on a ped names the ped, the damage and our weapon", "[messages]") {
     // Оружие здесь наше, а не жертвы: сервер пересказывает это число скриптам
     // как оружие удара, и ствол прохожего сделал бы всякий выстрел ударом

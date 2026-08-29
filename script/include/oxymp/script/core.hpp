@@ -439,6 +439,27 @@ struct BlipInfo {
 
     std::string name;
 
+    /// Признаки метки: мигание, яркость, конус, галочка и прочее. Набор
+    /// `shared::BlipFlag`.
+    std::uint16_t flags = 0;
+
+    /// Как часто метка мигает и сколько времени. Ноль — как решит игра.
+    std::uint16_t flashInterval = 0;
+    std::uint16_t flashTimer = 0;
+
+    /// Номер поверх метки. Ноль — без номера.
+    std::uint8_t number = 0;
+
+    /// Второй цвет: им красится обводка. Признак отдельно, потому что чёрный —
+    /// законный цвет, и «нет второго» им не выразить.
+    bool hasSecondaryColour = false;
+    std::uint8_t secondaryRed = 0;
+    std::uint8_t secondaryGreen = 0;
+    std::uint8_t secondaryBlue = 0;
+
+    /// Имя из словаря игры. Пусто — имя своё, в `name`.
+    std::string gxtName;
+
     /// В каком слое мира метка видна. См. dimension.hpp.
     std::int32_t dimension = kDefaultDimension;
 

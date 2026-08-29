@@ -1511,4 +1511,67 @@ globalThis.__oxympAlt.enums = {
         Medium: 'MEDIUM',
         High: 'HIGH',
     }),
+
+    // --- Серверные ------------------------------------------------------------
+
+    /// Особый вид патронов: бронебойные, разрывные и прочие.
+    ///
+    /// Задать их у нас нечем — `setAmmoSpecialType` отказывает вслух, — но числа
+    /// нужны и без этого: режим сравнивает с ними ответ и пишет их в свои
+    /// настройки.
+    AmmoSpecialType: Object.freeze({
+        None: 0,
+        ArmorPiercing: 1,
+        Explosive: 2,
+        FullMetalJacket: 3,
+        HollowPoint: 4,
+        Incendiary: 5,
+        Tracer: 6,
+    }),
+
+    /// Какой из двух бамперов машины.
+    VehicleBumper: Object.freeze({
+        Front: 0,
+        Rear: 1,
+    }),
+
+    /// В каком он состоянии. Тройка здесь — «бампера у модели нет вовсе», а не
+    /// «цел»: спутать их значило бы объявить целым то, чего не бывает.
+    VehicleBumperDamage: Object.freeze({
+        NotDamaged: 0,
+        Damaged: 1,
+        None: 2,
+    }),
+
+    /// Какая часть кузова: по стороне и ряду.
+    VehiclePart: Object.freeze({
+        FrontLeft: 0,
+        FrontRight: 1,
+        MiddleLeft: 2,
+        MiddleRight: 3,
+        RearLeft: 4,
+        RearRight: 5,
+    }),
+
+    /// Насколько она помята. Три ступени, а не признак: так считает игра.
+    VehiclePartDamage: Object.freeze({
+        NotDamaged: 0,
+        DamagedLevel1: 1,
+        DamagedLevel2: 2,
+        DamagedLevel3: 3,
+    }),
+
+    /// Чем кончилась проверка входа через облако alt:V. Своей такой проверки у
+    /// нас нет — числа объявлены затем, что режим сравнивает с ними ответ.
+    CloudAuthResult: Object.freeze({
+        Success: 0,
+        NoBenefit: 1,
+        VerifyFailed: 2,
+    }),
+
+    /// Что сервер получил от alt:V за подписку. У нас — ничего, и это `None`.
+    Benefit: Object.freeze({
+        None: 0,
+        CloudAuth: 1,
+    }),
 };

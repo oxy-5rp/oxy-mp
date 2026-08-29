@@ -1667,9 +1667,80 @@ struct BlipState {
     /// Подпись в списке на карте. Пустая — игра подпишет метку сама.
     std::string name;
 
+    /// Признаки, которых у метки полтора десятка и каждый — один бит.
+    ///
+    /// Одним числом, а не полем на признак: полтора десятка `bool` заняли бы
+    /// полтора десятка байт в каждом снимке метки, а меток на карте у режима
+    /// бывают сотни. Значения — `BlipFlag`.
+    std::uint16_t flags = 0;
+
+    /// Как часто метка мигает и сколько времени. Ноль — умолчание игры.
+    std::uint16_t flashInterval = 0;
+    std::uint16_t flashTimer = 0;
+
+    /// Номер, нарисованный поверх метки. Ноль — без номера.
+    std::uint8_t number = 0;
+
+    /// Второй цвет: им красится обводка у меток, которые её принимают.
+    /// Признак отдельно, потому что чёрный — законный цвет и «нет второго» им
+    /// не выразить.
+    bool hasSecondaryColour = false;
+    std::uint8_t secondaryRed = 0;
+    std::uint8_t secondaryGreen = 0;
+    std::uint8_t secondaryBlue = 0;
+
+    /// Имя из словаря игры, а не своё. Пусто — имя своё, в `name`.
+    std::string gxtName;
+
     void write(ByteWriter& writer) const;
     [[nodiscard]] static BlipState read(ByteReader& reader);
 };
+
+/// Признаки метки. По биту на каждый; значения — те же, что у alt:V по смыслу.
+enum class BlipFlag : std::uint16_t {
+    /// Мигает.
+    Flashes = 1U << 0U,
+
+    /// Мигает вперемежку с соседней.
+    FlashesAlternate = 1U << 1U,
+
+    /// Яркая: игра рисует её насыщеннее обычного.
+    Bright = 1U << 2U,
+
+    /// Показывает конус обзора — так рисуют охрану и камеры.
+    ShowCone = 1U << 3U,
+
+    /// Дружеская: у alt:V это отдельный признак, и игра красит её по-своему.
+    Friendly = 1U << 4U,
+
+    /// Подробная: не сливается с соседними при отдалении карты.
+    HighDetail = 1U << 5U,
+
+    /// Считать метку поставленной сюжетом. Игра рисует такие иначе.
+    MissionCreator = 1U << 6U,
+
+    /// Показывать, куда смотрит тот, кому метка принадлежит.
+    HeadingIndicator = 1U << 7U,
+
+    /// Сжатая: занимает меньше места на карте.
+    Shrinked = 1U << 8U,
+
+    /// Галочка поверх метки.
+    Tick = 1U << 9U,
+};
+
+[[nodiscard]] constexpr std::uint16_t operator|(BlipFlag left, BlipFlag right) noexcept {
+    return static_cast<std::uint16_t>(static_cast<std::uint16_t>(left) |
+                                      static_cast<std::uint16_t>(right));
+}
+
+[[nodiscard]] constexpr std::uint16_t operator|(std::uint16_t left, BlipFlag right) noexcept {
+    return static_cast<std::uint16_t>(left | static_cast<std::uint16_t>(right));
+}
+
+[[nodiscard]] constexpr bool has(std::uint16_t flags, BlipFlag flag) noexcept {
+    return (flags & static_cast<std::uint16_t>(flag)) != 0;
+}
 
 /// Метки больше нет.
 struct BlipRemoved {

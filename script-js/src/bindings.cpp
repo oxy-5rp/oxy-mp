@@ -2663,6 +2663,21 @@ void detachEntity(const v8::FunctionCallbackInfo<v8::Value>& info) {
     blip.priority = fields->byte("priority", 0);
     blip.name = fields->text("name");
 
+    // Признаки одним числом: слой их и собирает, и разбирает — здесь они уже
+    // сложены. Разбирать их дважды, тут и там, значило бы завести второе место,
+    // где номера битов могут разойтись с первым.
+    blip.flags = static_cast<std::uint16_t>(fields->number("flags", 0));
+    blip.flashInterval = static_cast<std::uint16_t>(fields->number("flashInterval", 0));
+    blip.flashTimer = static_cast<std::uint16_t>(fields->number("flashTimer", 0));
+    blip.number = fields->byte("number", 0);
+
+    blip.hasSecondaryColour = fields->flag("hasSecondaryColour", false);
+    blip.secondaryRed = fields->byte("secondaryRed", 0);
+    blip.secondaryGreen = fields->byte("secondaryGreen", 0);
+    blip.secondaryBlue = fields->byte("secondaryBlue", 0);
+
+    blip.gxtName = fields->text("gxtName");
+
     // Общая ли метка. Умолчание — «да»: у alt:V довод `global` необязателен, и
     // не назвавший его режим ждёт обычную метку, видимую всем.
     blip.global = fields->flag("global", true);

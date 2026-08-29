@@ -1129,6 +1129,15 @@ void BlipState::write(ByteWriter& writer) const {
     writer.writeFloat(scale);
     writer.writeU8(priority);
     writer.writeString(name);
+    writer.writeU16(flags);
+    writer.writeU16(flashInterval);
+    writer.writeU16(flashTimer);
+    writer.writeU8(number);
+    writer.writeU8(hasSecondaryColour ? 1 : 0);
+    writer.writeU8(secondaryRed);
+    writer.writeU8(secondaryGreen);
+    writer.writeU8(secondaryBlue);
+    writer.writeString(gxtName);
 }
 
 BlipState BlipState::read(ByteReader& reader) {
@@ -1143,6 +1152,15 @@ BlipState BlipState::read(ByteReader& reader) {
     message.scale = reader.readFloat();
     message.priority = reader.readU8();
     message.name = reader.readString();
+    message.flags = reader.readU16();
+    message.flashInterval = reader.readU16();
+    message.flashTimer = reader.readU16();
+    message.number = reader.readU8();
+    message.hasSecondaryColour = reader.readU8() != 0;
+    message.secondaryRed = reader.readU8();
+    message.secondaryGreen = reader.readU8();
+    message.secondaryBlue = reader.readU8();
+    message.gxtName = reader.readString();
     return message;
 }
 

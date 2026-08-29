@@ -21,20 +21,49 @@
 (function build(alt) {
     const native = alt.native;
     const shared = alt.shared;
+
+    /// Признаки метки: по биту на каждый. Те же номера, что и у протокола
+    /// (`shared::BlipFlag`), и разъехаться им нельзя — метка тогда замигает
+    /// вместо того, чтобы показать конус, и не скажет об этом ни слова.
+    const kBlipFlag = {
+        Flashes: 1 << 0,
+        FlashesAlternate: 1 << 1,
+        Bright: 1 << 2,
+        ShowCone: 1 << 3,
+        Friendly: 1 << 4,
+        HighDetail: 1 << 5,
+        MissionCreator: 1 << 6,
+        HeadingIndicator: 1 << 7,
+        Shrinked: 1 << 8,
+        Tick: 1 << 9,
+    };
+
+    /// Род метки в нумерации alt:V.
+    const kBlipType = { Destination: 4, Area: 3, Radius: 9 };
     const server = alt.server;
 
     /// О чём уже предупреждали. По одному разу на повод, а не на объект: режим,
     /// заводящий тысячу меток, залил бы журнал тысячей одинаковых строк.
     const warned = new Set();
 
-    function warnOnce(what) {
+    /// Жалоба со своими словами, сказанная один раз.
+    function warnOnce(what, why) {
         if (warned.has(what)) {
             return;
         }
 
         warned.add(what);
-        server.logWarning(`${what} заводится на сервере, но игроку пока не показывается: ` +
-                          'клиентской части alt:V в oxyMP ещё нет');
+        server.logWarning(`${what}: ${why}`);
+    }
+
+    /// Она же для того, что заводится, но игроку не показывается.
+    ///
+    /// Осталось от времени, когда клиентской части alt:V не было вовсе; теперь
+    /// так говорится только о голосовом канале, у которого нет ни серверной
+    /// половины, ни клиентской.
+    function warnUnshown(what) {
+        warnOnce(what, 'заводится на сервере, но игроку не показывается — '
+                       + 'этого в oxyMP ещё нет');
     }
 
     /// Общий предок всего, что заводит скрипт и что живёт до destroy().
@@ -509,6 +538,123 @@
             this.routeColor = 0;
             this.display = 2;
             this.priority = 0;
+
+            // Признаки одним числом, а свойства над ним — ниже. Полтора десятка
+            // отдельных полей заняли бы полтора десятка байт в каждом снимке
+            // метки, а меток у режима бывают сотни.
+            this.flags = 0;
+            this.flashInterval = 0;
+            this.flashTimer = 0;
+            this.number = 0;
+
+            this.hasSecondaryColour = false;
+            this.secondaryRed = 0;
+            this.secondaryGreen = 0;
+            this.secondaryBlue = 0;
+
+            this.gxtName = '';
+        }
+
+        /// Признак по биту: читается и ставится как обычное свойство.
+        ///
+        /// Через один помощник, а не пятнадцать одинаковых пар: пятнадцать
+        /// повторений — это пятнадцать мест, где можно перепутать бит, и
+        /// перепутанный молчит.
+        #flag(bit, value) {
+            if (value === undefined) {
+                return (this.flags & bit) !== 0;
+            }
+
+            this.flags = value ? (this.flags | bit) >>> 0 : (this.flags & ~bit) >>> 0;
+            return value;
+        }
+
+        get flashes() { return this.#flag(kBlipFlag.Flashes); }
+        set flashes(value) { this.#flag(kBlipFlag.Flashes, Boolean(value)); }
+
+        get flashesAlternate() { return this.#flag(kBlipFlag.FlashesAlternate); }
+        set flashesAlternate(value) { this.#flag(kBlipFlag.FlashesAlternate, Boolean(value)); }
+
+        get bright() { return this.#flag(kBlipFlag.Bright); }
+        set bright(value) { this.#flag(kBlipFlag.Bright, Boolean(value)); }
+
+        get showCone() { return this.#flag(kBlipFlag.ShowCone); }
+        set showCone(value) { this.#flag(kBlipFlag.ShowCone, Boolean(value)); }
+
+        get isFriendly() { return this.#flag(kBlipFlag.Friendly); }
+        set isFriendly(value) { this.#flag(kBlipFlag.Friendly, Boolean(value)); }
+
+        get highDetail() { return this.#flag(kBlipFlag.HighDetail); }
+        set highDetail(value) { this.#flag(kBlipFlag.HighDetail, Boolean(value)); }
+
+        get asMissionCreator() { return this.#flag(kBlipFlag.MissionCreator); }
+        set asMissionCreator(value) { this.#flag(kBlipFlag.MissionCreator, Boolean(value)); }
+
+        get headingIndicatorVisible() { return this.#flag(kBlipFlag.HeadingIndicator); }
+        set headingIndicatorVisible(value) {
+            this.#flag(kBlipFlag.HeadingIndicator, Boolean(value));
+        }
+
+        get shrinked() { return this.#flag(kBlipFlag.Shrinked); }
+        set shrinked(value) { this.#flag(kBlipFlag.Shrinked, Boolean(value)); }
+
+        get tickVisible() { return this.#flag(kBlipFlag.Tick); }
+        set tickVisible(value) { this.#flag(kBlipFlag.Tick, Boolean(value)); }
+
+        /// Второй цвет: RGBA у alt:V, три байта и признак у нас.
+        ///
+        /// Признак нужен потому, что чёрный — законный цвет, и «нет второго» им
+        /// не выразить. Снять его можно, присвоив пустоту.
+        get secondaryColor() {
+            return this.hasSecondaryColour
+                ? new shared.RGBA(this.secondaryRed, this.secondaryGreen,
+                                  this.secondaryBlue, 255)
+                : null;
+        }
+
+        set secondaryColor(value) {
+            if (value === null || value === undefined) {
+                this.hasSecondaryColour = false;
+                return;
+            }
+
+            this.hasSecondaryColour = true;
+            this.secondaryRed = Number(value.r) || 0;
+            this.secondaryGreen = Number(value.g) || 0;
+            this.secondaryBlue = Number(value.b) || 0;
+        }
+
+        /// Мигание разом: у alt:V это `pulse()` и `fade()`, а у игры — срок и
+        /// промежуток. Оба зовут одно и то же, и потому написаны через одно.
+        pulse(duration) {
+            this.flashes = true;
+            this.flashTimer = Number(duration) || 0;
+            this.update();
+        }
+
+        fade(opacity, duration) {
+            // Затухание у игры своё, и оно не то же, что прозрачность: alt:V
+            // объявляет `fade(opacity, duration)`, а игра умеет только мигание
+            // со сроком. Ставим прозрачность и говорим о разнице один раз.
+            warnOnce('blip.fade',
+                     'плавного затухания у игры нет — прозрачность выставлена разом');
+
+            this.alpha = Number(opacity) || 0;
+            this.flashTimer = Number(duration) || 0;
+            this.update();
+        }
+
+        /// К чему метка привязана. Привязки у нас нет, и `attachTo` говорит об
+        /// этом вслух; здесь — законный ответ «ни к чему», а не отказ.
+        get attachedTo() { return null; }
+        get isAttached() { return false; }
+
+        /// Какого рода эта метка. Различаются они классом, а не числом: у нас
+        /// нет `Blip` без рода, каждая заводится своим конструктором.
+        get blipType() {
+            return this instanceof AreaBlip ? kBlipType.Area
+                 : this instanceof RadiusBlip ? kBlipType.Radius
+                                              : kBlipType.Destination;
         }
 
         /// Общая ли метка. Называется при заведении и потом не меняется — так
@@ -776,7 +922,7 @@
             this.isSpatial = Boolean(spatial);
             this.maxDistance = Number(maxDistance) || 0;
 
-            warnOnce('голосовой канал');
+            warnUnshown('голосовой канал');
         }
 
         addPlayer(player) {

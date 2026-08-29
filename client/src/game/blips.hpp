@@ -33,6 +33,12 @@ public:
     /// помнить, знаем ли мы уже эту метку, ему негде, а нам — просто.
     void apply(const shared::BlipState& state);
 
+private:
+    /// Накладывает признаки, мигание, номер, второй цвет и имя из словаря.
+    void applyFlags(int blip, const shared::BlipState& state) const;
+
+public:
+
     /// Убирает метку. Молча, если её и не было: сообщение о снятой метке
     /// вправе прийти дважды.
     void remove(shared::BlipId id);
@@ -56,6 +62,20 @@ private:
     NativeHandler setDisplay_ = nullptr;
     NativeHandler setShortRange_ = nullptr;
     NativeHandler setPriority_ = nullptr;
+    NativeHandler setFlashes_ = nullptr;
+    NativeHandler setFlashesAlternate_ = nullptr;
+    NativeHandler setFlashInterval_ = nullptr;
+    NativeHandler setFlashTimer_ = nullptr;
+    NativeHandler setBright_ = nullptr;
+    NativeHandler setShowCone_ = nullptr;
+    NativeHandler setFriendly_ = nullptr;
+    NativeHandler setHighDetail_ = nullptr;
+    NativeHandler setMissionCreator_ = nullptr;
+    NativeHandler setHeadingIndicator_ = nullptr;
+    NativeHandler setTick_ = nullptr;
+    NativeHandler setNumber_ = nullptr;
+    NativeHandler setSecondaryColour_ = nullptr;
+    NativeHandler setGxtName_ = nullptr;
     NativeHandler beginName_ = nullptr;
     NativeHandler addNamePart_ = nullptr;
     NativeHandler endName_ = nullptr;

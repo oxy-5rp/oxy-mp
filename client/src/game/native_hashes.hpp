@@ -700,6 +700,49 @@ inline constexpr std::uint64_t kRemoveBlip = 0XFE54B8568B2ABD12;
 /// SET_BLIP_SPRITE, канонический хеш 0XDF735600A4696DAF.
 inline constexpr std::uint64_t kSetBlipSprite = 0X4C905FB262965D5D;
 
+/// SET_BLIP_FLASHES, канонический хеш 0XB14552383D39CE3E.
+inline constexpr std::uint64_t kSetBlipFlashes = 0X861AC9C2D48CEA7F;
+
+/// SET_BLIP_FLASHES_ALTERNATE, канонический хеш 0X2E8D9498C56DD0D1.
+inline constexpr std::uint64_t kSetBlipFlashesAlternate = 0XAB1FFF93A0BBFCDB;
+
+/// SET_BLIP_FLASH_INTERVAL, канонический хеш 0XAA51DB313C010A7E.
+inline constexpr std::uint64_t kSetBlipFlashInterval = 0XB562F84CE9B07D89;
+
+/// SET_BLIP_FLASH_TIMER, канонический хеш 0XD3CD6FD297AE87CC.
+inline constexpr std::uint64_t kSetBlipFlashTimer = 0X8D777E1B885E428C;
+
+/// SET_BLIP_BRIGHT, канонический хеш 0XB203913733F27884.
+inline constexpr std::uint64_t kSetBlipBright = 0XEE0DD5760A017C08;
+
+/// SET_BLIP_SHOW_CONE, канонический хеш 0X13127EC3665E8EE1.
+inline constexpr std::uint64_t kSetBlipShowCone = 0XD5888E94B9AE2B51;
+
+/// SET_BLIP_AS_FRIENDLY, канонический хеш 0X6F6F290102C02AB4.
+inline constexpr std::uint64_t kSetBlipAsFriendly = 0X6A52036D51C7E18E;
+
+/// SET_BLIP_HIGH_DETAIL, канонический хеш 0XE2590BC29220CEBB.
+inline constexpr std::uint64_t kSetBlipHighDetail = 0X3C6F00DDEA51A2DA;
+
+/// SET_BLIP_AS_MISSION_CREATOR_BLIP, канонический хеш 0X24AC0137444F9FD5.
+inline constexpr std::uint64_t kSetBlipAsMissionCreatorBlip = 0XEDFFFD65B4603707;
+
+/// SHOW_HEADING_INDICATOR_ON_BLIP, канонический хеш 0X5FBCA48327B914DF.
+inline constexpr std::uint64_t kShowHeadingIndicatorOnBlip = 0X0C56573D93709254;
+
+/// SHOW_TICK_ON_BLIP, канонический хеш 0X74513EA3E505181E.
+inline constexpr std::uint64_t kShowTickOnBlip = 0X80595F890177CB50;
+
+/// SHOW_NUMBER_ON_BLIP, канонический хеш 0XA3C0B359DCB848B6.
+inline constexpr std::uint64_t kShowNumberOnBlip = 0X5765DD63F0ECC572;
+
+/// SET_BLIP_SECONDARY_COLOUR, канонический хеш 0X14892474891E09EB.
+inline constexpr std::uint64_t kSetBlipSecondaryColour = 0X40B5D81DD20A370B;
+
+/// SET_BLIP_NAME_FROM_TEXT_FILE, канонический хеш 0XEAA0FFE120D92784.
+inline constexpr std::uint64_t kSetBlipNameFromTextFile = 0X594D5D0D7071B0DE;
+
+
 /// SET_BLIP_COLOUR, канонический хеш 0X03D7FB09E75D6B7E.
 inline constexpr std::uint64_t kSetBlipColour = 0X61183D6239A9D7B8;
 
