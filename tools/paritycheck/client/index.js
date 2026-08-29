@@ -53,7 +53,11 @@ alt.everyTick(() => {
 let ширинаНазвана = false;
 
 function рисуемТекст() {
-    const natives = alt.natives;
+    // Именно `require`, а не `alt.natives`: у ресурса нативы приходят отдельным
+    // модулем, как и у alt:V (`import * as natives from 'natives'`). `alt.natives`
+    // — внутреннее имя слоя, и снаружи оно пусто. Уборка однажды заменила одно
+    // другим, и весь разбор текста молча перестал исполняться.
+    const natives = require('natives');
 
     // 1. Голая цепочка, как её пишет всякий ресурс.
     natives.setTextFont(0);
