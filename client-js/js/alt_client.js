@@ -195,6 +195,13 @@
     /// значило бы отнять единственное, ради чего эти метаданные и заводят.
     const ownGlobalMeta = new Map();
 
+    /// На что сейчас наведена подгрузка мира. null — на игрока, как обычно.
+    ///
+    /// Помнится здесь потому, что у игры об этом не спросить: `IS_ENTITY_FOCUS`
+    /// отвечает про одну названную сущность, а «наведено ли вообще» она не
+    /// понимает вовсе.
+    let focusEntity = null;
+
     function emit(name, ...args) {
         fire(name, args);
     }
@@ -1191,6 +1198,54 @@
         HttpClient: net.HttpClient,
         WebSocketClient: net.WebSocketClient,
         WebSocketReadyState: net.WebSocketReadyState,
+
+        /// Куда игре смотреть при подгрузке мира.
+        ///
+        /// Обычно игра грузит мир вокруг игрока; этим его можно увести в другое
+        /// место — например к машине, за которой следит камера, или к точке,
+        /// куда игрок сейчас поедет. Без этого всё за пределами обычной
+        /// дальности остаётся незагруженным, и режим, показывающий что-нибудь
+        /// издали, показывает пустоту.
+        ///
+        /// Точку игре задать нечем: натив `SET_FOCUS_POS_AND_VEL` в объявлениях
+        /// alt:V отсутствует, и в нашей таблице его нет. Сущностью — можно, и
+        /// это как раз то, ради чего наведение и заводят.
+        ///
+        /// Состояние помнится здесь, а не спрашивается у игры: `IS_ENTITY_FOCUS`
+        /// отвечает лишь про одну названную сущность, а вопрос «наведено ли
+        /// вообще» она не понимает.
+        FocusData: {
+            get isFocusOverriden() { return focusEntity !== null; },
+            get focusOverrideEntity() { return focusEntity; },
+
+            get focusOverridePos() {
+                throw new Error('alt.FocusData.focusOverridePos: точку игре задать нечем — '
+                                + 'натива на неё нет ни у нас, ни в объявлениях alt:V');
+            },
+
+            get focusOverrideOffset() {
+                throw new Error('alt.FocusData.focusOverrideOffset: смещение принимает '
+                                + 'только наведение на точку, а его у нас нет');
+            },
+
+            /// Наводит на сущность. Точкой — отказ вслух: смолчав, мы оставили
+            /// бы режим уверенным, что мир вокруг неё грузится.
+            overrideFocus(target) {
+                if (target === null || target === undefined
+                    || typeof target.scriptID !== 'number') {
+                    throw new Error('alt.FocusData.overrideFocus: наводить умеем только на '
+                                    + 'сущность — натива на точку нет');
+                }
+
+                focusEntity = target;
+                natives.setFocusEntity(target.scriptID);
+            },
+
+            clearFocusOverride() {
+                focusEntity = null;
+                natives.clearFocus();
+            },
+        },
 
         // Того, чего ещё нет. Отказом, а не тишиной.
         VirtualEntity: absent('alt.VirtualEntity'),
