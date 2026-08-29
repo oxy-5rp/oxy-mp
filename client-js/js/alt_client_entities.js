@@ -729,17 +729,81 @@
             return this.valid ? natives.getVehicleDoorLockStatus(this.scriptID) : 0;
         }
 
+        /// Прочность бака. Отдельно от кузова и двигателя: горит машина именно
+        /// от него, и режимы со своей механикой пожара смотрят на него.
+        get petrolTankHealth() {
+            return this.valid ? natives.getVehiclePetrolTankHealth(this.scriptID) : 0;
+        }
+
+        /// Сколько в машине мест. У модели, а не у самой машины: число это её
+        /// свойство и не меняется от того, кто в ней сидит.
+        get seatCount() {
+            return this.valid ? natives.getVehicleModelNumberOfSeats(this.model) : 0;
+        }
+
+        /// Скорость по осям **самой машины**, а не мира: вперёд, вбок, вверх.
+        ///
+        /// Не то же, что `velocity`, и различать обязательно: по нему считают
+        /// занос и езду задним ходом, а мировая скорость об этом не говорит
+        /// ничего — машина, едущая назад на север, и машина, едущая вперёд на
+        /// север, дают в ней одно и то же.
+        get speedVector() {
+            if (!this.valid) {
+                return shared.Vector3.zero;
+            }
+
+            // true — «в осях машины». false дал бы мировые, то есть `velocity`.
+            return new shared.Vector3(natives.getEntitySpeedVector(this.scriptID, true));
+        }
+
+        /// Указатели поворота. Набор битов игры, он же набор alt:V
+        /// (`VehicleIndicatorLights`).
+        ///
+        /// Только запись: спросить у игры об этом нечем — натив у неё один и
+        /// тот распоряжение, а не вопрос. Отказ на чтение вслух, а не ноль:
+        /// ноль означает «оба погашены», и режим, мигающий поворотником по
+        /// очереди, читал бы своё же состояние неверно.
+        get indicatorLights() {
+            return absent('vehicle.indicatorLights')();
+        }
+
+        set indicatorLights(value) {
+            if (this.valid) {
+                natives.setVehicleIndicatorLights(this.scriptID, Number(value) || 0, true);
+            }
+        }
+
         /// Передача и обороты у alt:V читаются из памяти самой машины, а не
         /// нативом: ни того ни другого натива нет ни в открытой базе, ни в
         /// таблице alt:V. Отказ вслух, а не ноль: ноль означал бы «стоит на
         /// нейтрали и заглушена», и режим, показывающий тахометр, показал бы
         /// его неподвижным.
+        ///
+        /// Той же породы `engineTemperature`, `fuelLevel`, `oilLevel`,
+        /// `steeringAngle` и вся геометрия колёс: нативов нет, память машины
+        /// нам не размечена, а выдумать число значило бы соврать про приборы.
         get gear() {
             return absent('vehicle.gear')();
         }
 
         get rpm() {
             return absent('vehicle.rpm')();
+        }
+
+        get engineTemperature() {
+            return absent('vehicle.engineTemperature')();
+        }
+
+        get fuelLevel() {
+            return absent('vehicle.fuelLevel')();
+        }
+
+        get oilLevel() {
+            return absent('vehicle.oilLevel')();
+        }
+
+        get steeringAngle() {
+            return absent('vehicle.steeringAngle')();
         }
 
         toString() {

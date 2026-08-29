@@ -1380,4 +1380,135 @@ globalThis.__oxympAlt.enums = {
         WRONG_PASSWORD: 3,
         WRONG_CDN_URL: 4,
     }),
+
+    // --- Клиентские -----------------------------------------------------------
+    //
+    // Файл общий на обе стороны, и эти лежат здесь же. Серверу они не нужны и не
+    // мешают: перечисление — это данные, а не поведение, и лишнее в нём стоит
+    // нескольких байт. Разводить два файла ради этого значило бы завести второе
+    // место, где числа alt:V могут разойтись с настоящими.
+
+    /// Указатели поворота. Складываются побитово: `BlinkLeft | BlinkRight` —
+    /// не то же, что `BlinkPermBoth`, и разница у игры настоящая.
+    VehicleIndicatorLights: Object.freeze({
+        None: 0,
+        BlinkLeft: 1,
+        BlinkRight: 2,
+        BlinkPermBoth: 4,
+        StaticBoth: 8,
+        Interior: 64,
+    }),
+
+    /// Шрифты игры. Числа не по порядку — тройки и пятёрки-шестёрки у игры нет,
+    /// и заполнять пропуски своими значениями нельзя: они дали бы не тот шрифт.
+    GameFont: Object.freeze({
+        ChaletLondon: 0,
+        HouseScript: 1,
+        Monospace: 2,
+        CharletComprimeColonge: 4,
+        Pricedown: 7,
+    }),
+
+    /// Выравнивание текста. `Rigth` — опечатка самого alt:V, и повторить её
+    /// обязательно: режим, написанный под него, зовёт именно это имя.
+    TextAlign: Object.freeze({
+        Center: 0,
+        Left: 1,
+        Rigth: 2,
+    }),
+
+    TextLabelAlignment: Object.freeze({
+        Left: 0,
+        Right: 1,
+        Center: 2,
+        Justify: 3,
+    }),
+
+    /// Навыки игрока, которыми игра считает выносливость и меткость.
+    StatName: Object.freeze({
+        Stamina: 'stamina',
+        Strength: 'strength',
+        LungCapacity: 'lung_capacity',
+        Wheelie: 'wheelie_ability',
+        Flying: 'flying_ability',
+        Shooting: 'shooting_ability',
+        Stealth: 'stealth_ability',
+    }),
+
+    /// Что можно отключить у игры целиком. Строками, а не числами: так у alt:V.
+    ConfigFlag: Object.freeze({
+        DisableAutoWeaponSwap: 'DISABLE_AUTO_WEAPON_SWAP',
+        DisablePedPropKnockOff: 'DISABLE_PED_PROP_KNOCK_OFF',
+        DisableIdleCamera: 'DISABLE_IDLE_CAMERA',
+        DisableVehicleEngineShutdownOnLeave: 'DISABLE_VEHICLE_ENGINE_SHUTDOWN_ON_LEAVE',
+        DisableSPEnterVehicleClipset: 'DISABLE_SP_ENTER_VEHICLE_CLIPSET',
+        ForceRenderSnow: 'FORCE_RENDER_SNOW',
+        ForceHideNightProps: 'FORCE_HIDE_NIGHT_PROPS',
+        ForceShowNightProps: 'FORCE_SHOW_NIGHT_PROPS',
+        DisableEmissiveLightsRendering: 'DISABLE_EMISSIVE_LIGHTS_RENDERING',
+        ForceVehicleTyreBurst: 'FORCE_VEHICLE_TYRE_BURST',
+        SwapAllowHeadPropInVehicleFlag: 'SWAP_ALLOW_HEAD_PROP_IN_VEHICLE_FLAG',
+    }),
+
+    WatermarkPosition: Object.freeze({
+        BottomRight: 0,
+        TopRight: 1,
+        TopLeft: 2,
+        TopCenter: 3,
+        BottomCenter: 4,
+    }),
+
+    /// Языки, на которых alt:V разговаривает с человеком.
+    ///
+    /// Четыре метки здесь неверны по стандарту, и alt:V признаёт это прямо в
+    /// своих объявлениях: `in_hd` вместо `hi_in`, `in_ml` вместо `ml_in`,
+    /// `in_tl` вместо `te_in`, `in_tm` вместо `ta_in`, `rs` вместо `sr`, `ua`
+    /// вместо `uk`. Поправить их нельзя: ресурс сравнивает с тем, что отдаёт
+    /// alt:V, а отдаёт он эти.
+    Locale: Object.freeze({
+        Arabic: 'ar',
+        Belarusian: 'by',
+        Czech: 'cz',
+        German: 'de',
+        English: 'en',
+        Spanish: 'es',
+        Farsi: 'fa',
+        French: 'fr',
+        Hebrew: 'he',
+        Hungarian: 'hu',
+        Indonesian: 'id',
+        Hindi: 'in_hd',
+        Malayalam: 'in_ml',
+        Telugu: 'in_tl',
+        Tamil: 'in_tm',
+        Italian: 'it',
+        Lithuanian: 'lt',
+        Latvian: 'lv',
+        NorwegianBokmal: 'nb_no',
+        NorwegianNynorsk: 'nn_no',
+        Polish: 'pl',
+        Portugese: 'pt',
+        BrazilianPortuguese: 'pt_br',
+        Romanian: 'ro',
+        Serbian: 'rs',
+        Russian: 'ru',
+        Slovak: 'sk',
+        Thai: 'th',
+        Turkish: 'tr',
+        Ukrainian: 'ua',
+        ChineseSimplified: 'zh_cn',
+        ChineseTraditional: 'zh_tw',
+    }),
+
+    CookieSameSite: Object.freeze({
+        NoRestriction: 'NO_RESTRICTION',
+        LaxMode: 'LAX_MODE',
+        StrictMode: 'STRICT_MODE',
+    }),
+
+    CookiePriority: Object.freeze({
+        Low: 'LOW',
+        Medium: 'MEDIUM',
+        High: 'HIGH',
+    }),
 };
