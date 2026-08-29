@@ -434,6 +434,13 @@ enum class PlayerFlag : std::uint32_t {
     /// сидящим ни в какой (см. Vehicles::seatOf), и vehicleId у него пуст.
     /// Получателю она и не нужна — он помнит, откуда вылезают.
     LeavingVehicle = 1U << 19U,
+
+    /// Стоит на машине снаружи: на крыше, на капоте, в кузове.
+    ///
+    /// Не то же, что InVehicle, и различать их обязательно: сидящий внутри
+    /// занимает место, а стоящий сверху — нет, и наложение места усадило бы
+    /// его внутрь. Режимы спрашивают это у alt:V как `player.isOnVehicle`.
+    OnVehicle = 1U << 20U,
 };
 
 [[nodiscard]] constexpr std::uint32_t operator|(PlayerFlag left, PlayerFlag right) noexcept {

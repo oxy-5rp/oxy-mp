@@ -166,24 +166,25 @@ void playerSpeed(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&
 
     const shared::Vec3& speed = player->velocity;
 
+    // Ветвями, а не выходом посреди: выход из первой оставлял бы остальное
+    // недостижимым для неё, и /W4 справедливо ругался (C4702).
     if constexpr (Kind == SpeedKind::Total) {
         info.GetReturnValue().Set(
             std::sqrt((speed.x * speed.x) + (speed.y * speed.y) + (speed.z * speed.z)));
-        return;
-    }
-
-    // Направление взгляда у игры считается от севера по часовой стрелке, а
-    // синус с косинусом — от востока против неё. Отсюда и перестановка осей:
-    // «вперёд» это (-sin, cos), а не (cos, sin).
-    const float radians = player->heading * shared::kRadians;
-    const float forwardX = -std::sin(radians);
-    const float forwardY = std::cos(radians);
-
-    if constexpr (Kind == SpeedKind::Forward) {
-        info.GetReturnValue().Set((speed.x * forwardX) + (speed.y * forwardY));
     } else {
-        // Вбок — та же скорость, спроецированная на перпендикуляр к взгляду.
-        info.GetReturnValue().Set((speed.x * forwardY) - (speed.y * forwardX));
+        // Направление взгляда у игры считается от севера по часовой стрелке, а
+        // синус с косинусом — от востока против неё. Отсюда и перестановка осей:
+        // «вперёд» это (-sin, cos), а не (cos, sin).
+        const float radians = player->heading * shared::kRadians;
+        const float forwardX = -std::sin(radians);
+        const float forwardY = std::cos(radians);
+
+        if constexpr (Kind == SpeedKind::Forward) {
+            info.GetReturnValue().Set((speed.x * forwardX) + (speed.y * forwardY));
+        } else {
+            // Вбок — та же скорость, спроецированная на перпендикуляр к взгляду.
+            info.GetReturnValue().Set((speed.x * forwardY) - (speed.y * forwardX));
+        }
     }
 }
 
@@ -3377,6 +3378,12 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "isInRagdoll", playerFlag<shared::PlayerFlag::Ragdoll>);
     addGetter(isolate, shape, "isJumping", playerFlag<shared::PlayerFlag::Jumping>);
     addGetter(isolate, shape, "isCrouching", playerFlag<shared::PlayerFlag::Crouching>);
+    addGetter(isolate, shape, "isOnVehicle", playerFlag<shared::PlayerFlag::OnVehicle>);
+
+    // Крадущийся и пригнувшийся у игры — одно и то же: своего приседания у
+    // игрока в GTA V нет, а `GET_PED_STEALTH_MOVEMENT` отвечает и на то, и на
+    // другое. У alt:V это два свойства, и оба отвечают одним признаком.
+    addGetter(isolate, shape, "isStealthy", playerFlag<shared::PlayerFlag::Crouching>);
     addGetter(isolate, shape, "isParachuting", playerFlag<shared::PlayerFlag::Parachuting>);
     addGetter(isolate, shape, "isReloading", playerFlag<shared::PlayerFlag::Reloading>);
     addGetter(isolate, shape, "isInCover", playerFlag<shared::PlayerFlag::InCover>);

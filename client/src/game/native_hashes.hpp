@@ -933,6 +933,9 @@ inline constexpr std::uint64_t kGetPedStealthMovement = 0XC2BF1F6F84E31EB2;
 /// SET_PED_STEALTH_MOVEMENT, канонический хеш 0X88CBB5CEB96B7BD2.
 inline constexpr std::uint64_t kSetPedStealthMovement = 0XF9358C41CC69C616;
 
+/// IS_PED_ON_VEHICLE, канонический хеш 0X67722AEB798E5FAB.
+inline constexpr std::uint64_t kIsPedOnVehicle = 0X92D9D3367234ABE7;
+
 /// IS_PED_CLIMBING, канонический хеш 0X53E8CB4F48BFE623.
 inline constexpr std::uint64_t kIsPedClimbing = 0X7CB06BFD42FB0E24;
 

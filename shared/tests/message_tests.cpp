@@ -574,7 +574,10 @@ TEST_CASE("the horn and the roof survive a round trip", "[messages]") {
 TEST_CASE("the roof keeps all four of the states the game has", "[messages]") {
     // Признаком «открыта» из четырёх видно два, и потому признак снят: alt:V
     // отдаёт наружу именно число, а едущая вверх крыша отличима от приехавшей.
-    for (const std::uint8_t position : {0, 1, 2, 3}) {
+    // Список байтами, а не целыми: у списка инициализации свой тип, и выведен
+    // он был бы как int — с сужением на каждом шаге и предупреждением на /W4.
+    for (const std::uint8_t position : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{2},
+                                        std::uint8_t{3}}) {
         VehicleState sent;
         sent.id = 1;
         sent.roofState = position;
@@ -848,6 +851,52 @@ TEST_CASE("a player climbing out of a vehicle says so apart from sitting in it",
     CHECK(has(received->flags, PlayerFlag::LeavingVehicle));
     CHECK_FALSE(has(received->flags, PlayerFlag::InVehicle));
     CHECK_FALSE(has(received->flags, PlayerFlag::EnteringVehicle));
+}
+
+TEST_CASE("standing on a vehicle is not sitting in one", "[messages]") {
+    // Два разных признака, и путать их нельзя: сидящий внутри занимает место, а
+    // стоящий на крыше — нет, и наложение места усадило бы его в салон.
+    PlayerState sent;
+    sent.playerId = 5;
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::OnVehicle);
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, PlayerFlag::OnVehicle));
+    CHECK_FALSE(has(received->flags, PlayerFlag::InVehicle));
+}
+
+TEST_CASE("every player flag keeps the bit it was given", "[messages]") {
+    // Номер бита — часть протокола ровно так же, как номер сообщения: клиент
+    // прежней сборки, столкнувшись с переставленными битами, объявил бы одно
+    // состояние вместо другого — и объявил бы **молча**, потому что оба
+    // законны. Ошибки здесь не бывает; бывает игрок, который у всех остальных
+    // почему-то плывёт вместо того, чтобы целиться.
+    //
+    // Перечень поэтому закреплён числами, а не выведен из самого перечисления:
+    // выведенный переехал бы вместе с ним и не заметил бы перестановки.
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Dead) == 1U << 0U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Aiming) == 1U << 1U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Shooting) == 1U << 2U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Ragdoll) == 1U << 3U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Jumping) == 1U << 4U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::InVehicle) == 1U << 5U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Crouching) == 1U << 6U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Climbing) == 1U << 7U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Vaulting) == 1U << 8U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Swimming) == 1U << 9U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Diving) == 1U << 10U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Falling) == 1U << 11U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Parachuting) == 1U << 12U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Reloading) == 1U << 13U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::InCover) == 1U << 14U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::Melee) == 1U << 15U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::GettingUp) == 1U << 16U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::DriveBy) == 1U << 17U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::EnteringVehicle) == 1U << 18U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::LeavingVehicle) == 1U << 19U);
+    CHECK(static_cast<std::uint32_t>(PlayerFlag::OnVehicle) == 1U << 20U);
 }
 
 TEST_CASE("a loadout says which weapon goes into the hands", "[messages]") {

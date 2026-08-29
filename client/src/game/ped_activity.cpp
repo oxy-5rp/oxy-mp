@@ -38,6 +38,7 @@ PedActivity::PedActivity(const NativeTable& table) noexcept
       isRagdoll_(table.handlerFor(natives::kIsPedRagdoll)),
       isJumping_(table.handlerFor(natives::kIsPedJumping)),
       stealthMovement_(table.handlerFor(natives::kGetPedStealthMovement)),
+      isOnVehicle_(table.handlerFor(natives::kIsPedOnVehicle)),
       isClimbing_(table.handlerFor(natives::kIsPedClimbing)),
       isVaulting_(table.handlerFor(natives::kIsPedVaulting)),
       isSwimming_(table.handlerFor(natives::kIsPedSwimming)),
@@ -111,6 +112,13 @@ std::uint32_t PedActivity::flags(int player, int ped, bool dead) const {
     if (stealthMovement_ != nullptr) {
         set(shared::PlayerFlag::Crouching,
             invokeNative<int>(stealthMovement_, ped) == kStealthOn);
+    }
+
+    if (isOnVehicle_ != nullptr) {
+        // Стоит на машине снаружи, а не сидит внутри: игра различает эти два
+        // ответа сама, и путать их нельзя — стоящему на крыше не полагается
+        // места в салоне.
+        set(shared::PlayerFlag::OnVehicle, invokeNative<bool>(isOnVehicle_, ped));
     }
 
     if (parachuteState_ != nullptr) {

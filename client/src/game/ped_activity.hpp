@@ -71,6 +71,7 @@ private:
     NativeHandler isRagdoll_ = nullptr;
     NativeHandler isJumping_ = nullptr;
     NativeHandler stealthMovement_ = nullptr;
+    NativeHandler isOnVehicle_ = nullptr;
     NativeHandler isClimbing_ = nullptr;
     NativeHandler isVaulting_ = nullptr;
     NativeHandler isSwimming_ = nullptr;
