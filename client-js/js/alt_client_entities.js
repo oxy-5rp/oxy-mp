@@ -901,6 +901,123 @@
     // --- Машины ---------------------------------------------------------------
 
     class Vehicle extends Entity {
+        // --- Чего у машины нет, и почему ------------------------------------
+        //
+        // Колёса поштучно и приборная панель: у игры нативов на это нет вовсе —
+        // alt:V читает и правит их прямо в памяти машины, а такого чтения у нас
+        // нет. Отказ громкий, а не тишина: `undefined` ресурс примет за правду.
+
+        getWheelCamber(_wheel) {
+            throw new Error('vehicle.getWheelCamber: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelConfigFlag(_wheel) {
+            throw new Error('vehicle.getWheelConfigFlag: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelDynamicFlag(_wheel) {
+            throw new Error('vehicle.getWheelDynamicFlag: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelHeight(_wheel) {
+            throw new Error('vehicle.getWheelHeight: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelRimRadius(_wheel) {
+            throw new Error('vehicle.getWheelRimRadius: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelSurfaceMaterial(_wheel) {
+            throw new Error('vehicle.getWheelSurfaceMaterial: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelTrackWidth(_wheel) {
+            throw new Error('vehicle.getWheelTrackWidth: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelTyreRadius(_wheel) {
+            throw new Error('vehicle.getWheelTyreRadius: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        getWheelTyreWidth(_wheel) {
+            throw new Error('vehicle.getWheelTyreWidth: колёса поштучно у игры нативами не спрашиваются');
+        }
+
+        setWheelCamber(_wheel, _value) {
+            warnOnce('vehicle.setWheelCamber', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelConfigFlag(_wheel, _flag, _value) {
+            warnOnce('vehicle.setWheelConfigFlag', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelDynamicFlag(_wheel, _flag, _value) {
+            warnOnce('vehicle.setWheelDynamicFlag', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelHeight(_wheel, _value) {
+            warnOnce('vehicle.setWheelHeight', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelRimRadius(_wheel, _value) {
+            warnOnce('vehicle.setWheelRimRadius', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelTrackWidth(_wheel, _value) {
+            warnOnce('vehicle.setWheelTrackWidth', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelTyreRadius(_wheel, _value) {
+            warnOnce('vehicle.setWheelTyreRadius', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        setWheelTyreWidth(_wheel, _value) {
+            warnOnce('vehicle.setWheelTyreWidth', 'колёса поштучно у игры нативами не правятся');
+        }
+
+        get absLight() {
+            throw new Error('vehicle.absLight: лампы приборной панели у игры не спрашиваются');
+        }
+
+        get batteryLight() {
+            throw new Error('vehicle.batteryLight: лампы приборной панели у игры не спрашиваются');
+        }
+
+        get engineLight() {
+            throw new Error('vehicle.engineLight: лампы приборной панели у игры не спрашиваются');
+        }
+
+        get oilLight() {
+            throw new Error('vehicle.oilLight: лампы приборной панели у игры не спрашиваются');
+        }
+
+        get petrolLight() {
+            throw new Error('vehicle.petrolLight: лампы приборной панели у игры не спрашиваются');
+        }
+
+        get wheelsCount() {
+            throw new Error('vehicle.wheelsCount: число колёс у игры не спросить — '
+                            + 'alt:V читает его из памяти машины');
+        }
+
+        get maxGear() {
+            throw new Error('vehicle.maxGear: число передач у игры не спросить — '
+                            + 'alt:V читает его из памяти машины');
+        }
+
+        get suspensionHeight() {
+            throw new Error('vehicle.suspensionHeight: высота подвески у игры не '
+                            + 'спрашивается — alt:V читает её из памяти машины');
+        }
+
+        resetDashboardLights() {
+            warnOnce('vehicle.resetDashboardLights', 'лампы приборной панели у игры не правятся');
+        }
+
+        setupTransmission() {
+            warnOnce('vehicle.setupTransmission', 'передачи у игры нативами не настраиваются');
+        }
+
         get driver() {
             if (!this.valid) {
                 return null;
