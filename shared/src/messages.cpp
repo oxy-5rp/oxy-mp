@@ -1280,6 +1280,20 @@ CheckpointRemoved CheckpointRemoved::read(ByteReader& reader) {
     return message;
 }
 
+void PlayerBodyOrder::write(ByteWriter& writer) const {
+    writer.writeU32(playerId);
+    writer.writeU8(order);
+}
+
+PlayerBodyOrder PlayerBodyOrder::read(ByteReader& reader) {
+    PlayerBodyOrder message;
+
+    message.playerId = reader.readU32();
+    message.order = reader.readU8();
+
+    return message;
+}
+
 void PlayerSpeech::write(ByteWriter& writer) const {
     writer.writeU32(playerId);
     writer.writeString(speech);
@@ -1563,6 +1577,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::VehicleDoors:
     case MessageId::PedDamageReport:
     case MessageId::PlayerSpeech:
+    case MessageId::PlayerBodyOrder:
         return static_cast<MessageId>(packet.front());
     }
 

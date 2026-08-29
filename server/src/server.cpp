@@ -2413,6 +2413,14 @@ void Server::speechPlayed(const Player& player, const shared::PlayerSpeech& spee
                   net::kInvalidPeerId);
 }
 
+void Server::bodyOrdered(const Player& player, const shared::PlayerBodyOrder& order) {
+    // Тем же кругом и каналом, что и реплика: распоряжение — событие, и
+    // потерянное не повторится. Дальним не шлём: куклы у них нет, а приехавшая
+    // позже заводится чистой — крови на новорождённой кукле нет вовсе.
+    broadcastNear(player.position, shared::Channel::Control, order, player.dimension,
+                  net::kInvalidPeerId);
+}
+
 void Server::dimensionChanged(const Player& player, std::int32_t previous) {
     redrawKindFor<BlipDirectory, shared::BlipRemoved>(blips_, player, previous);
     redrawKindFor<MarkerDirectory, shared::MarkerRemoved>(markers_, player, previous);

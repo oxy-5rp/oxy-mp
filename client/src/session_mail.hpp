@@ -375,6 +375,21 @@ public:
         return std::exchange(speeches_, {});
     }
 
+    /// Распоряжения о телах. Событиями и по той же причине, что реплики.
+    void deliverBodyOrders(std::vector<shared::PlayerBodyOrder> orders) {
+        if (orders.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        bodyOrders_.insert(bodyOrders_.end(), orders.begin(), orders.end());
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerBodyOrder> takeBodyOrders() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(bodyOrders_, {});
+    }
+
     /// Взрывы, которые устроил сервер.
     ///
     /// Событиями, как и движения, и по той же причине: взрыв случается один раз,
@@ -844,6 +859,7 @@ private:
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
     std::vector<shared::PlayerSpeech> speeches_;
+    std::vector<shared::PlayerBodyOrder> bodyOrders_;
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::WeaponFired> outgoingShots_;

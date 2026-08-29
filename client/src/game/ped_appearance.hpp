@@ -36,6 +36,12 @@ public:
     /// Надевается всё остальное.
     void apply(int ped, const shared::PlayerAppearance& appearance) const;
 
+    /// Смывает с персонажа кровь и следы попаданий.
+    ///
+    /// Спросить у игры, есть ли кровь, нечем: натива на чтение нет. Поэтому
+    /// распоряжение исполняется как пришло, а не сверяется с телом.
+    void clearBlood(int ped) const;
+
 private:
     NativeHandler getDrawable_ = nullptr;
     NativeHandler getTexture_ = nullptr;
@@ -55,6 +61,8 @@ private:
     NativeHandler setOverlayColour_ = nullptr;
     NativeHandler setHairColour_ = nullptr;
     NativeHandler setEyeColour_ = nullptr;
+
+    NativeHandler clearBlood_ = nullptr;
 
     NativeHandler entityModel_ = nullptr;
 };

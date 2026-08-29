@@ -207,6 +207,7 @@ private:
                          const shared::PlayerAnimation& animation) override;
 
     void speechPlayed(const Player& player, const shared::PlayerSpeech& speech) override;
+    void bodyOrdered(const Player& player, const shared::PlayerBodyOrder& order) override;
     void exploded(const shared::Explosion& explosion, std::int32_t dimension) override;
 
     void dimensionChanged(const Player& player, std::int32_t previous) override;

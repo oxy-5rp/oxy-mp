@@ -646,6 +646,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerBodyOrder:
+        if (const auto order = shared::decode<shared::PlayerBodyOrder>(packet)) {
+            bodyOrders_.push_back(*order);
+        }
+        return;
+
     case shared::MessageId::PedState:
         if (const auto ped = shared::decode<shared::PedState>(packet)) {
             peds_.push_back(*ped);
@@ -1174,6 +1180,10 @@ std::vector<shared::PlayerAnimation> Connection::takeAnimations() {
 
 std::vector<shared::PlayerSpeech> Connection::takeSpeeches() {
     return std::exchange(speeches_, {});
+}
+
+std::vector<shared::PlayerBodyOrder> Connection::takeBodyOrders() {
+    return std::exchange(bodyOrders_, {});
 }
 
 std::vector<shared::Explosion> Connection::takeExplosions() {

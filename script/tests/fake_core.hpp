@@ -392,6 +392,15 @@ public:
         return true;
     }
 
+    bool clearBlood(shared::PlayerId id) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        said.push_back(std::format("blood- {}", id));
+        return true;
+    }
+
     bool clearTasks(shared::PlayerId id) override {
         if (!player(id)) {
             return false;

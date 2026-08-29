@@ -2017,6 +2017,33 @@ struct PlayerSpeech {
     [[nodiscard]] static PlayerSpeech read(ByteReader& reader);
 };
 
+/// Что сделать с телом игрока.
+///
+/// Перечислением, а не отдельным сообщением на каждое: распоряжений таких будет
+/// несколько — смыть кровь, снять грязь, — и каждому свой номер в протоколе не
+/// нужен. Число по сети идёт байтом.
+enum class BodyOrder : std::uint8_t {
+    /// Смыть кровь и следы попаданий. `CLEAR_PED_BLOOD_DAMAGE` у игры.
+    ClearBlood = 1,
+};
+
+/// Распоряжение о теле игрока. Всем, кто его видит.
+struct PlayerBodyOrder {
+    static constexpr MessageId kId = MessageId::PlayerBodyOrder;
+
+    PlayerId playerId = kInvalidPlayerId;
+
+    /// Значение BodyOrder. Числом, а не перечислением: незнакомое распоряжение
+    /// клиент прежней сборки обязан пропустить, а не разобрать как своё.
+    std::uint8_t order = 0;
+
+    [[nodiscard]] friend bool operator==(const PlayerBodyOrder&,
+                                         const PlayerBodyOrder&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerBodyOrder read(ByteReader& reader);
+};
+
 /// Что именно рвануло.
 ///
 /// Числа — игры, а не наши: перечисление взято из её ExplosionTypes по порядку,

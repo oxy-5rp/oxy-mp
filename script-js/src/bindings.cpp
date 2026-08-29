@@ -2260,6 +2260,23 @@ void playAnimation(const v8::FunctionCallbackInfo<v8::Value>& info) {
         static_cast<shared::PlayerId>(*id), animation));
 }
 
+/// Смывает с персонажа кровь: номер игрока.
+void clearBlood(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(context, info[0]) : std::nullopt;
+
+    if (!id) {
+        fail(isolate, "clearBlood ждёт номер игрока");
+        return;
+    }
+
+    info.GetReturnValue().Set(
+        resourceOf(isolate).core().clearBlood(static_cast<shared::PlayerId>(*id)));
+}
+
 void clearTasks(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
 
@@ -4000,6 +4017,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "addExplosion", addExplosion);
     addFunction(context, oxymp, "playAnimation", playAnimation);
     addFunction(context, oxymp, "playSpeech", playSpeech);
+    addFunction(context, oxymp, "clearBlood", clearBlood);
     addFunction(context, oxymp, "clearTasks", clearTasks);
     addFunction(context, oxymp, "peds", peds);
     addFunction(context, oxymp, "createPed", createPed);

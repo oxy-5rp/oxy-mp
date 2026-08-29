@@ -1067,6 +1067,28 @@ void GameSession::applySpeeches(int ped) {
     }
 }
 
+/// Исполняет присланные распоряжения о телах.
+///
+/// Своё идёт настоящему персонажу, чужое — кукле. Терпения здесь нет и не
+/// нужно: распоряжение мгновенно, а не нашедшая тела кукла заводится чистой —
+/// крови на новорождённой нет вовсе.
+void GameSession::applyBodyOrders(int ped) {
+    const shared::PlayerId self = status_.snapshot().playerId;
+
+    for (const shared::PlayerBodyOrder& order : mail_.takeBodyOrders()) {
+        const bool own = order.playerId == self && self != shared::kInvalidPlayerId;
+        const int body = own ? ped : remotePlayers_.handleFor(order.playerId);
+
+        // Незнакомое распоряжение пропускается молча: прислать его может только
+        // сервер новее нас, и жаловаться на это игроку незачем.
+        switch (static_cast<shared::BodyOrder>(order.order)) {
+        case shared::BodyOrder::ClearBlood:
+            look_.clearBlood(body);
+            break;
+        }
+    }
+}
+
 void GameSession::applyAttachments(int ped) {
     const shared::PlayerId self = status_.snapshot().playerId;
 
@@ -1096,6 +1118,7 @@ void GameSession::applyServerEvents(int ped) {
     forgetSessionOnLeaving();
     applyAnimations(ped);
     applySpeeches(ped);
+    applyBodyOrders(ped);
 
     // Взрывы — сразу и без откладывания, в отличие от движений: у движения есть
     // цель, которой может ещё не быть в игре, а взрыв случается на пустом месте.

@@ -47,6 +47,7 @@ PedAppearance::PedAppearance(const NativeTable& table) noexcept
       setOverlayColour_(table.handlerFor(natives::kSetPedHeadOverlayColor)),
       setHairColour_(table.handlerFor(natives::kSetPedHairColor)),
       setEyeColour_(table.handlerFor(natives::kSetPedEyeColor)),
+      clearBlood_(table.handlerFor(natives::kClearPedBloodDamage)),
       entityModel_(table.handlerFor(natives::kGetEntityModel)) {}
 
 bool PedAppearance::ready() const noexcept {
@@ -183,6 +184,14 @@ void PedAppearance::apply(int ped, const shared::PlayerAppearance& appearance) c
     if (setEyeColour_ != nullptr) {
         invokeNative<void>(setEyeColour_, ped, static_cast<int>(appearance.eyeColour));
     }
+}
+
+void PedAppearance::clearBlood(int ped) const {
+    if (ped == 0 || clearBlood_ == nullptr) {
+        return;
+    }
+
+    invokeNative<void>(clearBlood_, ped);
 }
 
 } // namespace oxymp::client::game

@@ -161,6 +161,12 @@ public:
     /// остальных персонаж показан куклой, и молчащая кукла осталась бы немой.
     virtual void speechPlayed(const Player& player, const shared::PlayerSpeech& speech) = 0;
 
+    /// Распорядиться телом игрока — рассказать всем, кто его видит.
+    ///
+    /// Всем, а не одному хозяину: кровь на персонаже видна всем, а у остальных
+    /// он показан куклой, и умытым бы он у них не стал.
+    virtual void bodyOrdered(const Player& player, const shared::PlayerBodyOrder& order) = 0;
+
     /// В мире рвануло — рассказать всем, кто до этого места достаёт.
     ///
     /// Слой мира приходит доводом, а не берётся из игрока: у взрыва игрока нет
@@ -276,6 +282,7 @@ public:
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
     bool playSpeech(shared::PlayerId id, const std::string& speech, const std::string& params,
                     const std::string& voice) override;
+    bool clearBlood(shared::PlayerId id) override;
     bool clearTasks(shared::PlayerId id) override;
     void explode(const script::ExplosionInfo& explosion) override;
 

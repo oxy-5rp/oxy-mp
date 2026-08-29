@@ -949,6 +949,32 @@ TEST_CASE("a spoken line without a voice keeps the ped's own", "[messages]") {
     CHECK(received->params.empty());
 }
 
+TEST_CASE("an order about a body names the player it is about", "[messages]") {
+    PlayerBodyOrder sent;
+    sent.playerId = 12;
+    sent.order = static_cast<std::uint8_t>(BodyOrder::ClearBlood);
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 12);
+    CHECK(received->order == static_cast<std::uint8_t>(BodyOrder::ClearBlood));
+}
+
+TEST_CASE("an unknown order survives the trip unchanged", "[messages]") {
+    // Число, а не перечисление, ровно затем: клиент прежней сборки обязан
+    // донести незнакомое распоряжение до места, где его пропустят, а не
+    // разобрать его как своё.
+    PlayerBodyOrder sent;
+    sent.playerId = 4;
+    sent.order = 200;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->order == 200);
+}
+
 TEST_CASE("standing on a vehicle is not sitting in one", "[messages]") {
     // Два разных признака, и путать их нельзя: сидящий внутри занимает место, а
     // стоящий на крыше — нет, и наложение места усадило бы его в салон.

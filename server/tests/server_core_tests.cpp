@@ -149,6 +149,10 @@ public:
                                    speech.voice.empty() ? "-" : speech.voice));
     }
 
+    void bodyOrdered(const Player& player, const shared::PlayerBodyOrder& order) override {
+        sent.push_back(std::format("body {} {}", player.id, order.order));
+    }
+
     void exploded(const shared::Explosion& explosion, std::int32_t dimension) override {
         sent.push_back(std::format("boom {} at {} {} {} in {}", explosion.kind,
                                    explosion.position.x, explosion.position.y,
@@ -1348,6 +1352,28 @@ TEST_CASE("a spoken line goes out to everyone who sees the player", "[server][sc
     session.sink.sent.clear();
     REQUIRE(session.core.playSpeech(player.id, "CHAT_STATE", "", ""));
     CHECK(session.sink.sent == std::vector<std::string>{"speech 0 CHAT_STATE - -"});
+}
+
+// Кровь видна всем, а у всех, кроме хозяина, персонаж показан куклой: скажи мы
+// одному хозяину, у остальных он остался бы в крови.
+TEST_CASE("washing the blood off goes out to everyone who sees the player",
+          "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+    session.sink.sent.clear();
+
+    REQUIRE(session.core.clearBlood(player.id));
+    CHECK(session.sink.sent ==
+          std::vector<std::string>{
+              std::format("body 0 {}", static_cast<int>(shared::BodyOrder::ClearBlood))});
+}
+
+TEST_CASE("washing the blood off a player who left goes nowhere", "[server][script]") {
+    Session session;
+    session.sink.sent.clear();
+
+    CHECK_FALSE(session.core.clearBlood(404));
+    CHECK(session.sink.sent.empty());
 }
 
 TEST_CASE("a spoken line of a player who left goes nowhere", "[server][script]") {

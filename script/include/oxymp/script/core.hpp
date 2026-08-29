@@ -909,6 +909,14 @@ public:
     virtual bool playSpeech(shared::PlayerId id, const std::string& speech,
                             const std::string& params, const std::string& voice) = 0;
 
+    /// Смывает с персонажа кровь и следы попаданий.
+    ///
+    /// Уходит всем, кто игрока видит, а не одному хозяину: у остальных он
+    /// показан куклой, и умытым бы он у них не стал.
+    ///
+    /// false — игрока уже нет.
+    virtual bool clearBlood(shared::PlayerId id) = 0;
+
     /// Снимает с персонажа все задачи, включая начатое движение.
     virtual bool clearTasks(shared::PlayerId id) = 0;
 

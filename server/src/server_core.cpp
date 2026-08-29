@@ -1036,6 +1036,20 @@ void ServerCore::explode(const script::ExplosionInfo& explosion) {
     sink_->exploded(message, explosion.dimension);
 }
 
+bool ServerCore::clearBlood(shared::PlayerId id) {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::PlayerBodyOrder message;
+    message.playerId = id;
+    message.order = static_cast<std::uint8_t>(shared::BodyOrder::ClearBlood);
+
+    sink_->bodyOrdered(*player, message);
+    return true;
+}
+
 bool ServerCore::clearTasks(shared::PlayerId id) {
     const Player* const player = players_->findById(id);
     if (player == nullptr) {

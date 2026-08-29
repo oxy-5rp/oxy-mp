@@ -2007,6 +2007,7 @@ void run() {
         mail.deliverRemovedBlips(connection->takeRemovedBlips());
         mail.deliverAnimations(connection->takeAnimations());
         mail.deliverSpeeches(connection->takeSpeeches());
+        mail.deliverBodyOrders(connection->takeBodyOrders());
         mail.deliverExplosions(connection->takeExplosions());
         mail.deliverShots(connection->takeShots());
         mail.deliverWeaponLooks(connection->takeWeaponLooks());

@@ -390,6 +390,9 @@ public:
     /// Реплики, которые велел сказать сервер.
     [[nodiscard]] std::vector<shared::PlayerSpeech> takeSpeeches();
 
+    /// Распоряжения о телах игроков, которые прислал сервер.
+    [[nodiscard]] std::vector<shared::PlayerBodyOrder> takeBodyOrders();
+
     /// Взрывы, которые устроил сервер.
     ///
     /// Забираются и исполняются разом, а не откладываются, как движения: у
@@ -566,6 +569,7 @@ private:
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
     std::vector<shared::PlayerSpeech> speeches_;
+    std::vector<shared::PlayerBodyOrder> bodyOrders_;
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::PlayerWeapon> weaponLooks_;
