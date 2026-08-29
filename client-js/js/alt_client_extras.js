@@ -17,19 +17,6 @@
 
     /// Жалоба, сказанная один раз.
     ///
-    /// Один раз, а не на каждый вызов: рисование текста зовут из кадра, и
-    /// тридцать строк в секунду завалили бы журнал так, что в нём не осталось
-    /// бы ничего другого.
-    const warned = new Set();
-
-    function warnOnce(what, why) {
-        if (warned.has(what)) {
-            return;
-        }
-
-        warned.add(what);
-        alt.client.logWarning(`${what}: ${why}`);
-    }
     const natives = alt.natives;
     const entities = alt.entities;
 
@@ -509,20 +496,7 @@
         },
 
         /// Надпись на экране в этом кадре.
-        ///
-        /// **Игра её не нарисует, и молчать об этом нельзя.** Текст рисует
-        /// тройка нативов, и состояние между ними игра держит у своего
-        /// скриптового потока; наш кадр идёт вне его. Подробности и полный
-        /// перечень отсеянных догадок — в `CLAUDE.md`; чинится своим потоком,
-        /// поднятым из `game::ScriptStartup`.
-        ///
-        /// Написано целиком и правильно: появится поток — заработает без единой
-        /// правки здесь.
         drawText2dThisFrame(text, pos2d, font, scale, color, outline, dropShadow, textAlign) {
-            warnOnce('alt.Utils.drawText',
-                     'игра не рисует текст из нашего кадра: текстовым командам нужен '
-                     + 'её скриптовый поток');
-
             const точка = pos2d ?? { x: 0.5, y: 0.5 };
             const цвет = color ?? shared.RGBA.white;
 
@@ -540,14 +514,9 @@
                 natives.setTextDropShadow();
             }
 
-            // Выравнивание alt:V переводится в нумерацию игры: у неё ноль это
-            // «влево», единица «по центру», двойка «вправо», а у alt:V
-            // Center = 0, Left = 1, Rigth = 2. Числа законны у обоих, и
-            // перепутанные они молчат.
-            const кудаИгре = [1, 0, 2][Number(textAlign) || 0] ?? 0;
-
-            natives.setTextJustification(кудаИгре);
-            natives.setTextCentre(кудаИгре === 1);
+            // Выравнивание общее с надписями (`alt_client_objects.js`): считать
+            // его дважды значило бы завести два ответа на один вопрос.
+            alt.objects.alignAround(textAlign, Number(точка.x) || 0);
 
             natives.beginTextCommandDisplayText('STRING');
             natives.addTextComponentSubstringPlayerName(String(text));

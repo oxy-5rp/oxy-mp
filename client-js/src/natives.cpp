@@ -72,6 +72,38 @@ Scratch& scratch() {
     return reinterpret_cast<std::uint64_t>(address);
 }
 
+/// Сколько строк-доводов остаётся в живых после своего вызова.
+///
+/// Кольцо: новая строка занимает следующее место и вытесняет ту, что лежала там
+/// пять сотен строк назад. Столько за один кадр не отдаёт никто, а привязки к
+/// кадру здесь нет и заводить её не за чем.
+constexpr std::size_t kStringRing = 512;
+
+/// Строка-довод, которая переживёт свой вызов.
+///
+/// **Игра запоминает указатель, а не байты.** Ярче всего это видно на текстовой
+/// команде: `ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME` кладёт себе указатель, а
+/// читает его уже `END_TEXT_COMMAND_...` — то есть следующим вызовом. Строка,
+/// умершая в конце своего вызова, к тому времени чужая, и игра честно считает
+/// её пустой.
+///
+/// Стоило это ложного диагноза: та же цепочка, написанная на C++, работала —
+/// там строка лежит в переменной вызывающего и живёт все три вызова, — а из JS
+/// давала ширину пустой строки. Отсюда вывод «игра не рисует текст из нашего
+/// кадра, нужен свой скриптовый поток», и он был неверен целиком.
+///
+/// Зовётся только из кадра игры, где живёт изолят, — своей защиты не требует.
+[[nodiscard]] const char* keepString(std::string value) {
+    static std::array<std::string, kStringRing> ring;
+    static std::size_t next = 0;
+
+    std::string& slot = ring[next];
+    next = (next + 1) % kStringRing;
+
+    slot = std::move(value);
+    return slot.c_str();
+}
+
 } // namespace
 
 void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -113,11 +145,6 @@ void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     std::array<std::uint64_t, OXYMP_JS_NATIVE_CELLS> cells{};
 
-    // Строки живут до конца вызова: в ячейку уходит указатель на их байты, и
-    // освободись они раньше, натив прочёл бы чужую память.
-    std::vector<std::string> strings;
-    strings.reserve(takes.size());
-
     // Куда натив пишет выходные значения и в каком они порядке.
     struct Outgoing {
         char kind = 'L';
@@ -158,8 +185,7 @@ void callNative(const v8::FunctionCallbackInfo<v8::Value>& info) {
                 break;
             }
 
-            strings.push_back(fromJs(isolate, given));
-            cells[i] = pointerTo(strings.back().c_str());
+            cells[i] = pointerTo(keepString(fromJs(isolate, given)));
             break;
         }
 

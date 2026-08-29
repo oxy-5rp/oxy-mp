@@ -37,7 +37,61 @@ alt.everyTick(() => {
         told = true;
         say('[ok] everyTick работает: сто кадров пришло');
     }
+
+    рисуемТекст();
 });
+
+// --- Текст ------------------------------------------------------------------
+//
+// Три чертежа рядом, и они не для красоты: текст ломается молча. Голая цепочка
+// нативов, `alt.Utils.drawText2d` и `TextLabel` — каждый из троих однажды не
+// рисовал ничего, и ни один не сказал об этом ни слова.
+//
+// Ширина в журнале — тот же вопрос числом: ширина пустой строки `0.001`
+// означает, что текстовая команда потеряла свою подстроку.
+
+let ширинаНазвана = false;
+
+function рисуемТекст() {
+    const natives = alt.natives;
+
+    // 1. Голая цепочка, как её пишет всякий ресурс.
+    natives.setTextFont(0);
+    natives.setTextScale(0.6, 0.6);
+    natives.setTextColour(255, 255, 0, 255);
+    natives.setTextOutline();
+    natives.beginTextCommandDisplayText('STRING');
+    natives.addTextComponentSubstringPlayerName('js natives chain');
+    natives.endTextCommandDisplayText(0.05, 0.30, 0);
+
+    // 2. Через слой.
+    alt.Utils.drawText2dThisFrame('alt.Utils.drawText2d', { x: 0.05, y: 0.35 }, 0, 0.6,
+                                  new alt.RGBA(0, 255, 255, 255), true, false, 0);
+
+    if (ширинаНазвана) {
+        return;
+    }
+
+    ширинаНазвана = true;
+
+    natives.beginTextCommandWidth('STRING');
+    natives.addTextComponentSubstringPlayerName('js natives chain');
+    say(`[ok] ширина из JS: ${natives.endTextCommandGetWidth(true)}`);
+
+    // 3. Надпись в точке мира — над собственной головой.
+    try {
+        const где = alt.Player.local.pos;
+        const метка = new alt.TextLabel(
+            'TextLabel here', 'chalet london', 8.0, 1.0,
+            new alt.Vector3(где.x, где.y, где.z + 1.2), new alt.Vector3(0, 0, 0),
+            new alt.RGBA(255, 0, 255, 255), 1.0, new alt.RGBA(0, 0, 0, 255), true, 30.0);
+
+        say(`[ok] TextLabel #${метка.id}: виден=${метка.visible}`
+            + ` в дальности=${метка.isStreamedIn}, всего ${alt.TextLabel.count}`);
+    } catch (беда) {
+        say(`[!!] TextLabel: ${беда.message}`);
+    }
+}
 
 // --- Появление тел ----------------------------------------------------------
 
