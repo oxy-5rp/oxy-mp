@@ -588,8 +588,45 @@
         // Того, чего ещё нет.
         focus() { this.focused = true; }
         unfocus() { this.focused = false; }
-        setZIndex() { throw new Error('webView.setZIndex: в oxyMP этого ещё нет'); }
-        setExtraHeader() { throw new Error('webView.setExtraHeader: в oxyMP этого ещё нет'); }
+        setZIndex(_index) { throw new Error('webView.setZIndex: в oxyMP этого ещё нет'); }
+
+        setExtraHeader(_name, _value) {
+            throw new Error('webView.setExtraHeader: заголовки запросам страницы у нас не '
+                            + 'подставляются');
+        }
+
+        setCookie(_url, _name, _value) {
+            throw new Error('webView.setCookie: своим хранилищем печений страница у нас не '
+                            + 'распоряжается');
+        }
+
+        setZoomLevel(_level) {
+            throw new Error('webView.setZoomLevel: масштаб страницы у нас не задаётся');
+        }
+
+        /// Готова ли страница. У alt:V это признак его собственного слоя; у нас
+        /// о готовности говорит событие `load`, и признака рядом нет.
+        get isReady() {
+            throw new Error('webView.isReady: о готовности страницы говорит событие load');
+        }
+
+        /// Ускорение видеокартой. Chromium в кадре игры рисует программно, и
+        /// иначе он рисовать не может: кадр отдаётся буфером.
+        get gpuAccelerationActive() { return false; }
+
+        /// Куда уходит звук страницы. У alt:V звук можно развести по своим
+        /// выходам; у нас звукового слоя нет вовсе.
+        addOutput(_output) {
+            throw new Error('webView.addOutput: своего звукового слоя в oxyMP нет');
+        }
+
+        removeOutput(_output) {
+            throw new Error('webView.removeOutput: своего звукового слоя в oxyMP нет');
+        }
+
+        getOutputs() {
+            throw new Error('webView.getOutputs: своего звукового слоя в oxyMP нет');
+        }
     }
 
     // --- Клавиши -------------------------------------------------------------
@@ -1290,6 +1327,8 @@
         // отказать по имени, чем оставить `undefined`: тогда ресурс падает с
         // «Cannot read properties of undefined», и виноватым выглядит он сам.
         HandlingData: absent('alt.HandlingData'),
+        MemoryBuffer: absent('alt.MemoryBuffer'),
+        Worker: absent('alt.Worker'),
         WeaponData: absent('alt.WeaponData'),
         Interior: absent('alt.Interior'),
         InteriorPortal: absent('alt.InteriorPortal'),
