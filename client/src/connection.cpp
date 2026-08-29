@@ -1074,6 +1074,20 @@ void Connection::reportDamage(shared::PlayerId victim, std::uint16_t amount,
     outgoingDamage_.push_back(report);
 }
 
+void Connection::reportPedDamage(shared::PedId ped, std::uint16_t amount,
+                                 std::uint32_t weapon) {
+    if (ped == shared::kInvalidPedId || amount == 0) {
+        return;
+    }
+
+    shared::PedDamageReport report;
+    report.victim = ped;
+    report.amount = amount;
+    report.weapon = weapon;
+
+    outgoingPedDamage_.push_back(report);
+}
+
 void Connection::reportVehicleDamage(shared::VehicleId vehicle, const shared::VehicleHarm& harm,
                                      std::uint32_t weapon) {
     if (vehicle == shared::kInvalidVehicleId || !harm.any()) {
@@ -1311,6 +1325,7 @@ void Connection::sendQueued() {
         outgoingChat_.clear();
         outgoingDamage_.clear();
         outgoingVehicleDamage_.clear();
+        outgoingPedDamage_.clear();
         outgoingEvents_.clear();
         return;
     }
@@ -1335,6 +1350,13 @@ void Connection::sendQueued() {
         host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
     }
     outgoingVehicleDamage_.clear();
+
+    // И попадания по прохожим — тем же каналом и по той же причине.
+    for (const shared::PedDamageReport& report : outgoingPedDamage_) {
+        const auto packet = shared::encode(report);
+        host_->send(serverPeer_, shared::Channel::Control, shared::ByteView{packet});
+    }
+    outgoingPedDamage_.clear();
 
     // Тем же каналом и по той же причине: потерянный выстрел не повторится.
     for (const shared::WeaponFired& fired : outgoingShots_) {

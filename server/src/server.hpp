@@ -273,6 +273,12 @@ private:
     void handleChatSay(net::PeerId peer, const shared::ChatSay& say);
     void handleDamageReport(net::PeerId peer, const shared::DamageReport& report);
 
+    /// Попадание по прохожему, увиденное клиентом.
+    ///
+    /// Отдельно от попадания по человеку: прохожий принадлежит серверу целиком,
+    /// у него нет хозяина среди игроков, и отнимать здоровье некому, кроме нас.
+    void handlePedDamage(net::PeerId peer, const shared::PedDamageReport& report);
+
     /// Разбирает свидетельство о попадании по чужой машине.
     ///
     /// Сервер здесь не судья, а посредник: прочность машины живёт в игре у её

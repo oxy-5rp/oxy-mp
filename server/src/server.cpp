@@ -485,6 +485,12 @@ void Server::handleMessage(net::PeerId peer, const std::vector<std::uint8_t>& pa
         }
         return;
 
+    case shared::MessageId::PedDamageReport:
+        if (const auto hit = shared::decode<shared::PedDamageReport>(packet)) {
+            handlePedDamage(peer, *hit);
+        }
+        return;
+
     // Эти сообщения посылает сервер, а не клиент. Получить их обратно означает
     // либо ошибку в клиенте, либо попытку что-то подделать.
     case shared::MessageId::ServerWelcome:
@@ -1710,6 +1716,68 @@ void Server::handleChatSay(net::PeerId peer, const shared::ChatSay& say) {
     }
 
     announce(shared::ChatKind::Say, author, std::move(nickname), std::move(text));
+}
+
+void Server::handlePedDamage(net::PeerId peer, const shared::PedDamageReport& report) {
+    const Player* const attacker = players_.findByPeer(peer);
+
+    if (attacker == nullptr || report.amount == 0) {
+        return;
+    }
+
+    const PedDirectory::Ped* const ped = peds_.find(report.victim);
+
+    if (ped == nullptr || ped->state.health == 0) {
+        return;
+    }
+
+    // Дальше предела раздачи попасть нельзя: тот, у кого прохожего нет рядом, его
+    // и не видит. Проверка не от взломщика, а от обычного расхождения — кукла
+    // могла уехать между кадром и пакетом, — но пакет собирает кто угодно, и
+    // отбить выдуманное попадание через полгорода она заодно отбивает тоже.
+    const float reach = config_.streamDistance * config_.streamDistance;
+
+    if (shared::distanceSquared(attacker->position, ped->state.position) > reach) {
+        spdlog::warn("player \"{}\" (id {}) reported a hit on a ped too far away",
+                     attacker->nickname, attacker->id);
+        return;
+    }
+
+    // Урон обрезается тем же пределом, что и человеку: число могло испортиться
+    // по дороге или прийти от ошибки в клиенте, а выстрел при этом был
+    // настоящим.
+    const std::uint16_t taken = std::min(report.amount, config_.maxDamagePerHit);
+
+    // Броня принимает удар первой и целиком — то же правило, что и у игрока, и
+    // считать его нужно одинаково: иначе бронированный прохожий терял бы
+    // здоровье, которого не терял.
+    const std::uint16_t armourHarm = std::min(taken, ped->state.armour);
+    const std::uint16_t healthHarm = static_cast<std::uint16_t>(taken - armourHarm);
+
+    // Скриптам — до наложения: у alt:V `pedDamage` отменяемое, и обработчик,
+    // вернувший false, оставляет прохожего целым. Отменённое наложение — это
+    // как раз то, ради чего событие и объявляют раньше.
+    script::Event damage;
+    damage.kind = script::EventKind::PedDamage;
+    damage.ped = report.victim;
+    damage.killer = script::Player{core_, attacker->id};
+    damage.weapon = report.weapon;
+    damage.healthHarm = healthHarm;
+    damage.armourHarm = armourHarm;
+
+    if (!events_.dispatch(damage)) {
+        return;
+    }
+
+    const std::uint16_t armour = static_cast<std::uint16_t>(ped->state.armour - armourHarm);
+    const std::uint16_t health =
+        healthHarm >= ped->state.health ? 0
+                                        : static_cast<std::uint16_t>(ped->state.health - healthHarm);
+
+    // Через ядро, а не правкой реестра: там же рассылка обновлённого состояния
+    // всем, кто прохожего видит, и объявление смерти — с ударившим, который
+    // известен только здесь.
+    (void)core_.hurtPed(report.victim, health, armour, attacker->id);
 }
 
 void Server::handleVehicleDamage(net::PeerId peer, const shared::VehicleDamageReport& report) {

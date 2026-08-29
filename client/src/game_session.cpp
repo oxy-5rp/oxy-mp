@@ -189,6 +189,11 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
 
     // Попадания по чужим машинам — той же почтой и по той же причине: замечает
     // их игровой поток, а отправляет сетевой.
+    peds_.reportDamageTo(
+        [&mail = mail_](shared::PedId ped, std::uint16_t amount, std::uint32_t weapon) {
+            mail.postPedDamage(ped, amount, weapon);
+        });
+
     vehicles_.reportDamageTo([&mail = mail_](shared::VehicleId vehicle,
                                              const shared::VehicleHarm& harm,
                                              std::uint32_t weapon) {
@@ -1147,7 +1152,9 @@ void GameSession::applyServerEvents(int ped) {
         peds_.apply(state);
     }
 
-    peds_.sync();
+    // Тело, а не номер игрока: попадание засчитывается сравнением сущностей, и
+    // номер игрока — это единица, то есть чужой дескриптор.
+    peds_.sync(player_.ped());
 
     // Привязки: запоминаются здесь, накладываются ниже. Разделено потому, что
     // накладывать их приходится не тогда, когда о них сказали: тел может не быть

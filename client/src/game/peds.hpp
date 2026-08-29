@@ -5,6 +5,7 @@
 #include <oxymp/shared/protocol/messages.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <unordered_map>
 
 namespace oxymp::client::game {
@@ -43,7 +44,18 @@ public:
     void remove(shared::PedId id);
 
     /// Доводит до конца то, что не удалось раньше. Вызывать раз в кадр.
-    void sync();
+    /// Свидетельство о попадании по прохожему: номер, урон, наше оружие.
+    using DamageSink =
+        std::function<void(shared::PedId ped, std::uint16_t amount, std::uint32_t weapon)>;
+
+    /// Кому говорить о попаданиях. Без этого попадания просто не замечаются.
+    void reportDamageTo(DamageSink sink) { onDamage_ = std::move(sink); }
+
+    /// Довести кукол до присланного состояния.
+    ///
+    /// Довод — тело своего игрока: попадание засчитывается только от него.
+    /// Ноль — своего тела в мире нет, и засчитывать нечего.
+    void sync(int localPed);
 
     /// Убирает всех разом. Нужно при разрыве.
     void clear();
@@ -62,6 +74,14 @@ private:
 
         /// Номер в игре. Ноль — модель ещё не загрузилась, тела пока нет.
         int handle = 0;
+
+        /// Здоровье и броня, какими мы их поставили в прошлый раз.
+        ///
+        /// Помнятся отдельно от `state`, хотя и берутся из него: попадание
+        /// считается разницей между поставленным и оставшимся, а `state`
+        /// обновится присланным раньше, чем мы успеем сравнить.
+        int appliedHealth = 0;
+        int appliedArmour = 0;
     };
 
     /// Заводит куклу в мире. Ноль, если модель ещё не загрузилась.
@@ -75,6 +95,12 @@ private:
     void dress(int handle, const shared::PedState& fresh, const shared::PedState& previous) const;
 
     void destroy(int handle) const;
+
+    /// Замечает попадание нашего игрока по этой кукле и говорит о нём.
+    void noticeDamage(shared::PedId id, Entry& entry, int localPed);
+
+    /// Запоминает здоровье и броню, только что поставленные на тело.
+    static void remember(Entry& entry);
 
     NativeHandler requestModel_ = nullptr;
     NativeHandler hasModelLoaded_ = nullptr;
@@ -92,6 +118,13 @@ private:
     NativeHandler setMaxHealth_ = nullptr;
     NativeHandler setArmour_ = nullptr;
     NativeHandler giveWeapon_ = nullptr;
+    NativeHandler getHealth_ = nullptr;
+    NativeHandler getArmour_ = nullptr;
+    NativeHandler damagedBy_ = nullptr;
+    NativeHandler clearDamage_ = nullptr;
+    NativeHandler selectedWeapon_ = nullptr;
+
+    DamageSink onDamage_;
 
     std::unordered_map<shared::PedId, Entry> peds_;
 };

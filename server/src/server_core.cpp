@@ -1486,9 +1486,11 @@ bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
     sink_->pedChanged(id);
 
     // Смерть и лечение — по тем же правилам, что и у игрока: смерть это
-    // обнуление здоровья у живого, лечение — его рост. Урона здесь нет и быть
-    // не может: у него есть ударивший, а о попаданиях по прохожим клиент
-    // серверу не сообщает.
+    // обнуление здоровья у живого, лечение — его рост.
+    //
+    // Ударивший здесь не назван, и это верно: правкой куклы через ядро
+    // распоряжается скрипт, а не чужая пуля. Убитый попаданием приходит другим
+    // путём — `hurtPed`, — и там ударивший известен.
     const PedDirectory::Ped* const after = peds_->find(id);
 
     if (after == nullptr) {
@@ -1496,12 +1498,7 @@ bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
     }
 
     if (healthWas != 0 && after->state.health == 0) {
-        script::Event death;
-        death.kind = script::EventKind::PedDeath;
-        death.ped = id;
-        death.weapon = after->state.weapon;
-
-        events_->dispatch(death);
+        announcePedDeath(id, shared::kInvalidPlayerId);
         return true;
     }
 
@@ -1515,6 +1512,52 @@ bool ServerCore::updatePed(shared::PedId id, const script::PedInfo& ped) {
         healed.armour = after->state.armour;
 
         events_->dispatch(healed);
+    }
+
+    return true;
+}
+
+void ServerCore::announcePedDeath(shared::PedId id, shared::PlayerId killer) {
+    const PedDirectory::Ped* const dead = peds_->find(id);
+
+    script::Event death;
+    death.kind = script::EventKind::PedDeath;
+    death.ped = id;
+    death.weapon = dead != nullptr ? dead->state.weapon : 0U;
+
+    // Ударивший — живой ссылкой, как и везде: он мог выйти между попаданием и
+    // обработчиком, и тогда обработчик честно увидит, что его больше нет.
+    if (killer != shared::kInvalidPlayerId) {
+        death.killer = script::Player{*this, killer};
+    }
+
+    events_->dispatch(death);
+}
+
+bool ServerCore::hurtPed(shared::PedId id, std::uint16_t health, std::uint16_t armour,
+                         shared::PlayerId killer) {
+    const PedDirectory::Ped* const before = peds_->find(id);
+
+    if (before == nullptr) {
+        return false;
+    }
+
+    const std::uint16_t healthWas = before->state.health;
+
+    shared::PedState fresh = before->state;
+    fresh.health = health;
+    fresh.armour = armour;
+
+    if (!peds_->update(id, fresh)) {
+        return false;
+    }
+
+    sink_->pedChanged(id);
+
+    // Смерть объявляется здесь же и с ударившим: он известен только на этом
+    // пути. Оживление сюда попасть не может — попадание здоровья не прибавляет.
+    if (healthWas != 0 && health == 0) {
+        announcePedDeath(id, killer);
     }
 
     return true;

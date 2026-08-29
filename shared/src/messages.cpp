@@ -1324,6 +1324,20 @@ PedRemoved PedRemoved::read(ByteReader& reader) {
     return message;
 }
 
+void PedDamageReport::write(ByteWriter& writer) const {
+    writer.writeU32(victim);
+    writer.writeU16(amount);
+    writer.writeU32(weapon);
+}
+
+PedDamageReport PedDamageReport::read(ByteReader& reader) {
+    PedDamageReport message;
+    message.victim = reader.readU32();
+    message.amount = reader.readU16();
+    message.weapon = reader.readU32();
+    return message;
+}
+
 void EntityAttachment::write(ByteWriter& writer) const {
     writer.writeU8(static_cast<std::uint8_t>(kind));
     writer.writeU32(id);
@@ -1511,6 +1525,7 @@ std::optional<MessageId> peekMessageId(ByteView packet) noexcept {
     case MessageId::PlayerControl:
     case MessageId::VehicleControl:
     case MessageId::VehicleDoors:
+    case MessageId::PedDamageReport:
         return static_cast<MessageId>(packet.front());
     }
 

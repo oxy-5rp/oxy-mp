@@ -61,6 +61,25 @@ public:
         return std::exchange(outgoingDamage_, {});
     }
 
+    /// Попадание по прохожему.
+    ///
+    /// Тем же путём, что и попадание по человеку и по машине: заметил его
+    /// игровой поток, а отправляет сетевой.
+    void postPedDamage(shared::PedId ped, std::uint16_t amount, std::uint32_t weapon) {
+        shared::PedDamageReport report;
+        report.victim = ped;
+        report.amount = amount;
+        report.weapon = weapon;
+
+        const std::lock_guard guard{mutex_};
+        outgoingPedDamage_.push_back(report);
+    }
+
+    [[nodiscard]] std::vector<shared::PedDamageReport> takeOutgoingPedDamage() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(outgoingPedDamage_, {});
+    }
+
     /// Свой выстрел: замечает его игровой поток, отправляет сетевой.
     void postShot(std::uint32_t weapon, const shared::Vec3& target) {
         shared::WeaponFired fired;
@@ -811,6 +830,7 @@ private:
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::WeaponFired> outgoingShots_;
     std::vector<shared::VehicleDamageReport> outgoingVehicleDamage_;
+    std::vector<shared::PedDamageReport> outgoingPedDamage_;
     std::vector<shared::VehicleDamaged> incomingVehicleDamage_;
     std::vector<shared::PlayerWeapon> weaponLooks_;
     std::vector<shared::PedState> peds_;

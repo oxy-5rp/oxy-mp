@@ -82,6 +82,8 @@ namespace {
         return "pedHeal";
     case EventKind::PedDeath:
         return "pedDeath";
+    case EventKind::PedDamage:
+        return "pedDamage";
     case EventKind::VehicleAttach:
         return "vehicleAttach";
     case EventKind::VehicleDetach:
@@ -610,11 +612,22 @@ bool Resource::dispatch(const Event& event) {
         break;
 
     case EventKind::PedDeath:
-        // Кукла, убийца, оружие. Убийцы у нас нет и взяться ему неоткуда — о
-        // попаданиях по прохожим клиент не сообщает, — и потому здесь пустота,
-        // а не выдуманный игрок: место довода держится, а лжи в нём нет.
+        // Кукла, убийца, оружие. Убийца называется, если смерть пришла от
+        // попадания игрока; умерший от правки скриптом или от чего угодно
+        // другого приходит с пустотой — не с выдуманным игроком.
         arguments.push_back(wrapPed(*this, context, event.ped));
-        arguments.push_back(v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(event.killer.valid() ? wrapPlayer(*this, context, event.killer.id())
+                                         : v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        break;
+
+    case EventKind::PedDamage:
+        // Кукла, ударивший, урон здоровью, урон броне, оружие — порядок alt:V.
+        arguments.push_back(wrapPed(*this, context, event.ped));
+        arguments.push_back(event.killer.valid() ? wrapPlayer(*this, context, event.killer.id())
+                                         : v8::Local<v8::Value>{v8::Null(isolate)});
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.healthHarm)));
+        arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.armourHarm)));
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
         break;
 

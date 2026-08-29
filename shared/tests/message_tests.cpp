@@ -853,6 +853,23 @@ TEST_CASE("a player climbing out of a vehicle says so apart from sitting in it",
     CHECK_FALSE(has(received->flags, PlayerFlag::EnteringVehicle));
 }
 
+TEST_CASE("a hit on a ped names the ped, the damage and our weapon", "[messages]") {
+    // Оружие здесь наше, а не жертвы: сервер пересказывает это число скриптам
+    // как оружие удара, и ствол прохожего сделал бы всякий выстрел ударом
+    // кулака. Та же ошибка однажды уже жила у попадания по человеку.
+    PedDamageReport sent;
+    sent.victim = 17;
+    sent.amount = 45;
+    sent.weapon = 0x1B06D571;
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->victim == 17);
+    CHECK(received->amount == 45);
+    CHECK(received->weapon == 0x1B06D571);
+}
+
 TEST_CASE("standing on a vehicle is not sitting in one", "[messages]") {
     // Два разных признака, и путать их нельзя: сидящий внутри занимает место, а
     // стоящий на крыше — нет, и наложение места усадило бы его в салон.

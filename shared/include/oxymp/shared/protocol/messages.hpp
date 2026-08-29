@@ -2129,6 +2129,28 @@ struct PedRemoved {
     [[nodiscard]] static PedRemoved read(ByteReader& reader);
 };
 
+/// Попадание по прохожему, увиденное клиентом.
+///
+/// Состав тот же, что у попадания по человеку, и по той же причине: сервер
+/// пересказывает это скриптам событием `pedDamage`, а урон считает сам.
+struct PedDamageReport {
+    static constexpr MessageId kId = MessageId::PedDamageReport;
+
+    PedId victim = kInvalidPedId;
+
+    /// Сколько здоровья и брони ушло вместе. Полный урон, а не остаток: делит
+    /// его сервер и по тем же правилам, что и игра.
+    std::uint16_t amount = 0;
+
+    /// Чем ударили. Наше оружие, а не жертвы: сервер пересказывает это число
+    /// скриптам как оружие удара, и ствол прохожего сделал бы всякий выстрел
+    /// ударом кулака.
+    std::uint32_t weapon = 0;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PedDamageReport read(ByteReader& reader);
+};
+
 /// Какого рода сущность сессии.
 ///
 /// Понадобился он привязке: та связывает две сущности, и род у них может быть

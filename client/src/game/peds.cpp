@@ -58,7 +58,12 @@ Peds::Peds(const NativeTable& table) noexcept
       setHealth_(table.handlerFor(natives::kSetEntityHealth)),
       setMaxHealth_(table.handlerFor(natives::kSetPedMaxHealth)),
       setArmour_(table.handlerFor(natives::kSetPedArmour)),
-      giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)) {}
+      giveWeapon_(table.handlerFor(natives::kGiveWeaponToPed)),
+      getHealth_(table.handlerFor(natives::kGetEntityHealth)),
+      getArmour_(table.handlerFor(natives::kGetPedArmour)),
+      damagedBy_(table.handlerFor(natives::kHasEntityBeenDamagedByEntity)),
+      clearDamage_(table.handlerFor(natives::kClearEntityLastDamageEntity)),
+      selectedWeapon_(table.handlerFor(natives::kGetSelectedPedWeapon)) {}
 
 Peds::~Peds() {
     // Куклы здесь уже не убрать: разрушение приходится на выгрузку модуля, а она
@@ -125,6 +130,11 @@ int Peds::spawn(const shared::PedState& state) {
     return handle;
 }
 
+void Peds::remember(Entry& entry) {
+    entry.appliedHealth = static_cast<int>(entry.state.health);
+    entry.appliedArmour = static_cast<int>(entry.state.armour);
+}
+
 void Peds::dress(int handle, const shared::PedState& fresh,
                  const shared::PedState& previous) const {
     if (setMaxHealth_ != nullptr && fresh.maxHealth != previous.maxHealth) {
@@ -185,6 +195,7 @@ void Peds::apply(const shared::PedState& state) {
             spdlog::debug("прохожий {} заведён", state.id);
         }
 
+        remember(entry);
         peds_.emplace(state.id, entry);
         return;
     }
@@ -200,6 +211,10 @@ void Peds::apply(const shared::PedState& state) {
 
     known->second.state = state;
     known->second.state.model = model;
+
+    // Запоминается после наложения, а не до: сравнивать попадание нужно с тем,
+    // что на теле стоит сейчас, а не с тем, что стояло до присланного.
+    remember(known->second);
 }
 
 void Peds::remove(shared::PedId id) {
@@ -225,12 +240,17 @@ void Peds::destroy(int handle) const {
     deletePed_(context.address());
 }
 
-void Peds::sync() {
+void Peds::sync(int localPed) {
     if (!ready()) {
         return;
     }
 
     for (auto& [id, entry] : peds_) {
+        // Попадание замечается раньше всего прочего в этом обходе: дальше кукла
+        // может быть заведена заново или ей вернут присланное здоровье, и
+        // разницу, из которой оно видно, стирает и то и другое.
+        noticeDamage(id, entry, localPed);
+
         // Кукла, которую не удалось завести сразу: модель грузилась. Пробуем
         // снова — сервер о ней не забудет, и ждать можно сколько угодно.
         if (entry.handle == 0) {
@@ -238,6 +258,7 @@ void Peds::sync() {
 
             if (entry.handle != 0) {
                 dress(entry.handle, entry.state, born(entry.state));
+                remember(entry);
                 spdlog::debug("прохожий {} заведён", id);
             }
 
@@ -249,6 +270,48 @@ void Peds::sync() {
         if (!invokeNative<bool>(doesExist_, entry.handle)) {
             entry.handle = 0;
         }
+    }
+}
+
+void Peds::noticeDamage(shared::PedId id, Entry& entry, int localPed) {
+    if (!onDamage_ || entry.handle == 0 || localPed == 0 || damagedBy_ == nullptr ||
+        getHealth_ == nullptr) {
+        return;
+    }
+
+    // Спрашиваем «кто ударил» первым: без этого серверу уходил бы и урон от
+    // чужой машины, и падение с высоты — всё то, что он и так посчитает сам.
+    // Последний довод натива — «считать ли попадания сквозь машину»: да, стрелок
+    // за рулём попадает так же, как стоящий.
+    if (!invokeNative<bool>(damagedBy_, entry.handle, localPed, true)) {
+        return;
+    }
+
+    const int health = invokeNative<int>(getHealth_, entry.handle);
+    const int armour = getArmour_ != nullptr ? invokeNative<int>(getArmour_, entry.handle)
+                                             : entry.appliedArmour;
+
+    // Здоровье и броня вместе, и по той же причине, что у игрока: пуля уходит
+    // сперва в броню, а её мы возвращаем кукле из присланного. По разнице
+    // одного здоровья бронированного не пробить вовсе.
+    const int lost = std::max(entry.appliedHealth - health, 0) +
+                     std::max(entry.appliedArmour - armour, 0);
+
+    if (lost > 0) {
+        // Оружие называется наше, а не жертвы: сервер пересказывает это число
+        // скриптам как оружие удара, и ствол прохожего сделал бы всякий выстрел
+        // ударом кулака. Та же ошибка однажды уже жила у попадания по человеку.
+        const std::uint32_t weapon =
+            selectedWeapon_ != nullptr ? invokeNative<std::uint32_t>(selectedWeapon_, localPed)
+                                       : 0U;
+
+        onDamage_(id, static_cast<std::uint16_t>(lost), weapon);
+    }
+
+    // Отметку о том, кто ударил, снимаем всегда, а не только при уроне: не сняв
+    // её, мы засчитали бы то же попадание в каждом следующем кадре.
+    if (clearDamage_ != nullptr) {
+        invokeNative<void>(clearDamage_, entry.handle);
     }
 }
 

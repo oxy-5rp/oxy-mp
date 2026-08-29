@@ -1979,6 +1979,9 @@ void run() {
         for (const shared::VehicleDamageReport& hit : mail.takeOutgoingVehicleDamage()) {
             connection->reportVehicleDamage(hit.vehicle, hit.harm, hit.weapon);
         }
+        for (const shared::PedDamageReport& hit : mail.takeOutgoingPedDamage()) {
+            connection->reportPedDamage(hit.victim, hit.amount, hit.weapon);
+        }
         for (shared::ClientEvent& event : mail.takeOutgoingEvents()) {
             connection->emit(std::move(event.name), std::move(event.payload));
         }

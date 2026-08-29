@@ -300,6 +300,12 @@ public:
     /// три прочности, а не одна, и ведут они себя по-разному. Да и путь у них
     /// разный — урон человеку сервер применяет сам, а прочность машины отнимает
     /// её ведущий.
+    /// Сообщает серверу о попадании по прохожему.
+    ///
+    /// Отдельно от человека и от машины, и по той же причине, что и они друг от
+    /// друга: прохожий принадлежит серверу целиком, и урон ему считает он.
+    void reportPedDamage(shared::PedId ped, std::uint16_t amount, std::uint32_t weapon);
+
     void reportVehicleDamage(shared::VehicleId vehicle, const shared::VehicleHarm& harm,
                              std::uint32_t weapon);
 
@@ -589,6 +595,7 @@ private:
     std::vector<shared::ChatSay> outgoingChat_;
     std::vector<shared::DamageReport> outgoingDamage_;
     std::vector<shared::VehicleDamageReport> outgoingVehicleDamage_;
+    std::vector<shared::PedDamageReport> outgoingPedDamage_;
     std::vector<shared::VehicleDamaged> vehicleDamage_;
     std::vector<shared::WeaponFired> outgoingShots_;
     std::vector<shared::ClientEvent> outgoingEvents_;

@@ -354,6 +354,18 @@ public:
 
     [[nodiscard]] shared::PedId createPed(const script::PedInfo& ped) override;
     bool updatePed(shared::PedId id, const script::PedInfo& ped) override;
+
+    /// Отнимает у прохожего здоровье и броню от попадания игрока.
+    ///
+    /// Отдельно от `updatePed`, а не доводом к нему, и это граница знания:
+    /// `updatePed` принадлежит скриптовому ядру и об ударивших ничего не знает,
+    /// а здесь ударивший известен и обязан дойти до события смерти. Тем же
+    /// путём идёт и урон человеку.
+    bool hurtPed(shared::PedId id, std::uint16_t health, std::uint16_t armour,
+                 shared::PlayerId killer);
+
+    /// Объявляет смерть прохожего. kInvalidPlayerId — ударившего нет.
+    void announcePedDeath(shared::PedId id, shared::PlayerId killer);
     bool removePed(shared::PedId id) override;
     bool setPedDimension(shared::PedId id, std::int32_t dimension) override;
 
