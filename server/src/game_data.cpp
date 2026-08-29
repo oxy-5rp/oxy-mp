@@ -1,9 +1,12 @@
 #include "game_data.hpp"
 
+#include <array>
 #include <cstring>
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <system_error>
+#include <vector>
 
 namespace oxymp::server {
 namespace {
