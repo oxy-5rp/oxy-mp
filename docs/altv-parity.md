@@ -1071,10 +1071,8 @@ alt:V с RAGE MP он ровно такой же.
 Ставится она в раскладку так:
 
 ```powershell
-Copy-Item -Recurse D:ackend-VRUSSIAesources\main\server release\serveresourcesrussia\server
-cmd /c mklink /J release\server
-ode_modules D:ackend-VRUSSIA
-ode_modules
+Copy-Item -Recurse D:\backend-VRUSSIA\resources\main\server release\server\resources\vrussia\server
+cmd /c mklink /J release\server\node_modules D:\backend-VRUSSIA\node_modules
 ```
 
 Второе обязательно: режим тянет семь с лишним сотен пакетов из `node_modules`, и
