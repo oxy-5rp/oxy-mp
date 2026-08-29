@@ -1247,6 +1247,32 @@
             },
         },
 
+        /// Отладочное рисование в мире.
+        ///
+        /// Шар у игры свой (`DRAW_DEBUG_SPHERE`), и он же лежит под этим именем
+        /// у alt:V. Число граней его не спрашивает — сколько нарисовать, игра
+        /// решает сама по расстоянию; довод принимается и не читается, о чём
+        /// сказано вслух один раз, а не молча пропущено.
+        Rendering: {
+            drawSphere(center, radius, color, segments) {
+                const точка = new shared.Vector3(center);
+                const цвет = color === undefined ? shared.RGBA.white : new shared.RGBA(color);
+
+                if (segments !== undefined) {
+                    warnOnce('alt.Rendering.drawSphere',
+                             'число граней игра не принимает: она решает его сама');
+                }
+
+                alt.natives.drawDebugSphere(точка.x, точка.y, точка.z, Number(radius) || 1,
+                                        цвет.r, цвет.g, цвет.b, цвет.a);
+            },
+
+            setDepthtesting: unperformed(
+                'alt.Rendering.setDepthtesting',
+                'глубиной отладочного рисования игра не распоряжается: у alt:V это '
+                + 'настройка его собственного вывода, а рисуем мы игрой'),
+        },
+
         // Того, чего ещё нет. Отказом, а не тишиной.
         VirtualEntity: absent('alt.VirtualEntity'),
         Voice: absent('alt.Voice'),
