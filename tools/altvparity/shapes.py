@@ -42,33 +42,41 @@ def theirs(path):
     s = io.open(path, encoding='utf-8', errors='replace').read()
     s = re.sub(r'/\*.*?\*/', '', s, flags=re.S)
     out = {}
+    статики = {}
+
     for m in re.finditer(r'export class (\w+)[^{]*\{', s):
+        имякласса = m.group(1)
         t = body(s, m.end())
         methods = {}
         # Обобщённые объявляются как `setMeta<K extends string>(…)`, и без
         # разрешения на угловые скобки сверка их не видела вовсе — а ими
         # объявлена вся семья метаданных.
         for c in re.finditer(
-                r'(?:public |private |protected )?(?:static )?(\w+)\s*(?:<[^(]*>)?\s*\(([^)]*)\)\s*:', t):
-            name = c.group(1)
+                r'(?:public |private |protected )?(static )?(\w+)\s*(?:<[^(]*>)?\s*\(([^)]*)\)\s*:', t):
+            статичный = c.group(1) is not None
+            name = c.group(2)
             if name in ('constructor', 'if', 'for', 'while', 'return'):
                 continue
-            args = split_args(c.group(2))
+            args = split_args(c.group(3))
             need = len([a for a in args if '?' not in a.split(':')[0] and not a.startswith('...')])
             methods.setdefault(name, set()).add((need, len(args)))
-        out[m.group(1)] = methods
-    return out
+            if статичный:
+                статики.setdefault(имякласса, set()).add(name)
+        out[имякласса] = methods
+    return out, статики
 
 def ours(patterns):
     out = {}
+    статики = {}
     for pat in patterns:
         for path in glob.glob(pat):
             s = io.open(path, encoding='utf-8', errors='replace').read()
             for m in re.finditer(r'\bclass (\w+)(?: extends [\w.]+)?\s*\{', s):
                 t = body(s, m.end())
                 methods = {}
-                for c in re.finditer(r'\n\s{4,}(?:static )?(\w+)\s*\(([^)]*)\)\s*\{', t):
-                    name = c.group(1)
+                for c in re.finditer(r'\n\s{4,}(static )?(\w+)\s*\(([^)]*)\)\s*\{', t):
+                    статичный = c.group(1) is not None
+                    name = c.group(2)
                     if name in ('constructor', 'if', 'for', 'while', 'switch', 'catch', 'function'):
                         continue
                     # Громкий отказ доводов не читает и читать не должен: он бросает
@@ -76,11 +84,15 @@ def ours(patterns):
                     # топить настоящие находки в шуме — таких отказов в слое десятки.
                     if t[c.end():].lstrip().startswith('throw '):
                         continue
-                    args = [a.strip() for a in c.group(2).split(',') if a.strip()]
+                    args = [a.strip() for a in c.group(3).split(',') if a.strip()]
                     need = len([a for a in args if '=' not in a and not a.startswith('...')])
                     methods[name] = (need, len(args), path)
+
+                    if статичный:
+                        статики.setdefault(m.group(1), set()).add(name)
+
                 out.setdefault(m.group(1), {}).update(methods)
-    return out
+    return out, статики
 
 for types, mine, label in [
     ('D:/backend-VRUSSIA/node_modules/@altv/types-client/index.d.ts',
@@ -88,7 +100,8 @@ for types, mine, label in [
     ('D:/backend-VRUSSIA/node_modules/@altv/types-server/index.d.ts',
      ['script-js/js/alt_*.js'], 'SERVER'),
 ]:
-    th, my = theirs(types), ours(mine)
+    th, ихСтатики = theirs(types)
+    my, нашиСтатики = ours(mine)
     print('==== %s ====' % label)
     found = 0
     for cls, methods in sorted(my.items()):
@@ -104,5 +117,24 @@ for types, mine, label in [
             found += 1
             print('  %s.%s  our(%d..%d)  alt%s  %s'
                   % (cls, name, need, total, sorted(variants), path))
+    # Статическое у них — статическое и у нас.
+    #
+    # Имя может быть на месте и всё же не позваться: у alt:V `LocalStorage.set`
+    # объявлен статическим, то есть зовётся у класса, а у нас жил только на
+    # экземпляре — и падал с «is not a function». Сверка по именам этого не
+    # видела: имя было.
+    #
+    # Нашёл это живой чужой режим, а не сверка; теперь спрашивает и она.
+    for cls, имена in sorted(ихСтатики.items()):
+        if cls not in my:
+            continue
+
+        наши = нашиСтатики.get(cls, set())
+
+        for name in sorted(имена):
+            if name in my[cls] and name not in наши:
+                found += 1
+                print('  %s.%s  у alt:V статический, у нас только на экземпляре' % (cls, name))
+
     if not found:
         print('  расхождений нет')
