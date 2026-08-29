@@ -1079,6 +1079,7 @@
         PointBlip: objects.PointBlip,
         RadiusBlip: objects.RadiusBlip,
         Marker: objects.Marker,
+        TextLabel: objects.TextLabel,
 
         showCursor: objects.showCursor,
         get isCursorVisible() { return objects.cursorVisible; },

@@ -21,6 +21,21 @@
         };
     }
 
+    /// Жалоба, сказанная один раз.
+    ///
+    /// Один раз, а не на каждый вызов: надписи заводят десятками, и одна и та же
+    /// строка в журнале сотню раз не скажет больше, чем один.
+    const warned = new Set();
+
+    function warnOnce(what, why) {
+        if (warned.has(what)) {
+            return;
+        }
+
+        warned.add(what);
+        alt.client.logWarning(`${what}: ${why}`);
+    }
+
     /// Всё, что заведено скриптом и живёт до destroy().
     class BaseObject {
         #alive = true;
@@ -396,6 +411,9 @@
     /// Держится не игрой, а нами: у маркера нет дескриптора, его рисуют заново
     /// каждый кадр. Отсюда и устройство — список живых маркеров и один обход по
     /// нему на кадр. Забудь мы про кадр — маркер мигнёт и исчезнет.
+    /// Сколько надписей заведено. Служит номерами, как и у маркеров.
+    let nextLabelId = 0;
+
     /// Сколько маркеров заведено. Служит номерами: у alt:V маркер спрашивают
     /// по номеру (`Marker.getByID`), и номер этот клиентский — сервер о
     /// маркерах не знает вовсе.
@@ -505,6 +523,164 @@
         }
     }
 
+    // --- Надписи в мире --------------------------------------------------------
+
+    /// Названия шрифтов alt:V и номера, которыми их знает игра.
+    ///
+    /// Именем, а не числом, потому что так объявлено у alt:V: `fontName`
+    /// строкой. Неизвестное имя даёт шрифт по умолчанию — отказывать здесь
+    /// нельзя, надпись рисуют из кадра, и исключение тридцать раз в секунду
+    /// завалило бы журнал.
+    const kFonts = {
+        chaletlondon: 0,
+        housescript: 1,
+        monospace: 2,
+        charletcomprimecolonge: 4,
+        pricedown: 7,
+    };
+
+    /// Надпись, висящая в мире.
+    ///
+    /// Как и маркер, игра её у себя не помнит: текст рисуется заново каждым
+    /// кадром. Оттого и живёт она рядом с маркером и рисуется тем же обходом.
+    ///
+    /// Рисуется через «начало координат отрисовки» (`SET_DRAW_ORIGIN`): текст у
+    /// игры плоский, экранный, а этот натив переносит его начало в точку мира и
+    /// сам считает, куда она попадает на экране. Другого способа повесить текст
+    /// в мире у игры нет.
+    class TextLabel extends BaseObject {
+        #id;
+        #streamingDistance;
+
+        constructor(text, fontName, fontSize, scale, pos, rot, color, outlineWidth,
+                    outlineColor, useStreaming, streamingDistance) {
+            super();
+
+            this.#id = nextLabelId++;
+
+            this.text = String(text ?? '');
+            this.font = String(fontName ?? 'chaletlondon');
+            this.fontSize = Number(fontSize) || 1;
+            this.scale = Number(scale) || 1;
+            this.pos = new shared.Vector3(pos);
+            this.rot = rot === undefined ? shared.Vector3.zero : new shared.Vector3(rot);
+            this.color = color === undefined ? shared.RGBA.white : new shared.RGBA(color);
+            this.outlineWidth = Number(outlineWidth) || 0;
+            this.outlineColor = outlineColor === undefined
+                ? new shared.RGBA(0, 0, 0, 255) : new shared.RGBA(outlineColor);
+
+            this.align = shared.TextLabelAlignment.Center;
+            this.visible = true;
+
+            this.#streamingDistance = useStreaming ? (Number(streamingDistance) || 0) : 0;
+
+            // Надпись заводится, живёт и отвечает на все вопросы — но **не
+            // рисуется**, и молчать об этом нельзя.
+            //
+            // Текстовые нативы игры работают тройкой: `BEGIN_TEXT_COMMAND`,
+            // подстрока, `END_TEXT_COMMAND`. Состояние между ними игра держит у
+            // **своего скриптового потока**, а наш кадр идёт вне его — и
+            // состояние уходит в никуда.
+            //
+            // Измерено, а не выведено: хеши всех трёх нативов сверены с
+            // `tools/nativegen` и верны; строки до нативов доходят
+            // (`getHashKey('mp_m_freemode_01')` отвечает правильным числом);
+            // `DRAW_RECT` и `DRAW_MARKER` из того же кадра рисуются и видны на
+            // снимке. А цепочка текстовых команд отвечает шириной 0.001 —
+            // шириной пустой строки — и для своей подстроки, и для готовой
+            // надписи самой игры.
+            //
+            // Чинится это одним: своим скриптовым потоком, поднятым из
+            // `game::ScriptStartup`. Пока его нет, честнее сказать вслух.
+            warnOnce('TextLabel',
+                     'надпись заведена, но игра не рисует текст из нашего кадра: '
+                     + 'текстовым командам нужен её скриптовый поток');
+
+            TextLabel.all.push(this);
+        }
+
+        static all = [];
+
+        static getByID(id) {
+            return TextLabel.all.find((label) => label.id === id) ?? null;
+        }
+
+        static get count() { return TextLabel.all.length; }
+
+        get id() { return this.#id; }
+
+        get streamingDistance() { return this.#streamingDistance; }
+
+        /// Всякая заведённая здесь надпись общая: она видна тому, у кого
+        /// заведена. Направленных — тех, что сервер показывает одному игроку, —
+        /// сюда не приходит.
+        get isGlobal() { return true; }
+
+        get isStreamedIn() {
+            if (this.#streamingDistance <= 0) {
+                return true;
+            }
+
+            const я = natives.getEntityCoords(natives.playerPedId(), true);
+            const dx = я.x - this.pos.x;
+            const dy = я.y - this.pos.y;
+            const dz = я.z - this.pos.z;
+
+            return dx * dx + dy * dy + dz * dz
+                <= this.#streamingDistance * this.#streamingDistance;
+        }
+
+        /// Рисует себя. Зовётся раз в кадр.
+        _draw() {
+            if (!this.visible || !this.isStreamedIn) {
+                return;
+            }
+
+            natives.setTextFont(kFonts[this.font.toLowerCase()] ?? 0);
+
+            // Размер шрифта и общий размер перемножаются: у alt:V это два
+            // разных числа, а у игры одно.
+            const размер = (Number(this.fontSize) || 1) * (Number(this.scale) || 1) * 0.1;
+            natives.setTextScale(размер, размер);
+
+            natives.setTextColour(this.color.r, this.color.g, this.color.b, this.color.a);
+
+            // Обводка у игры одна на всё и своего цвета не принимает: натив
+            // берётся без доводов. Цвет обводки поэтому доезжает только как
+            // «есть она или нет» — сказать об этом честнее, чем принять число и
+            // не сделать ничего.
+            if (this.outlineWidth > 0) {
+                natives.setTextOutline();
+            }
+
+            natives.setTextJustification(this.align ?? 0);
+            natives.setTextCentre(this.align === shared.TextLabelAlignment.Center);
+
+            // Начало координат отрисовки — точка мира. Последний довод игра не
+            // разбирает; ноль здесь её же умолчание.
+            natives.setDrawOrigin(this.pos.x, this.pos.y, this.pos.z, 0);
+
+            natives.beginTextCommandDisplayText('STRING');
+            natives.addTextComponentSubstringPlayerName(this.text);
+
+            // Нули — смещение от начала координат: надпись стоит ровно в точке.
+            natives.endTextCommandDisplayText(0, 0);
+
+            // Снимать обязательно: не снятое начало координат уносит с собой всё
+            // остальное, что игра рисует в этом кадре, — интерфейс, чат, метки.
+            natives.clearDrawOrigin();
+        }
+
+        destroy() {
+            const at = TextLabel.all.indexOf(this);
+            if (at >= 0) {
+                TextLabel.all.splice(at, 1);
+            }
+
+            this._forget();
+        }
+    }
+
     // --- Курсор и управление ---------------------------------------------------
 
     /// Сколько раз просили показать курсор.
@@ -536,6 +712,13 @@
             marker._draw();
         }
 
+        // Надписи — после маркеров, и порядок этот значим: текст рисуется
+        // поверх, а маркер под ним. Обратный порядок спрятал бы надпись внутри
+        // цилиндра маркера, которым её как раз и подписывают.
+        for (const label of TextLabel.all) {
+            label._draw();
+        }
+
         // Курсор и запрет управления держатся ровно кадр: у игры это натив «на
         // этот кадр», а не признак. Перестань звать — и всё вернётся само.
         if (cursorRequests > 0) {
@@ -554,6 +737,7 @@
         PointBlip,
         RadiusBlip,
         Marker,
+        TextLabel,
 
         showCursor,
 
