@@ -16,6 +16,28 @@
     const native = alt.native;
     const shared = alt.shared;
 
+    /// Дальность раздачи, спрошенная один раз.
+    ///
+    /// Раз, а не на каждый вызов: `isEntityInStreamRange` зовут в обходе по
+    /// сущностям, и переход через границу на каждую из них стоил бы дороже
+    /// самой проверки. Настройка эта за время работы сервера не меняется — она
+    /// читается из файла при запуске.
+    let знаемДальность = null;
+
+    function streamingDistance() {
+        if (знаемДальность === null) {
+            знаемДальность = native.serverConfig().streamingDistance;
+        }
+
+        return знаемДальность;
+    }
+
+    /// Чем игра метит «наложения на лице нет».
+    ///
+    /// Двести пятьдесят пять, а не ноль: ноль — это первое наложение из списка,
+    /// и снять им ничего нельзя. Так же считает и alt:V.
+    const kNoOverlay = 255;
+
     /// Чем справочник метит «набора тюнинга у модели нет». То же число, что и
     /// у ядра (`script::kNoModKit`).
     const kNoModKit = 0xFFFF;
@@ -1925,6 +1947,56 @@
             server.fireLocal('localMetaChange', [this, key, undefined, было]);
         },
         getLocalMetaKeys() { return [...localFor(this.id).keys()]; },
+
+        /// Снять наложение с лица: бровь, щетину, румяна и прочее.
+        ///
+        /// «Снять» у игры отдельного натива не имеет: наложение снимается
+        /// назначением пустого — номер 255, непрозрачность ноль. Так же делает и
+        /// alt:V, и потому это не подмена, а тот же приём.
+        removeHeadOverlay(overlayID) {
+            return this.setHeadOverlay(Number(overlayID) || 0, kNoOverlay, 0);
+        },
+
+        /// Вернуть черте лица её обычный вид. Ноль — середина шкалы от −1 до 1,
+        /// то есть «как у всех», а не «нет черты».
+        removeFaceFeature(index) {
+            return this.setFaceFeature(Number(index) || 0, 0);
+        },
+
+        /// Забыть родителей и смешение целиком.
+        ///
+        /// Нулевые родители с нулевым смешением — это и есть «лица не
+        /// назначали»: именно так выглядит персонаж, которому его не задавали.
+        removeHeadBlendData() {
+            this.setHeadBlendData(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        },
+
+        /// Рядом ли эта сущность с игроком — то есть дошла ли она до него по
+        /// раздаче.
+        ///
+        /// Считается расстоянием и дальностью раздачи сервера, а не спросом у
+        /// клиента: сервер сам решает, кому что отдавать, и ответ у него точнее.
+        /// Своя машина у alt:V всегда «рядом», и здесь так же — она едет вместе
+        /// с игроком.
+        isEntityInStreamRange(entity) {
+            if (entity === null || entity === undefined || entity.valid !== true) {
+                return false;
+            }
+
+            if (this.vehicle !== null && entity.id === this.vehicle.id) {
+                return true;
+            }
+
+            const дальность = streamingDistance();
+            const мой = this.pos;
+            const их = entity.pos;
+
+            const dx = мой.x - их.x;
+            const dy = мой.y - их.y;
+            const dz = мой.z - их.z;
+
+            return dx * dx + dy * dy + dz * dz <= дальность * дальность;
+        },
     });
 
     // Привязка — всем трём родам: у alt:V она объявлена у Entity, а Entity здесь
