@@ -180,6 +180,54 @@ void sessionId(const v8::FunctionCallbackInfo<v8::Value>& info) {
 }
 
 /// Имя игрока сессии.
+/// Состояние игрока сессии — одним объектом.
+///
+/// Одним, а не вызовом на поле: спрашивают их из кадра — режимы рисуют значки
+/// над головами и проверяют прицел каждый кадр, — и два десятка переходов через
+/// границу на игрока стоили бы дороже всей отрисовки.
+///
+/// null — такого игрока клиент не знает. Именно null, а не пустой объект:
+/// «игрока нет» и «игрок стоит на месте с нулевым здоровьем» — разные вещи, и
+/// ресурс, получивший второе вместо первого, показал бы мертвеца.
+void playerState(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const OxympJsHost& host = resourceOf(isolate).host();
+
+    if (host.playerState == nullptr) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    const OxympJsPlayerState known = host.playerState(host.context, numberAt(info, 0));
+
+    if (known.known == 0) {
+        info.GetReturnValue().SetNull();
+        return;
+    }
+
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const v8::Local<v8::Object> out = v8::Object::New(isolate);
+
+    const auto put = [&](const char* name, double value) {
+        (void)out->Set(context, toJs(isolate, std::string_view{name}),
+                       v8::Number::New(isolate, value));
+    };
+
+    put("flags", known.flags);
+    put("aimX", known.aimX);
+    put("aimY", known.aimY);
+    put("aimZ", known.aimZ);
+    put("heading", known.heading);
+    put("velocityX", known.velocityX);
+    put("velocityY", known.velocityY);
+    put("velocityZ", known.velocityZ);
+    put("weapon", known.weapon);
+    put("health", known.health);
+    put("armour", known.armour);
+
+    info.GetReturnValue().Set(out);
+}
+
 void playerName(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const OxympJsHost& host = resourceOf(isolate).host();
@@ -350,6 +398,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, native, "sessionHandle", sessionHandle);
     addFunction(context, native, "sessionId", sessionId);
     addFunction(context, native, "playerName", playerName);
+    addFunction(context, native, "playerState", playerState);
 
     addFunction(context, native, "readResourceFile", readResourceFile);
 

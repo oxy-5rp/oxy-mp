@@ -42,7 +42,10 @@
 
     /// Модель по имени или хешу.
     function modelHash(model) {
-        return typeof model === 'string' ? shared.hash(model) : Number(model) || 0;
+        // Беззнаковым и от числа тоже: режим вправе передать сюда хеш, взятый у
+        // натива, а тот отдаёт его знаковым. Игра же ждёт беззнаковый, и с
+        // отрицательным просто не найдёт модели — молча.
+        return typeof model === 'string' ? shared.hash(model) : (Number(model) || 0) >>> 0;
     }
 
     /// Отпускает заказ на модель.
@@ -283,8 +286,11 @@
             //
             // Найдено живой игрой: до этой правки не заводилось ни одного
             // ствола, и виноватым выглядело оружие, а не незагруженная модель.
-            const модель = modelHash_ === undefined ? natives.getWeapontypeModel(хеш)
-                                                    : modelHash(modelHash_);
+            // Беззнаковым: натив отдаёт хеш знаковым числом, а `requestModel`
+            // и `hasModelLoaded` ждут того же числа, каким его считает игра.
+            const модель = modelHash_ === undefined
+                ? natives.getWeapontypeModel(хеш) >>> 0
+                : modelHash(modelHash_);
 
             if (модель !== 0 && !demandModel(модель)) {
                 throw new Error(`WeaponObject: модель ствола ${модель} ещё не ` +

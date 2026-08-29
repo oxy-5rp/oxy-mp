@@ -1,9 +1,12 @@
 #pragma once
 
+#include <oxymp/shared/protocol/messages.hpp>
+
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -78,6 +81,14 @@ public:
 
             /// Имя игрока сессии. Пусто — такого игрока нет.
             std::function<std::string(std::int32_t id)> nameOf;
+
+            /// Состояние игрока сессии. Пусто — такого игрока нет.
+            ///
+            /// Снимком, а не вопросом к игре, и это единственно верно: чужой
+            /// персонаж здесь кукла, которой распоряжаемся мы сами, и спросить
+            /// у игры «целится ли он» значит спросить, что мы сами ей велели.
+            /// Правду знает только хозяин, и она приезжает снимком.
+            std::function<std::optional<shared::PlayerState>(std::int32_t id)> stateOf;
         };
 
         Entities entities;

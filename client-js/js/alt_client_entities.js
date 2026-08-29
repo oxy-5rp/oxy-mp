@@ -23,6 +23,51 @@
 
 (function build(alt) {
     const shared = alt.shared;
+
+    /// Хеш, приведённый к беззнаковому.
+    ///
+    /// Нативы отдают хеш знаковым числом: у безоружного он выходит
+    /// `-1569615261` вместо `2725352035`. А `alt.hash` считает беззнаковый, и
+    /// режимы сравнивают одно с другим через `===`.
+    ///
+    /// **Молчит это полностью**: оба числа законны, исключения нет, а
+    /// `player.currentWeapon === alt.hash('weapon_unarmed')` не сходится ни
+    /// разу. Виноватым при этом выглядит что угодно — оружие, игрок, порядок
+    /// событий, — только не знак.
+    ///
+    /// Всякий хеш, уходящий из слоя наружу, проходит здесь.
+    function asHash(value) {
+        return Number(value) >>> 0;
+    }
+
+
+    /// Признаки состояния игрока — те же номера битов, что и у протокола
+    /// (`shared::PlayerFlag`). Закреплены проверкой в `shared/tests`: перестань
+    /// они совпадать — игрок у всех остальных почему-то поплывёт вместо того,
+    /// чтобы целиться, и ошибки при этом не будет никакой.
+    const kPlayerFlag = {
+        Dead: 1 << 0,
+        Aiming: 1 << 1,
+        Shooting: 1 << 2,
+        Ragdoll: 1 << 3,
+        Jumping: 1 << 4,
+        InVehicle: 1 << 5,
+        Crouching: 1 << 6,
+        Climbing: 1 << 7,
+        Vaulting: 1 << 8,
+        Swimming: 1 << 9,
+        Diving: 1 << 10,
+        Falling: 1 << 11,
+        Parachuting: 1 << 12,
+        Reloading: 1 << 13,
+        InCover: 1 << 14,
+        Melee: 1 << 15,
+        GettingUp: 1 << 16,
+        DriveBy: 1 << 17,
+        EnteringVehicle: 1 << 18,
+        LeavingVehicle: 1 << 19,
+        OnVehicle: 1 << 20,
+    };
     const natives = alt.natives;
     const native = alt.native;
 
@@ -199,7 +244,7 @@
         }
 
         get model() {
-            return this.valid ? natives.getEntityModel(this.scriptID) : 0;
+            return this.valid ? asHash(natives.getEntityModel(this.scriptID)) : 0;
         }
 
         get rot() {
@@ -371,7 +416,7 @@
             // Оружие возвращается выходным доводом, поэтому ответ приходит
             // списком: сперва то, что вернул сам натив, затем записанное.
             const [, оружие] = natives.getCurrentPedWeapon(this.scriptID, 0, true);
-            return оружие;
+            return asHash(оружие);
         }
 
         get vehicle() {
@@ -449,6 +494,143 @@
 
         /// Насколько громко. По той же причине — ноль.
         get micLevel() { return 0; }
+
+        // --- Состояние из снимка -------------------------------------------
+        //
+        // Всё, что ниже, берётся из снимка, а не из вопросов к игре, и это
+        // единственно верно: чужой персонаж здесь кукла, которой распоряжаемся
+        // мы сами. Спросить у игры «целится ли он» — значит спросить, что мы
+        // сами ей велели, и ответ отстанет от правды ровно на то, что кукла ещё
+        // не отыграла. Правду знает хозяин, и она приезжает снимком.
+        //
+        // Свой игрок отвечает своим снимком — тем, что уходит на сервер: он снят
+        // в этом же кадре.
+        //
+        // Снимок спрашивается на каждое обращение, а не запоминается: он меняется
+        // тридцать раз в секунду, а запомненный врал бы тем убедительнее, чем
+        // дольше его не трогали.
+        //
+        // Разделение здесь по роду ответа, а не по вкусу. То, что игра держит
+        // **наложенным** — здоровье, оружие, смерть, — спрашивается у тела, если
+        // оно здесь: накладываем его мы сами из этого же снимка, и игра ответит
+        // тем же, но свежее. То, что есть **намерение хозяина** — прицел,
+        // приседание, стрельба, укрытие, — спрашивается только у снимка: кукла
+        // его лишь отыгрывает, и спросить у неё значит спросить, что мы сами ей
+        // велели.
+
+        /// Признак состояния. Пусто, если игрока клиент не знает, — «нет», а не
+        /// отказ: игрок, только что вышедший, законно отвечает «не целится».
+        _flag(bit) {
+            const снимок = native.playerState(this.sessionId);
+            return снимок === null ? false : (снимок.flags & bit) !== 0;
+        }
+
+        /// Мёртв ли. У тела спрашивается, если оно здесь: здоровье кукле
+        /// накладываем мы сами из этого же снимка, и игра ответит тем же, но
+        /// свежее. Нет тела — отвечает снимок, и это не придирка: `Ped.isDead`
+        /// без тела отвечает «мёртв», то есть врёт про всякого, кто просто
+        /// стоит за пределами подгрузки.
+        get isDead() {
+            return this.valid ? super.isDead : this._flag(kPlayerFlag.Dead);
+        }
+
+        get isAiming() { return this._flag(kPlayerFlag.Aiming); }
+        get isShooting() { return this._flag(kPlayerFlag.Shooting); }
+        get isInRagdoll() { return this._flag(kPlayerFlag.Ragdoll); }
+        get isJumping() { return this._flag(kPlayerFlag.Jumping); }
+        get isCrouching() { return this._flag(kPlayerFlag.Crouching); }
+        get isInCover() { return this._flag(kPlayerFlag.InCover); }
+        get isInMelee() { return this._flag(kPlayerFlag.Melee); }
+        get isParachuting() { return this._flag(kPlayerFlag.Parachuting); }
+        get isReloading() { return this._flag(kPlayerFlag.Reloading); }
+        get isEnteringVehicle() { return this._flag(kPlayerFlag.EnteringVehicle); }
+        get isLeavingVehicle() { return this._flag(kPlayerFlag.LeavingVehicle); }
+        get isOnVehicle() { return this._flag(kPlayerFlag.OnVehicle); }
+        get isSwimming() { return this._flag(kPlayerFlag.Swimming); }
+
+        /// Крадётся ли. Тот же признак, что и `isCrouching`, и это не подмена:
+        /// своего приседания у игрока в GTA V нет — крадущийся и пригнувшийся
+        /// там одно и то же. У alt:V это два свойства, и оба отвечают одним
+        /// признаком игры.
+        get isStealthy() { return this._flag(kPlayerFlag.Crouching); }
+
+        /// Куда он целится. Не целясь — куда смотрит: поле в снимке одно, и
+        /// различает их признак прицела.
+        get aimPos() {
+            const снимок = native.playerState(this.sessionId);
+
+            return снимок === null ? shared.Vector3.zero
+                                   : new shared.Vector3(снимок.aimX, снимок.aimY, снимок.aimZ);
+        }
+
+        /// Скорость, метры в секунду. Три вида, как у alt:V.
+        get moveSpeed() {
+            const v = this._velocity();
+            return Math.sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+        }
+
+        get forwardSpeed() {
+            const снимок = native.playerState(this.sessionId);
+
+            if (снимок === null) {
+                return 0;
+            }
+
+            // Направление взгляда у игры считается от севера по часовой стрелке,
+            // а синус с косинусом — от востока против неё. Отсюда перестановка
+            // осей: «вперёд» это (-sin, cos), а не (cos, sin). Та же поправка
+            // стоит и на сервере.
+            const радианы = снимок.heading * (Math.PI / 180);
+            const вперёдX = -Math.sin(радианы);
+            const вперёдY = Math.cos(радианы);
+
+            return (снимок.velocityX * вперёдX) + (снимок.velocityY * вперёдY);
+        }
+
+        get strafeSpeed() {
+            const снимок = native.playerState(this.sessionId);
+
+            if (снимок === null) {
+                return 0;
+            }
+
+            const радианы = снимок.heading * (Math.PI / 180);
+            const вперёдX = -Math.sin(радианы);
+            const вперёдY = Math.cos(радианы);
+
+            return (снимок.velocityX * вперёдY) - (снимок.velocityY * вперёдX);
+        }
+
+        _velocity() {
+            const снимок = native.playerState(this.sessionId);
+
+            return снимок === null ? { x: 0, y: 0, z: 0 }
+                                   : { x: снимок.velocityX, y: снимок.velocityY,
+                                       z: снимок.velocityZ };
+        }
+
+        /// Оружие в руках. Ноль — безоружен.
+        ///
+        /// Как и смерть: у тела, если оно здесь, — оружие ему выдаём мы сами из
+        /// этого же снимка, — а без тела у снимка. `Ped.currentWeapon` без тела
+        /// отвечает нулём, то есть «безоружен», про всякого, кто стоит за
+        /// пределами подгрузки.
+        get currentWeapon() {
+            if (this.valid) {
+                return super.currentWeapon;
+            }
+
+            const снимок = native.playerState(this.sessionId);
+            return снимок === null ? 0 : снимок.weapon;
+        }
+
+        /// На лестнице ли. У игры натива нет вовсе — лестница у неё задача, а
+        /// номер задачи пришлось бы угадывать, и угаданный не тот отвечал бы
+        /// правдоподобно. Отказ вслух: тишина на вопрос — это ложь.
+        get isOnLadder() {
+            throw new Error('player.isOnLadder: у игры нет натива, а номер задачи '
+                            + 'угадывать нельзя');
+        }
 
         toString() {
             return `Player{ id: ${this.sessionId}, name: ${this.name} }`;

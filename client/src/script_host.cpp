@@ -236,6 +236,41 @@ std::int32_t onEntityId(void*, OxympJsEntityKind kind, std::int32_t handle) {
     return resolve ? resolve(handle) : -1;
 }
 
+OxympJsPlayerState onPlayerState(void*, std::int32_t id) {
+    OxympJsPlayerState out{};
+
+    ScriptHost::State* const state = current();
+
+    if (state == nullptr || !state->hooks.entities.stateOf) {
+        return out;
+    }
+
+    const std::optional<shared::PlayerState> known = state->hooks.entities.stateOf(id);
+
+    if (!known) {
+        return out;
+    }
+
+    out.known = 1;
+    out.flags = known->flags;
+
+    out.aimX = known->aimAt.x;
+    out.aimY = known->aimAt.y;
+    out.aimZ = known->aimAt.z;
+
+    out.heading = known->heading;
+
+    out.velocityX = known->velocity.x;
+    out.velocityY = known->velocity.y;
+    out.velocityZ = known->velocity.z;
+
+    out.weapon = known->weapon;
+    out.health = known->health;
+    out.armour = known->armour;
+
+    return out;
+}
+
 OxympJsText onPlayerName(void*, std::int32_t id) {
     ScriptHost::State* const state = current();
 
@@ -345,6 +380,7 @@ std::unique_ptr<ScriptHost> ScriptHost::load(const std::filesystem::path& client
     state->host.entityHandle = &onEntityHandle;
     state->host.entityId = &onEntityId;
     state->host.playerName = &onPlayerName;
+    state->host.playerState = &onPlayerState;
     state->host.createWebView = &onCreateWebView;
     state->host.destroyWebView = &onDestroyWebView;
     state->host.emitWebView = &onEmitWebView;

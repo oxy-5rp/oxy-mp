@@ -713,7 +713,11 @@
         }
 
         const ped = alt.natives.playerPedId();
-        const weapon = alt.natives.getSelectedPedWeapon(ped);
+
+        // Беззнаковым: натив отдаёт хеш знаковым числом, а `alt.hash` считает
+        // беззнаковый, и режим сравнивает одно с другим через `===`. Молчит это
+        // полностью — оба числа законны.
+        const weapon = alt.natives.getSelectedPedWeapon(ped) >>> 0;
 
         // Ответ приходит вторым местом: сам натив отвечает «есть ли обойма».
         const [, clip] = alt.natives.getAmmoInClip(ped, weapon, 0);

@@ -1349,6 +1349,32 @@ void GameSession::runScripts() {
             return id == shared::kInvalidVehicleId ? -1 : static_cast<std::int32_t>(id);
         };
 
+        // Состояние игрока сессии — из снимка, а не из вопросов к игре.
+        //
+        // Чужой персонаж здесь кукла, которой распоряжаемся мы сами: спросить у
+        // игры «целится ли он» значит спросить, что мы сами ей велели, и ответ
+        // отстанет от правды ровно на то, что кукла ещё не отыграла. Правду
+        // знает хозяин, и она приезжает снимком.
+        //
+        // Свой игрок отвечает своим снимком — тем самым, что уходит на сервер:
+        // он снят в этом же кадре и точнее всего, что можно спросить заново.
+        hooks.entities.stateOf =
+            [this](std::int32_t id) -> std::optional<shared::PlayerState> {
+            const shared::PlayerId self = status_.snapshot().playerId;
+
+            if (self != shared::kInvalidPlayerId && id == static_cast<std::int32_t>(self)) {
+                return localState_.get();
+            }
+
+            for (const RemoteView& player : roster_.snapshot()) {
+                if (static_cast<std::int32_t>(player.id) == id) {
+                    return player.state;
+                }
+            }
+
+            return std::nullopt;
+        };
+
         hooks.entities.nameOf = [this](std::int32_t id) -> std::string {
             const shared::PlayerId self = status_.snapshot().playerId;
 
