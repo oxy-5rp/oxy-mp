@@ -1257,6 +1257,21 @@ void vehicleTeleport(const v8::FunctionCallbackInfo<v8::Value>& info) {
         core.teleportVehicle(*id, *position, static_cast<float>(heading)));
 }
 
+/// Отметка времени последней перемены у сущности.
+///
+/// У alt:V она есть у всякой сущности, а у нас — только у машины, и то не под
+/// этим именем: реестр помнит, когда пришёл её последний снимок, чтобы решать,
+/// кого пересылать в такте. У игрока, куклы и предмета такой отметки нет вовсе,
+/// и завести её значило бы штамповать каждую перемену в четырёх реестрах ради
+/// одного имени.
+///
+/// Отказ вслух, а не ноль: ноль здесь читался бы как «менялось на первом такте»,
+/// и режим, сравнивший две отметки, не увидел бы разницы никогда.
+void entityTimestamp(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    fail(info.GetIsolate(),
+         "entity.timestamp: отметки времени перемен у сущностей мы не ведём");
+}
+
 /// Присваивание, которого мы не умеем исполнить.
 ///
 /// Говорит о себе один раз в журнал и возвращается — не бросает. Разница не в
@@ -3717,6 +3732,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
               playerSetSwitch<&Core::setInvincible>);
     addGetter(isolate, shape, "dimension", playerField<&PlayerInfo::dimension>,
               setPlayerDimension);
+    addGetter(isolate, shape, "timestamp", entityTimestamp);
     addGetter(isolate, shape, "vehicle", playerVehicle);
     addGetter(isolate, shape, "valid", playerValid);
 
@@ -3793,6 +3809,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "rotation", objectField<&ObjectInfo::rotation>);
     addGetter(isolate, shape, "dimension", objectField<&ObjectInfo::dimension>,
               setObjectDimensionValue);
+    addGetter(isolate, shape, "timestamp", entityTimestamp);
     addGetter(isolate, shape, "valid", objectValid);
 
     addMethod(isolate, shape, "destroy", objectDestroy);
@@ -3812,6 +3829,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addGetter(isolate, shape, "owner", vehicleOwner);
     addGetter(isolate, shape, "dimension", vehicleField<&VehicleInfo::dimension>,
               setVehicleDimension);
+    addGetter(isolate, shape, "timestamp", entityTimestamp);
     addGetter(isolate, shape, "valid", vehicleValid);
 
     // Прочность, скорость, признаки и сидящие. Имена — alt:V; всё это ехало в
@@ -3890,6 +3908,7 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
               setPedField<&PedInfo::weapon>);
     addGetter(isolate, shape, "dimension", pedField<&PedInfo::dimension>,
               setPedDimensionValue);
+    addGetter(isolate, shape, "timestamp", entityTimestamp);
     addGetter(isolate, shape, "valid", pedValid);
 
     addMethod(isolate, shape, "destroy", pedDestroy);
