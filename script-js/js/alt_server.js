@@ -1363,6 +1363,115 @@
     }
 
     Object.defineProperties(Vehicle.prototype, {
+        // --- Чего у машины нет, и почему ------------------------------------
+        //
+        // Ниже четыре семьи имён, которых у нас нет. Отказ у всех громкий, а не
+        // тишина: свойство, отвечающее `undefined`, ресурс примет за правду и
+        // унесёт её дальше. Причина у каждой семьи своя, и она названа.
+        //
+        // Поезда. Их у нас нет как рода: рельсы, составы и сцепка — отдельное
+        // хозяйство игры, которого сервер не ведёт вовсе, и всякое число отсюда
+        // было бы выдумкой.
+        isMissionTrain: { get: absent('vehicle.isMissionTrain') },
+        isTrainCaboose: { get: absent('vehicle.isTrainCaboose') },
+        isTrainEngine: { get: absent('vehicle.isTrainEngine') },
+        trainCarriageConfigIndex: { get: absent('vehicle.trainCarriageConfigIndex') },
+        trainConfigIndex: { get: absent('vehicle.trainConfigIndex') },
+        trainCruiseSpeed: { get: absent('vehicle.trainCruiseSpeed') },
+        trainDirection: { get: absent('vehicle.trainDirection') },
+        trainDistanceFromEngine: { get: absent('vehicle.trainDistanceFromEngine') },
+        trainEngineId: { get: absent('vehicle.trainEngineId') },
+        trainForceDoorsOpen: { get: absent('vehicle.trainForceDoorsOpen') },
+        trainLinkedToBackwardId: { get: absent('vehicle.trainLinkedToBackwardId') },
+        trainLinkedToForwardId: { get: absent('vehicle.trainLinkedToForwardId') },
+        trainPassengerCarriages: { get: absent('vehicle.trainPassengerCarriages') },
+        trainRenderDerailed: { get: absent('vehicle.trainRenderDerailed') },
+        trainTrackId: { get: absent('vehicle.trainTrackId') },
+        trainUnk1: { get: absent('vehicle.trainUnk1') },
+        trainUnk2: { get: absent('vehicle.trainUnk2') },
+        trainUnk3: { get: absent('vehicle.trainUnk3') },
+        setTrainEngineId: { value: unperformed('vehicle.setTrainEngineId', 'поездов у нас нет как рода') },
+        setTrainLinkedToBackwardId: { value: unperformed('vehicle.setTrainLinkedToBackwardId', 'поездов у нас нет как рода') },
+        setTrainLinkedToForwardId: { value: unperformed('vehicle.setTrainLinkedToForwardId', 'поездов у нас нет как рода') },
+
+        // Колёса поштучно. alt:V читает и правит их прямо в памяти машины у
+        // ведущего; у нас по сети едет состояние машины целиком, а колесо в него
+        // не входит.
+        doesWheelHasTire: { value: absent('vehicle.doesWheelHasTire') },
+        getWheelCamber: { value: absent('vehicle.getWheelCamber') },
+        getWheelHealth: { value: absent('vehicle.getWheelHealth') },
+        getWheelHeight: { value: absent('vehicle.getWheelHeight') },
+        getWheelRimRadius: { value: absent('vehicle.getWheelRimRadius') },
+        getWheelTrackWidth: { value: absent('vehicle.getWheelTrackWidth') },
+        getWheelTyreRadius: { value: absent('vehicle.getWheelTyreRadius') },
+        getWheelTyreWidth: { value: absent('vehicle.getWheelTyreWidth') },
+        isWheelBurst: { value: absent('vehicle.isWheelBurst') },
+        isWheelDetached: { value: absent('vehicle.isWheelDetached') },
+        isWheelOnFire: { value: absent('vehicle.isWheelOnFire') },
+        setWheelBurst: { value: unperformed('vehicle.setWheelBurst', 'колёса поштучно по сети не едут') },
+        setWheelCamber: { value: unperformed('vehicle.setWheelCamber', 'колёса поштучно по сети не едут') },
+        setWheelDetached: { value: unperformed('vehicle.setWheelDetached', 'колёса поштучно по сети не едут') },
+        setWheelFixed: { value: unperformed('vehicle.setWheelFixed', 'колёса поштучно по сети не едут') },
+        setWheelHasTire: { value: unperformed('vehicle.setWheelHasTire', 'колёса поштучно по сети не едут') },
+        setWheelOnFire: { value: unperformed('vehicle.setWheelOnFire', 'колёса поштучно по сети не едут') },
+        setWheelHealth: { value: unperformed('vehicle.setWheelHealth', 'колёса поштучно по сети не едут') },
+        setWheelHeight: { value: unperformed('vehicle.setWheelHeight', 'колёса поштучно по сети не едут') },
+        setWheelRimRadius: { value: unperformed('vehicle.setWheelRimRadius', 'колёса поштучно по сети не едут') },
+        setWheelTrackWidth: { value: unperformed('vehicle.setWheelTrackWidth', 'колёса поштучно по сети не едут') },
+        setWheelTyreRadius: { value: unperformed('vehicle.setWheelTyreRadius', 'колёса поштучно по сети не едут') },
+        setWheelTyreWidth: { value: unperformed('vehicle.setWheelTyreWidth', 'колёса поштучно по сети не едут') },
+
+        // Разбор повреждений по частям: бронестёкла, бамперы, пулевые отверстия,
+        // разбитые фары. У alt:V это его собственный слепок, который он
+        // рассылает; у нас по сети едет прочность кузова, двигателя и бака — и
+        // больше ничего.
+        getArmoredWindowHealth: { value: absent('vehicle.getArmoredWindowHealth') },
+        getArmoredWindowShootCount: { value: absent('vehicle.getArmoredWindowShootCount') },
+        getBumperDamageLevel: { value: absent('vehicle.getBumperDamageLevel') },
+        getPartBulletHoles: { value: absent('vehicle.getPartBulletHoles') },
+        getPartDamageLevel: { value: absent('vehicle.getPartDamageLevel') },
+        isLightDamaged: { value: absent('vehicle.isLightDamaged') },
+        isSpecialLightDamaged: { value: absent('vehicle.isSpecialLightDamaged') },
+        isWindowDamaged: { value: absent('vehicle.isWindowDamaged') },
+        setArmoredWindowHealth: { value: unperformed('vehicle.setArmoredWindowHealth', 'разбор повреждений по частям по сети не едет') },
+        setArmoredWindowShootCount: { value: unperformed('vehicle.setArmoredWindowShootCount', 'разбор повреждений по частям по сети не едет') },
+        setBumperDamageLevel: { value: unperformed('vehicle.setBumperDamageLevel', 'разбор повреждений по частям по сети не едет') },
+        setLightDamaged: { value: unperformed('vehicle.setLightDamaged', 'разбор повреждений по частям по сети не едет') },
+        setPartBulletHoles: { value: unperformed('vehicle.setPartBulletHoles', 'разбор повреждений по частям по сети не едет') },
+        setPartDamageLevel: { value: unperformed('vehicle.setPartDamageLevel', 'разбор повреждений по частям по сети не едет') },
+        setSpecialLightDamaged: { value: unperformed('vehicle.setSpecialLightDamaged', 'разбор повреждений по частям по сети не едет') },
+        setWindowDamaged: { value: unperformed('vehicle.setWindowDamaged', 'разбор повреждений по частям по сети не едет') },
+
+        // Разное, и причины разные: часть alt:V читает из памяти машины (разгон,
+        // торможение), часть принадлежит дополнениям GTA Online, которых сервер
+        // не ведёт (ракетное топливо, огнемёт, противоракеты), часть — его
+        // собственные затеи (значок на борту, отложенный взрыв).
+        accelerationLevel: { get: absent('vehicle.accelerationLevel') },
+        activeRadioStation: { get: absent('vehicle.activeRadioStation') },
+        attached: { get: absent('vehicle.attached') },
+        boatAnchorActive: { get: absent('vehicle.boatAnchorActive') },
+        bodyAdditionalHealth: { get: absent('vehicle.bodyAdditionalHealth') },
+        brakeLevel: { get: absent('vehicle.brakeLevel') },
+        counterMeasureCount: { get: absent('vehicle.counterMeasureCount') },
+        driftModeEnabled: { get: absent('vehicle.driftModeEnabled') },
+        flamethrowerActive: { get: absent('vehicle.flamethrowerActive') },
+        hasTimedExplosion: { get: absent('vehicle.hasTimedExplosion') },
+        headlightColor: { get: absent('vehicle.headlightColor') },
+        hybridExtraActive: { get: absent('vehicle.hybridExtraActive') },
+        hybridExtraState: { get: absent('vehicle.hybridExtraState') },
+        lightsMultiplier: { get: absent('vehicle.lightsMultiplier') },
+        manualEngineControl: { get: absent('vehicle.manualEngineControl') },
+        repairsCount: { get: absent('vehicle.repairsCount') },
+        rocketRefuelSpeed: { get: absent('vehicle.rocketRefuelSpeed') },
+        scriptMaxSpeed: { get: absent('vehicle.scriptMaxSpeed') },
+        timedExplosionCulprit: { get: absent('vehicle.timedExplosionCulprit') },
+        timedExplosionTime: { get: absent('vehicle.timedExplosionTime') },
+        getWeaponCapacity: { value: absent('vehicle.getWeaponCapacity') },
+        setBadge: { value: unperformed('vehicle.setBadge', 'у сервера этого нет') },
+        setSearchLightTo: { value: unperformed('vehicle.setSearchLightTo', 'у сервера этого нет') },
+        setTimedExplosion: { value: unperformed('vehicle.setTimedExplosion', 'у сервера этого нет') },
+        setWeaponCapacity: { value: unperformed('vehicle.setWeaponCapacity', 'у сервера этого нет') },
+
         pos: {
             get() { return new shared.Vector3(this.position); },
             set(value) { this.teleport(new shared.Vector3(value)); },
