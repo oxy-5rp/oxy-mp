@@ -2405,6 +2405,14 @@ void Server::animationPlayed(const Player& player, const shared::PlayerAnimation
                   net::kInvalidPeerId);
 }
 
+void Server::speechPlayed(const Player& player, const shared::PlayerSpeech& speech) {
+    // Тем же кругом и тем же каналом, что и движение: реплика — событие, и
+    // потерянная не повторится, а дальним она не нужна вовсе — к их приезду
+    // человек договорит.
+    broadcastNear(player.position, shared::Channel::Control, speech, player.dimension,
+                  net::kInvalidPeerId);
+}
+
 void Server::dimensionChanged(const Player& player, std::int32_t previous) {
     redrawKindFor<BlipDirectory, shared::BlipRemoved>(blips_, player, previous);
     redrawKindFor<MarkerDirectory, shared::MarkerRemoved>(markers_, player, previous);

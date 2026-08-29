@@ -155,6 +155,12 @@ public:
     virtual void animationPlayed(const Player& player,
                                  const shared::PlayerAnimation& animation) = 0;
 
+    /// Игрок сказал реплику — рассказать всем, кто его видит.
+    ///
+    /// Всем, а не одному хозяину, и по той же причине, что и движение: у
+    /// остальных персонаж показан куклой, и молчащая кукла осталась бы немой.
+    virtual void speechPlayed(const Player& player, const shared::PlayerSpeech& speech) = 0;
+
     /// В мире рвануло — рассказать всем, кто до этого места достаёт.
     ///
     /// Слой мира приходит доводом, а не берётся из игрока: у взрыва игрока нет
@@ -268,6 +274,8 @@ public:
     [[nodiscard]] std::optional<shared::PlayerAppearance> appearance(
         shared::PlayerId id) const override;
     bool playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) override;
+    bool playSpeech(shared::PlayerId id, const std::string& speech, const std::string& params,
+                    const std::string& voice) override;
     bool clearTasks(shared::PlayerId id) override;
     void explode(const script::ExplosionInfo& explosion) override;
 

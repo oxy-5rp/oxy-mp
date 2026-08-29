@@ -489,6 +489,15 @@ alt.on('playerConnect', (player) => {
             alt.log(`[оружие] патронов после setWeaponAmmo: ` +
                     `${player.getWeaponAmmo(пистолет)}`);
 
+            // Реплика голосом персонажа. Услышать её отсюда нельзя, но видно
+            // другое: распоряжение принято и ушло. Не принятое отвечает false —
+            // например если игрок уже вышел.
+            alt.log(`[речь] обычная: ${player.playAmbientSpeech('GENERIC_HI')}`);
+            alt.log(`[речь] с настроением: `
+                    + `${player.playAmbientSpeech('GENERIC_INSULT_HIGH', 'SPEECH_PARAMS_FORCE')}`);
+            alt.log(`[речь] чужим голосом: `
+                    + `${player.playAmbientSpeech('GENERIC_HI', '', 'S_M_Y_COP_01_WHITE_FULL_01')}`);
+
             player.maxArmour = 200;
             player.armour = 200;
             alt.log(`[броня] предел ${player.maxArmour}, надето ${player.armour}`);

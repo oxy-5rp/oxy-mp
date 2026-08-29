@@ -372,6 +372,26 @@ public:
         return true;
     }
 
+    /// Что и кому сказали. Читается проверкой.
+    struct SpokenLine {
+        shared::PlayerId player = shared::kInvalidPlayerId;
+        std::string speech;
+        std::string params;
+        std::string voice;
+    };
+
+    std::vector<SpokenLine> spoken;
+
+    bool playSpeech(shared::PlayerId id, const std::string& speech, const std::string& params,
+                    const std::string& voice) override {
+        if (!player(id)) {
+            return false;
+        }
+
+        spoken.push_back(SpokenLine{id, speech, params, voice});
+        return true;
+    }
+
     bool clearTasks(shared::PlayerId id) override {
         if (!player(id)) {
             return false;

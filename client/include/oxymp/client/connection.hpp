@@ -387,6 +387,9 @@ public:
     /// но показан он у каждого — куклой, которую ведут снимки.
     [[nodiscard]] std::vector<shared::PlayerAnimation> takeAnimations();
 
+    /// Реплики, которые велел сказать сервер.
+    [[nodiscard]] std::vector<shared::PlayerSpeech> takeSpeeches();
+
     /// Взрывы, которые устроил сервер.
     ///
     /// Забираются и исполняются разом, а не откладываются, как движения: у
@@ -562,6 +565,7 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::PlayerSpeech> speeches_;
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::PlayerWeapon> weaponLooks_;

@@ -640,6 +640,12 @@ void Connection::handleMessage(const std::vector<std::uint8_t>& payload) {
         }
         return;
 
+    case shared::MessageId::PlayerSpeech:
+        if (auto speech = shared::decode<shared::PlayerSpeech>(packet)) {
+            speeches_.push_back(std::move(*speech));
+        }
+        return;
+
     case shared::MessageId::PedState:
         if (const auto ped = shared::decode<shared::PedState>(packet)) {
             peds_.push_back(*ped);
@@ -1166,6 +1172,10 @@ std::vector<shared::PlayerAnimation> Connection::takeAnimations() {
     return std::exchange(animations_, {});
 }
 
+std::vector<shared::PlayerSpeech> Connection::takeSpeeches() {
+    return std::exchange(speeches_, {});
+}
+
 std::vector<shared::Explosion> Connection::takeExplosions() {
     return std::exchange(explosions_, {});
 }
@@ -1413,6 +1423,7 @@ void Connection::fallBackToWaiting(std::string_view reason) {
     blips_.clear();
     removedBlips_.clear();
     animations_.clear();
+    speeches_.clear();
     explosions_.clear();
     shots_.clear();
     outgoingShots_.clear();

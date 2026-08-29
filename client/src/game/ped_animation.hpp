@@ -103,6 +103,13 @@ public:
     /// полезно: движение стоит попробовать в следующем кадре.
     [[nodiscard]] bool playNamed(int ped, const shared::PlayerAnimation& animation);
 
+    /// Произносит реплику голосом персонажа.
+    ///
+    /// Два натива, а не один: с названным голосом вызов идёт другой, и голос в
+    /// нём отдельный довод. Ответа игра не даёт вовсе — реплики она проигрывает
+    /// молча, и узнать, нашлась ли такая, можно только на слух.
+    void speak(int ped, const shared::PlayerSpeech& speech) const;
+
     /// Снимает с персонажа все задачи, включая начатое движение.
     void clearTasks(int ped) const;
 
@@ -144,6 +151,8 @@ private:
     NativeHandler getStealth_ = nullptr;
     NativeHandler gameTimer_ = nullptr;
     NativeHandler clearTasks_ = nullptr;
+    NativeHandler speak_ = nullptr;
+    NativeHandler speakWithVoice_ = nullptr;
     NativeHandler taskJump_ = nullptr;
     NativeHandler taskClimb_ = nullptr;
     NativeHandler taskReload_ = nullptr;

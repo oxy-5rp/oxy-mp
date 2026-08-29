@@ -917,6 +917,38 @@ TEST_CASE("a hit on a ped names the ped, the damage and our weapon", "[messages]
     CHECK(received->weapon == 0x1B06D571);
 }
 
+TEST_CASE("a spoken line carries its mood and voice", "[messages]") {
+    // Три строки, а не одна: настроение и голос игра принимает отдельными
+    // доводами, и склеенные они означали бы другую реплику.
+    PlayerSpeech sent;
+    sent.playerId = 9;
+    sent.speech = "GENERIC_HI";
+    sent.params = "SPEECH_PARAMS_FORCE_SHOUTED";
+    sent.voice = "S_M_Y_COP_01_WHITE_FULL_01";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->playerId == 9);
+    CHECK(received->speech == "GENERIC_HI");
+    CHECK(received->params == "SPEECH_PARAMS_FORCE_SHOUTED");
+    CHECK(received->voice == "S_M_Y_COP_01_WHITE_FULL_01");
+}
+
+TEST_CASE("a spoken line without a voice keeps the ped's own", "[messages]") {
+    // Пустой голос — это «своим голосом», а не «молча»: он уводит вызов на
+    // другой натив у клиента, и различить их можно только пустотой.
+    PlayerSpeech sent;
+    sent.playerId = 3;
+    sent.speech = "CHAT_STATE";
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(received->voice.empty());
+    CHECK(received->params.empty());
+}
+
 TEST_CASE("standing on a vehicle is not sitting in one", "[messages]") {
     // Два разных признака, и путать их нельзя: сидящий внутри занимает место, а
     // стоящий на крыше — нет, и наложение места усадило бы его в салон.

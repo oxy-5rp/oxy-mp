@@ -98,6 +98,8 @@ PedAnimation::PedAnimation(const NativeTable& table) noexcept
       getStealth_(table.handlerFor(natives::kGetPedStealthMovement)),
       gameTimer_(table.handlerFor(natives::kGetGameTimer)),
       clearTasks_(table.handlerFor(natives::kClearPedTasks)),
+      speak_(table.handlerFor(natives::kPlayAmbientSpeech)),
+      speakWithVoice_(table.handlerFor(natives::kPlayAmbientSpeechWithVoice)),
       taskJump_(table.handlerFor(natives::kTaskJump)),
       taskClimb_(table.handlerFor(natives::kTaskClimb)),
       taskReload_(table.handlerFor(natives::kTaskReloadWeapon)),
@@ -281,6 +283,29 @@ void PedAnimation::applyDriveBy(int ped, const shared::Vec3& target, bool firing
     // второй раз по тому, кто уже посчитан.
     invokeNative<void>(taskDriveBy_, ped, 0, 0, target.x, target.y, target.z, kDriveByRange,
                        kNoAccuracy, true, kFiringPatternFullAuto);
+}
+
+void PedAnimation::speak(int ped, const shared::PlayerSpeech& speech) const {
+    if (ped == 0 || speech.speech.empty()) {
+        return;
+    }
+
+    // Пустое настроение — обычное. Пустой строкой его отдавать нельзя: игра
+    // ищет по имени, и пустое имя ей не годится.
+    const std::string params =
+        speech.params.empty() ? std::string{"SPEECH_PARAMS_STANDARD"} : speech.params;
+
+    if (!speech.voice.empty() && speakWithVoice_ != nullptr) {
+        // Последний довод — «говорить, даже если персонаж занят другой
+        // репликой». Ложь: перебивать себя человек не должен.
+        invokeNative<void>(speakWithVoice_, ped, speech.speech.c_str(), speech.voice.c_str(),
+                           params.c_str(), false);
+        return;
+    }
+
+    if (speak_ != nullptr) {
+        invokeNative<void>(speak_, ped, speech.speech.c_str(), params.c_str());
+    }
 }
 
 bool PedAnimation::playNamed(int ped, const shared::PlayerAnimation& animation) {

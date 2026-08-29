@@ -193,6 +193,12 @@ inline constexpr std::uint64_t kIsPlayerSwitchInProgress = 0X3555462DB47B7AB1;
 /// STOP_PLAYER_SWITCH, канонический хеш 0X95C0A5BBDC189AA1.
 inline constexpr std::uint64_t kStopPlayerSwitch = 0XF4DB2666A609235A;
 
+/// _PLAY_AMBIENT_SPEECH1, канонический хеш 0X8E04FEDD28D42462.
+inline constexpr std::uint64_t kPlayAmbientSpeech = 0X4C016145CE6A18B;
+
+/// _PLAY_AMBIENT_SPEECH_WITH_VOICE, канонический хеш 0X3523634255FC3318.
+inline constexpr std::uint64_t kPlayAmbientSpeechWithVoice = 0X4CAD907F190E6F10;
+
 /// DO_SCREEN_FADE_OUT, канонический хеш 0X891B5B39AC6302AF.
 inline constexpr std::uint64_t kDoScreenFadeOut = 0X8F72AF14CE5AACE4;
 

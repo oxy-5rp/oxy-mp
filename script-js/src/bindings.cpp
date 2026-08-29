@@ -2185,6 +2185,27 @@ void playerPlayScenario(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().playAnimation(*id, animation));
 }
 
+/// Просит игрока сказать реплику: номер, имя реплики, настроение и голос.
+void playSpeech(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<std::int64_t> id =
+        info.Length() >= 1 ? intFromJs(context, info[0]) : std::nullopt;
+
+    if (!id || info.Length() < 2) {
+        fail(isolate, "playSpeech ждёт номер игрока и имя реплики");
+        return;
+    }
+
+    const std::string speech = fromJs(isolate, info[1]);
+    const std::string params = info.Length() >= 3 ? fromJs(isolate, info[2]) : std::string{};
+    const std::string voice = info.Length() >= 4 ? fromJs(isolate, info[3]) : std::string{};
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().playSpeech(
+        static_cast<shared::PlayerId>(*id), speech, params, voice));
+}
+
 void playAnimation(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3959,6 +3980,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, oxymp, "createObject", createObject);
     addFunction(context, oxymp, "addExplosion", addExplosion);
     addFunction(context, oxymp, "playAnimation", playAnimation);
+    addFunction(context, oxymp, "playSpeech", playSpeech);
     addFunction(context, oxymp, "clearTasks", clearTasks);
     addFunction(context, oxymp, "peds", peds);
     addFunction(context, oxymp, "createPed", createPed);

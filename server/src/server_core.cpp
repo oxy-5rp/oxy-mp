@@ -1007,6 +1007,23 @@ bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo&
     return true;
 }
 
+bool ServerCore::playSpeech(shared::PlayerId id, const std::string& speech,
+                            const std::string& params, const std::string& voice) {
+    const Player* const player = players_->findById(id);
+    if (player == nullptr) {
+        return false;
+    }
+
+    shared::PlayerSpeech message;
+    message.playerId = id;
+    message.speech = speech;
+    message.params = params;
+    message.voice = voice;
+
+    sink_->speechPlayed(*player, message);
+    return true;
+}
+
 void ServerCore::explode(const script::ExplosionInfo& explosion) {
     shared::Explosion message;
     message.position = explosion.position;

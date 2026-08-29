@@ -1051,6 +1051,22 @@ void GameSession::applyAnimations(int ped) {
     });
 }
 
+/// Произносит присланные реплики.
+///
+/// Своя идёт настоящему персонажу, чужая — кукле. Терпения здесь нет и не нужно:
+/// реплика мгновенна, и не нашедшая тела к своему кадру уже опоздала — человек
+/// договорит раньше, чем кукла приедет.
+void GameSession::applySpeeches(int ped) {
+    const shared::PlayerId self = status_.snapshot().playerId;
+
+    for (const shared::PlayerSpeech& speech : mail_.takeSpeeches()) {
+        const bool own = speech.playerId == self && self != shared::kInvalidPlayerId;
+        const int body = own ? ped : remotePlayers_.handleFor(speech.playerId);
+
+        pedAnimation_.speak(body, speech);
+    }
+}
+
 void GameSession::applyAttachments(int ped) {
     const shared::PlayerId self = status_.snapshot().playerId;
 
@@ -1079,6 +1095,7 @@ void GameSession::applyAttachments(int ped) {
 void GameSession::applyServerEvents(int ped) {
     forgetSessionOnLeaving();
     applyAnimations(ped);
+    applySpeeches(ped);
 
     // Взрывы — сразу и без откладывания, в отличие от движений: у движения есть
     // цель, которой может ещё не быть в игре, а взрыв случается на пустом месте.

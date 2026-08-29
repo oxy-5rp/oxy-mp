@@ -1220,6 +1220,21 @@
                 });
             },
         },
+        /// Произносит реплику голосом персонажа.
+        ///
+        /// Уходит всем, кто игрока видит, и по той же причине, что движение: у
+        /// остальных он показан куклой, и молчащая кукла осталась бы немой.
+        ///
+        /// Третий довод — голос. Пустой означает «своим»; названный уводит вызов
+        /// на другой натив у клиента, где голос идёт отдельным доводом.
+        playAmbientSpeech: {
+            value(speechName, speechParam, speechDictionary) {
+                return native.playSpeech(this.id, String(speechName ?? ''),
+                                         String(speechParam ?? ''),
+                                         String(speechDictionary ?? ''));
+            },
+        },
+
         /// Снимает с персонажа все задачи, включая начатое движение.
         clearTasks: {
             value() {
@@ -2211,11 +2226,6 @@
         /// машинам (`vehicle.setNetOwner`), второе не заводилось вовсе: имена
         /// уезжают всем и всегда.
         sendNames: unperformed('player.sendNames', 'имена уезжают всем и всегда'),
-
-        /// Произнести реплику голосом персонажа. Своего сообщения на это нет, а
-        /// без него распоряжение дошло бы только до того, кто его отдал.
-        playAmbientSpeech: unperformed('player.playAmbientSpeech',
-                                       'своего сообщения на речь у протокола пока нет'),
 
         setLocalMeta(key, value) {
             shared._eachMetaPair(key, value, (name, own) => {

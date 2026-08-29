@@ -358,6 +358,23 @@ public:
         return std::exchange(animations_, {});
     }
 
+    /// Реплики. Событиями и по той же причине, что движения: сказанное один раз
+    /// не повторится, а произносит его поток игры.
+    void deliverSpeeches(std::vector<shared::PlayerSpeech> speeches) {
+        if (speeches.empty()) {
+            return;
+        }
+
+        const std::lock_guard guard{mutex_};
+        speeches_.insert(speeches_.end(), std::make_move_iterator(speeches.begin()),
+                         std::make_move_iterator(speeches.end()));
+    }
+
+    [[nodiscard]] std::vector<shared::PlayerSpeech> takeSpeeches() {
+        const std::lock_guard guard{mutex_};
+        return std::exchange(speeches_, {});
+    }
+
     /// Взрывы, которые устроил сервер.
     ///
     /// Событиями, как и движения, и по той же причине: взрыв случается один раз,
@@ -826,6 +843,7 @@ private:
     std::vector<shared::BlipState> blips_;
     std::vector<shared::BlipId> removedBlips_;
     std::vector<shared::PlayerAnimation> animations_;
+    std::vector<shared::PlayerSpeech> speeches_;
     std::vector<shared::Explosion> explosions_;
     std::vector<shared::WeaponFired> shots_;
     std::vector<shared::WeaponFired> outgoingShots_;

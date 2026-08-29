@@ -1994,6 +1994,29 @@ struct PlayerAnimation {
     [[nodiscard]] static PlayerAnimation read(ByteReader& reader);
 };
 
+/// Реплика голосом персонажа. Всем, кто игрока видит.
+struct PlayerSpeech {
+    static constexpr MessageId kId = MessageId::PlayerSpeech;
+
+    PlayerId playerId = kInvalidPlayerId;
+
+    /// Имя реплики в наборе игры: `GENERIC_HI`, `CHAT_STATE`, и так далее.
+    std::string speech;
+
+    /// Настроение, с которым она говорится: `SPEECH_PARAMS_FORCE_SHOUTED` и
+    /// прочие. Пусто — обычное (`SPEECH_PARAMS_STANDARD`).
+    std::string params;
+
+    /// Чьим голосом. Пусто — голосом самого персонажа; названный голос уводит
+    /// вызов на другой натив, где он идёт отдельным доводом.
+    std::string voice;
+
+    [[nodiscard]] friend bool operator==(const PlayerSpeech&, const PlayerSpeech&) = default;
+
+    void write(ByteWriter& writer) const;
+    [[nodiscard]] static PlayerSpeech read(ByteReader& reader);
+};
+
 /// Что именно рвануло.
 ///
 /// Числа — игры, а не наши: перечисление взято из её ExplosionTypes по порядку,

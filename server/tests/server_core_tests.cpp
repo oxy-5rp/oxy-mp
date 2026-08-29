@@ -143,6 +143,12 @@ public:
                                    animation.name));
     }
 
+    void speechPlayed(const Player& player, const shared::PlayerSpeech& speech) override {
+        sent.push_back(std::format("speech {} {} {} {}", player.id, speech.speech,
+                                   speech.params.empty() ? "-" : speech.params,
+                                   speech.voice.empty() ? "-" : speech.voice));
+    }
+
     void exploded(const shared::Explosion& explosion, std::int32_t dimension) override {
         sent.push_back(std::format("boom {} at {} {} {} in {}", explosion.kind,
                                    explosion.position.x, explosion.position.y,
@@ -1328,6 +1334,30 @@ TEST_CASE("staying in the same dimension is not a move", "[server][script]") {
 
 // Движение уходит всем, кто игрока видит, а не одному хозяину: у остальных
 // персонаж показан куклой, и молчащая кукла осталась бы стоять столбом.
+TEST_CASE("a spoken line goes out to everyone who sees the player", "[server][script]") {
+    Session session;
+    Player& player = session.join(1, "игрок");
+    session.sink.sent.clear();
+
+    REQUIRE(session.core.playSpeech(player.id, "GENERIC_HI", "SPEECH_PARAMS_FORCE", "COP_01"));
+    CHECK(session.sink.sent ==
+          std::vector<std::string>{"speech 0 GENERIC_HI SPEECH_PARAMS_FORCE COP_01"});
+
+    // Без настроения и голоса — то же распоряжение с пустыми строками: пустой
+    // голос означает «своим», а не «молча», и различить их можно только так.
+    session.sink.sent.clear();
+    REQUIRE(session.core.playSpeech(player.id, "CHAT_STATE", "", ""));
+    CHECK(session.sink.sent == std::vector<std::string>{"speech 0 CHAT_STATE - -"});
+}
+
+TEST_CASE("a spoken line of a player who left goes nowhere", "[server][script]") {
+    Session session;
+    session.sink.sent.clear();
+
+    CHECK_FALSE(session.core.playSpeech(404, "GENERIC_HI", "", ""));
+    CHECK(session.sink.sent.empty());
+}
+
 TEST_CASE("an animation is told about, not just performed", "[server][script]") {
     Session session;
     Player& player = session.join(1, "игрок");

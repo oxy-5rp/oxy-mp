@@ -896,6 +896,19 @@ public:
     /// false — игрока уже нет.
     virtual bool playAnimation(shared::PlayerId id, const AnimationInfo& animation) = 0;
 
+    /// Произносит реплику голосом персонажа.
+    ///
+    /// Речь у игры принадлежит персонажу, а не заказавшему её: сказать «этот
+    /// человек говорит вот это» может только тот, у кого он стоит рядом.
+    /// Поэтому распоряжение уходит всем, кто игрока видит.
+    ///
+    /// `voice` пусто — говорит своим голосом. Названный уводит вызов на другой
+    /// натив у клиента, где голос идёт отдельным доводом.
+    ///
+    /// false — игрока уже нет.
+    virtual bool playSpeech(shared::PlayerId id, const std::string& speech,
+                            const std::string& params, const std::string& voice) = 0;
+
     /// Снимает с персонажа все задачи, включая начатое движение.
     virtual bool clearTasks(shared::PlayerId id) = 0;
 
