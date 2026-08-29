@@ -152,6 +152,12 @@
             return ScriptResource.all.find((each) => each.name === String(name)) ?? null;
         }
 
+        /// То же самое под именем alt:V. Оба имени живые: `get` пришло из RAGE
+        /// MP, а режимы под alt:V зовут `getByName`.
+        static getByName(name) {
+            return ScriptResource.get(name);
+        }
+
         static exists(name) {
             return ScriptResource.get(name) !== null;
         }
@@ -2425,6 +2431,16 @@
     }
 
     Object.defineProperties(WorldObject.prototype, {
+        /// Дальность показа, наложение на землю и вариант текстуры. Всё это
+        /// делает игра у того, кто предмет видит; у нас предмет заводится
+        /// сервером и рассылается положением, а этих трёх чисел в рассылке нет.
+        lodDistance: { get: absent('object.lodDistance') },
+        textureVariation: { get: absent('object.textureVariation') },
+        placeOnGroundProperly: {
+            value: unperformed('object.placeOnGroundProperly',
+                               'наложить предмет на землю может только тот, кто его видит'),
+        },
+
         /// Где предмет стоит и как повёрнут.
         ///
         /// Присваивание переставляет его по-настоящему и сразу у всех: ведущего

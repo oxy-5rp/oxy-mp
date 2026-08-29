@@ -598,6 +598,36 @@
         get shrinked() { return this.#flag(kBlipFlag.Shrinked); }
         set shrinked(value) { this.#flag(kBlipFlag.Shrinked, Boolean(value)); }
 
+        /// Три указателя, которых у игры нативами нет вовсе: alt:V правит их в
+        /// своей записи метки. Отказ вслух, а не тишина — метка, принявшая
+        /// признак и не изменившаяся, выглядит исправной.
+        get crewIndicatorVisible() {
+            throw new Error('blip.crewIndicatorVisible: натива у игры нет, alt:V правит '
+                            + 'это в своей записи метки');
+        }
+
+        set crewIndicatorVisible(_value) {
+            warnOnce('blip.crewIndicatorVisible', 'натива у игры нет');
+        }
+
+        get friendIndicatorVisible() {
+            throw new Error('blip.friendIndicatorVisible: натива у игры нет, alt:V правит '
+                            + 'это в своей записи метки');
+        }
+
+        set friendIndicatorVisible(_value) {
+            warnOnce('blip.friendIndicatorVisible', 'натива у игры нет');
+        }
+
+        get outlineIndicatorVisible() {
+            throw new Error('blip.outlineIndicatorVisible: натива у игры нет, alt:V правит '
+                            + 'это в своей записи метки');
+        }
+
+        set outlineIndicatorVisible(_value) {
+            warnOnce('blip.outlineIndicatorVisible', 'натива у игры нет');
+        }
+
         get tickVisible() { return this.#flag(kBlipFlag.Tick); }
         set tickVisible(value) { this.#flag(kBlipFlag.Tick, Boolean(value)); }
 
@@ -915,6 +945,16 @@
     /// oxyMP пока не передаёт вовсе.
     class VoiceChannel extends BaseObject {
         #members = new Set();
+
+        /// Голосовой связи в oxyMP нет вовсе, и канал существует только как
+        /// запись: сказать, кто в нём и сколько их, ему нечем.
+        get playerCount() {
+            throw new Error('voiceChannel.playerCount: голосовой связи в oxyMP нет');
+        }
+
+        isPlayerInChannel() {
+            throw new Error('voiceChannel.isPlayerInChannel: голосовой связи в oxyMP нет');
+        }
 
         constructor(spatial, maxDistance) {
             super('voiceChannel');
