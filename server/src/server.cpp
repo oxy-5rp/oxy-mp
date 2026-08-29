@@ -2537,6 +2537,23 @@ void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerS
 
     const auto tell = [&](script::EventKind kind, shared::VehicleId vehicle, std::int8_t seat,
                           std::int8_t seatWas) {
+        // Машина, которой у нас нет, событием не объявляется вовсе.
+        //
+        // Номер её приходит из снимка клиента, а снимок — это то, что человек о
+        // себе рассказал, а не то, что у нас записано. Разойтись они могут
+        // законно: игрок переподключился, сидя в машине прошлой сессии, — у него
+        // она есть, у нового реестра её нет.
+        //
+        // Прежде такое событие уходило с пустой машиной, и режим падал на
+        // `vehicle.id`: у alt:V машина в этих событиях есть всегда, и проверять
+        // её там незачем. Нашёл это живой чужой режим на первом же входе — сразу
+        // четыре обработчика, и ни один не был написан неправильно.
+        if (vehicle == shared::kInvalidVehicleId || vehicles_.find(vehicle) == nullptr) {
+            spdlog::debug("событие о машине {} не объявлено: такой машины у сервера нет",
+                          vehicle);
+            return;
+        }
+
         script::Event event;
         event.kind = kind;
         event.player = script::Player{core_, player.id};
