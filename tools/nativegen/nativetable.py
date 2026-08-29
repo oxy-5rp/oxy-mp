@@ -166,6 +166,152 @@ ALT_ALIASES = {
 }
 
 
+# Доводы, которых недостаёт в открытой базе имён.
+#
+# База CitizenFX местами отстала от игры, и отстала молча: у `TASK_JUMP` в ней
+# два довода, а в её же описании к нему написано «Definition is wrong. This has
+# 4 parameters». Таких нативов сто двадцать шесть.
+#
+# Наружу это выходит так: натив объявлен принимающим меньше, чем принимает, и
+# лишние доводы отбрасываются на границе — **молча**. Режим, передавший их, не
+# получает ни ошибки, ни строки в журнале; натив просто делает не то. Место в
+# ячейке при этом обнуляется, так что игра читает там ноль, — вот почему это
+# годами не всплывало.
+#
+# Перечень собран сверкой с объявлениями alt:V (`@altv/types-natives`) и
+# проверяется ею же: `tools/altvparity/native_arity.py`. Вид довода взят оттуда
+# же; там, где alt:V говорит просто «число», он выбран по имени довода —
+# `blendOutOverride` дробный, `warpTimerMS` целый.
+EXTRA_ARGUMENTS = {
+    "_activateRockstarEditor": "i",  # p0: number
+    "_getPosixTime": "LLLLLL",  # year?: number | null, month?: number | null, day?: number | null, hour?: number | null, minute?: number | null, second?: number | null
+    "_networkCheckDataManagerForHandle": "a",  # gamerHandle?: any | null
+    "_networkSpentRequestHeist": "a",  # p3: any
+    "_taskStopPhoneGestureAnimation": "f",  # blendOutOverride: number
+    "addExplosion": "b",  # noDamage: boolean
+    "addScenarioBlockingArea": "a",  # p10: any
+    "addStuntJump": "i",  # p17: number
+    "addStuntJumpAngled": "i",  # p19: number
+    "applyDamageToPed": "ai",  # p3: any, weaponType: number
+    "attachEntityToEntity": "a",  # p15: any
+    "clearAllPedProps": "a",  # p1: any
+    "clearAngledAreaOfVehicles": "aa",  # p12: any, p13: any
+    "clearAreaOfVehicles": "ba",  # p9: boolean, p10: any
+    "clearPedProp": "a",  # p2: any
+    "createIncident": "aa",  # p7: any, p8: any
+    "createIncidentWithEntity": "aa",  # p5: any, p6: any
+    "createMissionTrain": "aa",  # p5: any, p6: any
+    "createVehicle": "b",  # p7: boolean
+    "createWeaponObject": "aa",  # p8: any, p9: any
+    "datafileCreate": "i",  # p0: number
+    "datafileDelete": "i",  # p0: number
+    "datafileGetFileDict": "i",  # p0: number
+    "drawRect": "b",  # p8: boolean
+    "drawSprite": "ba",  # p11: boolean, p12: any
+    "enableSpecialAbility": "a",  # p2: any
+    "endTextCommandDisplayText": "i",  # p2: number
+    "getCurrentPedWeaponEntityIndex": "a",  # p1: any
+    "getGroundZFor3dCoord": "b",  # p5: boolean
+    "getNumReservedMissionObjects": "a",  # p1: any
+    "getNumReservedMissionPeds": "a",  # p1: any
+    "getNumReservedMissionVehicles": "a",  # p1: any
+    "getPedInVehicleSeat": "b",  # p2: boolean
+    "getPedPropIndex": "a",  # p2: any
+    "getVehicleNumberOfPassengers": "bb",  # includeDriver: boolean, includeDeadOccupants: boolean
+    "hasObjectBeenBroken": "a",  # p1: any
+    "hintAmbientAudioBank": "a",  # p2: any
+    "hintScriptAudioBank": "a",  # p2: any
+    "isEntityDead": "b",  # p1: boolean
+    "isSpecialAbilityActive": "a",  # p1: any
+    "isSpecialAbilityEnabled": "a",  # p1: any
+    "isSpecialAbilityMeterFull": "a",  # p1: any
+    "isVehicleSeatFree": "b",  # isTaskRunning: boolean
+    "networkBail": "iii",  # p0: number, p1: number, p2: number
+    "networkBailTransition": "iii",  # p0: number, p1: number, p2: number
+    "networkBuyAirstrike": "a",  # p3: any
+    "networkBuyBounty": "a",  # p4: any
+    "networkBuyFairgroundRide": "a",  # p4: any
+    "networkBuyHeliStrike": "a",  # p3: any
+    "networkCanSpendMoney": "a",  # p5: any
+    "networkCreateSynchronisedScene": "fi",  # animTime: number, p11: number
+    "networkDoTransitionQuickmatch": "aa",  # p4: any, p5: any
+    "networkDoTransitionQuickmatchAsync": "aa",  # p4: any, p5: any
+    "networkDoTransitionQuickmatchWithGroup": "aa",  # p6: any, p7: any
+    "networkFadeInEntity": "a",  # p2: any
+    "networkHostTransition": "biai",  # p6: boolean, p7: number, p8: any, p9: number
+    "networkRegisterHostBroadcastVariables": "s",  # debugName: string | null
+    "networkRegisterPlayerBroadcastVariables": "s",  # debugName: string | null
+    "networkResurrectLocalPlayer": "bii",  # p6: boolean, p7: number, p8: number
+    "networkSpentAmmoDrop": "a",  # p3: any
+    "networkSpentBoatPickup": "a",  # p3: any
+    "networkSpentBullShark": "a",  # p3: any
+    "networkSpentBuyOfftheradar": "a",  # p3: any
+    "networkSpentBuyPassiveMode": "a",  # p3: any
+    "networkSpentBuyRevealPlayers": "a",  # p3: any
+    "networkSpentBuyWantedlevel": "a",  # p4: any
+    "networkSpentHeliPickup": "a",  # p3: any
+    "networkSpentHireMercenary": "a",  # p3: any
+    "networkSpentHireMugger": "a",  # p3: any
+    "networkSpentNoCops": "a",  # p3: any
+    "networkSpentRequestJob": "a",  # p3: any
+    "networkSpentRobbedByMugger": "a",  # p3: any
+    "networkSpentTaxi": "aa",  # p3: any, p4: any
+    "playPain": "a",  # p3: any
+    "removeDoorFromSystem": "a",  # p1: any
+    "renderScriptCams": "a",  # p5: any
+    "requestAmbientAudioBank": "a",  # p2: any
+    "requestMissionAudioBank": "a",  # p2: any
+    "requestScriptAudioBank": "a",  # p2: any
+    "setBlipShowCone": "i",  # hudColorIndex: number
+    "setEmitterRadioStation": "a",  # p2: any
+    "setEntityHealth": "ii",  # instigator: Entity | number, weaponType: number
+    "setEntityLoadCollisionFlag": "a",  # p2: any
+    "setMountedWeaponTarget": "ib",  # taskMode: number, ignoreTargetVehDeadCheck: boolean
+    "setMpGamerTagVisibility": "a",  # p3: any
+    "setNetworkVehicleRespotTimer": "aa",  # p2: any, p3: any
+    "setObjectTargettable": "a",  # p2: any
+    "setPedAmmo": "b",  # p3: boolean
+    "setPedHelmetPropIndex": "b",  # p2: boolean
+    "setPedPathsBackToOriginal": "a",  # p6: any
+    "setPedPathsInArea": "a",  # p7: any
+    "setPedPropIndex": "a",  # p5: any
+    "setPlayerMeleeWeaponDamageModifier": "b",  # p2: boolean
+    "setRoadsBackToOriginal": "a",  # p6: any
+    "setRoadsBackToOriginalInAngledArea": "a",  # p7: any
+    "setVehicleExclusiveDriver": "i",  # index: number
+    "setVehicleOnGroundProperly": "i",  # p1: number
+    "setWarningMessage": "i",  # errorCode: number
+    "setWarningMessageWithHeader": "a",  # p9: any
+    "simulatePlayerInputGait": "a",  # p6: any
+    "specialAbilityChargeAbsolute": "a",  # p3: any
+    "specialAbilityChargeContinuous": "a",  # p2: any
+    "specialAbilityChargeLarge": "a",  # p3: any
+    "specialAbilityChargeMedium": "a",  # p3: any
+    "specialAbilityChargeNormalized": "a",  # p3: any
+    "specialAbilityChargeSmall": "a",  # p3: any
+    "specialAbilityDeactivate": "a",  # p1: any
+    "specialAbilityDeactivateFast": "a",  # p1: any
+    "specialAbilityDepleteMeter": "a",  # p2: any
+    "specialAbilityFillMeter": "a",  # p2: any
+    "specialAbilityLock": "a",  # p1: any
+    "specialAbilityReset": "a",  # p1: any
+    "specialAbilityUnlock": "a",  # p1: any
+    "statSave": "b",  # p3: boolean
+    "stopCutsceneCamShaking": "a",  # p0: any
+    "taskEnterVehicle": "a",  # p7: any
+    "taskGoToCoordAnyMeansExtraParams": "i",  # warpTimerMS: number
+    "taskGoToCoordAnyMeansExtraParamsWithCruiseSpeed": "f",  # targetArriveDist: number
+    "taskJump": "bb",  # doSuperJump: boolean, useFullSuperJumpForce: boolean
+    "taskParachute": "b",  # instant: boolean
+    "taskPlaneMission": "b",  # precise: boolean
+    "taskShuffleToNextVehicleSeat": "b",  # useAlternateShuffle: boolean
+    "taskSkyDive": "b",  # instant: boolean
+    "taskThrowProjectile": "ib",  # ignoreCollisionEntityIndex: number, createInvincibleProjectile: boolean
+    "taskUseMobilePhone": "i",  # desiredPhoneMode: number
+    "taskWrithe": "bi",  # forceShootOnGround: boolean, shootFromGroundTimer: number
+}
+
+
 def resolve_alias(name: str, aliases: dict[str, str]) -> str:
     """Разворачивает псевдоним типа до его основы.
 
@@ -370,8 +516,13 @@ def main() -> int:
             skipped_types += 1
             continue
 
-        signature = f"{build:X}|{''.join(letters)}:{result}"
         name = camel_case(native)
+
+        # Недостающие доводы дописываются здесь, а не правятся в готовой
+        # таблице: правка в таблице пропала бы при первой же пересборке.
+        letters.append(EXTRA_ARGUMENTS.get(name, EXTRA_ARGUMENTS.get(name.lstrip('_'), '')))
+
+        signature = f"{build:X}|{''.join(letters)}:{result}"
 
         entries[name] = signature
 
