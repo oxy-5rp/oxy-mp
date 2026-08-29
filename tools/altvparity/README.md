@@ -67,8 +67,7 @@ python tools\altvparity\binding_arity.py "$T\types-client\index.d.ts" "client-js
 ## `native_arity.py` — сколько доводов у натива
 
 ```powershell
-python toolsltvparity
-ative_arity.py "$T	ypes-natives\index.d.ts"
+python tools\altvparity\native_arity.py "$T\types-natives\index.d.ts"
 ```
 
 Сверяет раскладку доводов в `client-js/js/alt_natives_table.js` с объявлениями
