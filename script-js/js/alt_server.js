@@ -1969,6 +1969,70 @@
     /// сущности: так объявлено у alt:V, и своей сущности у него для этого нет —
     /// метаданные эти принадлежат не телу, а тому, кто за ним сидит.
     Object.assign(Player.prototype, {
+        /// Патроны по роду боеприпаса, а не по стволу.
+        ///
+        /// У игры и у alt:V патроны общие для всех стволов одного рода: у двух
+        /// пистолетов обойма одна на двоих. У нас же снаряжение хранится по
+        /// стволам, и род боеприпаса приходится доставать из справочника
+        /// (`getWeaponModelInfoByHash`) — оттуда же, откуда его берёт и сама
+        /// игра.
+        ///
+        /// Отсюда и то, чего этот ответ не умеет: разойдись у двух стволов
+        /// одного рода счёт патронов, отвечен будет первый. В игре так не
+        /// бывает, а у нас может — если режим положил патроны каждому стволу
+        /// отдельно.
+        getAmmo(ammoHash) {
+            const род = Number(ammoHash) >>> 0;
+
+            for (const слот of this.weapons) {
+                const сведения = alt.getWeaponModelInfoByHash(слот.hash);
+
+                if (сведения !== null && сведения.ammoTypeHash === род) {
+                    return слот.ammo;
+                }
+            }
+
+            return 0;
+        },
+
+        /// Кладёт патроны всем стволам этого рода разом — так же, как это видит
+        /// игра.
+        setAmmo(ammoHash, amount) {
+            const род = Number(ammoHash) >>> 0;
+            const сколько = Number(amount) || 0;
+            let положено = false;
+
+            for (const слот of this.weapons) {
+                const сведения = alt.getWeaponModelInfoByHash(слот.hash);
+
+                if (сведения !== null && сведения.ammoTypeHash === род) {
+                    this.setWeaponAmmo(слот.hash, сколько);
+                    положено = true;
+                }
+            }
+
+            return положено;
+        },
+
+        /// Пределы, особый род боеприпаса и его признаки. Всё это alt:V держит у
+        /// себя и рассылает клиентам; у нас такой синхронизации нет вовсе, и
+        /// молчаливое согласие означало бы обещание, которого мы не сдержим.
+        getAmmoMax: absent('player.getAmmoMax'),
+        setAmmoMax: unperformed('player.setAmmoMax',
+                                'предел патронов по роду боеприпаса по сети не едет'),
+        getAmmoMax50: absent('player.getAmmoMax50'),
+        setAmmoMax50: unperformed('player.setAmmoMax50',
+                                  'предел патронов по роду боеприпаса по сети не едет'),
+        getAmmoMax100: absent('player.getAmmoMax100'),
+        setAmmoMax100: unperformed('player.setAmmoMax100',
+                                   'предел патронов по роду боеприпаса по сети не едет'),
+        getAmmoSpecialType: absent('player.getAmmoSpecialType'),
+        setAmmoSpecialType: unperformed('player.setAmmoSpecialType',
+                                        'особый род боеприпаса по сети не едет'),
+        getAmmoFlags: absent('player.getAmmoFlags'),
+        setAmmoFlags: unperformed('player.setAmmoFlags',
+                                  'признаки боеприпаса по сети не едут'),
+
         setLocalMeta(key, value) {
             shared._eachMetaPair(key, value, (name, own) => {
                 const store = localFor(this.id);
