@@ -382,11 +382,33 @@
             return LocalStorage.#only;
         }
 
+        /// Все семь имён есть и на классе, и на экземпляре, и это не излишество.
+        ///
+        /// У alt:V они объявлены **статическими**: `LocalStorage.set(ключ,
+        /// значение)` — обычная запись у режима под alt:V. У нас статическим был
+        /// один `get`, и всё остальное падало с «is not a function»; нашёл это
+        /// живой чужой режим на первой же строке своей настройки.
+        ///
+        /// Экземплярные остаются потому, что `LocalStorage.get()` без доводов
+        /// отдаёт само хранилище, и режим вправе звать методы у него.
+        ///
+        /// Сверки этого не видели: по именам всё на месте, а что они на
+        /// экземпляре, а не на классе, — вопрос, которого сверка не задаёт.
+        static has(key) { return LocalStorage.instance.has(key); }
+        static set(key, value) { LocalStorage.instance.set(key, value); }
+        static delete(key) { LocalStorage.instance.delete(key); }
+        static deleteAll() { LocalStorage.instance.deleteAll(); }
+        static clear() { LocalStorage.instance.deleteAll(); }
+        static save() { LocalStorage.instance.save(); }
+
         get(key) { return this.#values.get(String(key)); }
         has(key) { return this.#values.has(String(key)); }
         set(key, value) { this.#values.set(String(key), value); }
         delete(key) { this.#values.delete(String(key)); }
         deleteAll() { this.#values.clear(); }
+
+        /// То же самое под именем alt:V: у него `clear` — псевдоним `deleteAll`.
+        clear() { this.#values.clear(); }
 
         save() {
             try {
