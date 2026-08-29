@@ -3256,6 +3256,34 @@ void setWeather(const v8::FunctionCallbackInfo<v8::Value>& info) {
 /// Пароля здесь нет и не будет — только признак того, что он есть. Режим,
 /// положивший его в свой журнал или отправивший в своё окно, раздал бы его
 /// игрокам, а спрашивать пароль у сервера ему незачем: проверяет его сервер.
+/// Что этому игроку сейчас раздаётся.
+///
+/// Списком пар «род, номер», а не готовыми сущностями: оборачивать их здесь
+/// значило бы заводить объект на каждую, а раздаётся их сотни. Обёртки и
+/// расстояние доделывает слой — там же, где живут сами классы.
+void playerStreamed(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+    const v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+
+    if (!id) {
+        return;
+    }
+
+    const auto found = resourceOf(isolate).core().streamedTo(*id);
+    const v8::Local<v8::Array> list = v8::Array::New(isolate, static_cast<int>(found.size()) * 2);
+
+    for (std::size_t at = 0; at < found.size(); ++at) {
+        (void)list->Set(context, static_cast<std::uint32_t>(at * 2),
+                        v8::Integer::New(isolate, static_cast<std::int32_t>(found[at].first)));
+        (void)list->Set(context, static_cast<std::uint32_t>(at * 2 + 1),
+                        v8::Integer::New(isolate, static_cast<std::int32_t>(found[at].second)));
+    }
+
+    info.GetReturnValue().Set(list);
+}
+
 void serverConfig(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
     const v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -3630,6 +3658,10 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     // вторым действием.
     addGetter(isolate, shape, "weapons", playerWeapons);
     addMethod(isolate, shape, "hasWeapon", playerHasWeapon);
+    // Имя со звёздочкой на конце нарочно: свойство `streamedEntities`
+    // объявляет слой, и он же зовёт это. Одно имя на оба означало бы, что
+    // слой перекрывает ядро и зовёт сам себя.
+    addMethod(isolate, shape, "streamedEntitiesRaw", playerStreamed);
     addMethod(isolate, shape, "getWeaponAmmo", playerWeaponAmmo);
     addMethod(isolate, shape, "removeWeapon", playerRemoveWeapon);
     addMethod(isolate, shape, "removeAllWeapons", playerClearWeapons);

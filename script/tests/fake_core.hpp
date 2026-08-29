@@ -352,6 +352,15 @@ public:
         return modsPerSlot;
     }
 
+    /// Что подставное ядро считает розданным. Правится проверкой напрямую.
+    std::vector<std::pair<shared::EntityKind, std::uint32_t>> streamed;
+
+    [[nodiscard]] std::vector<std::pair<shared::EntityKind, std::uint32_t>> streamedTo(
+        shared::PlayerId id) const override {
+        return player(id) ? streamed
+                          : std::vector<std::pair<shared::EntityKind, std::uint32_t>>{};
+    }
+
     bool askResource(std::string_view name, ResourceAction action) override {
         if (!catalogued.empty()
             && std::ranges::find(catalogued, name) == catalogued.end()) {

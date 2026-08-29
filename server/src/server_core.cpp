@@ -1262,6 +1262,34 @@ script::ServerConfigInfo ServerCore::config() const {
     };
 }
 
+std::vector<std::pair<shared::EntityKind, std::uint32_t>> ServerCore::streamedTo(
+    shared::PlayerId id) const {
+    std::vector<std::pair<shared::EntityKind, std::uint32_t>> found;
+
+    const Player* const player = players_->findById(id);
+
+    if (player == nullptr) {
+        return found;
+    }
+
+    found.reserve(player->streamed.size() + player->streamedObjects.size() +
+                  player->streamedPeds.size());
+
+    for (const shared::VehicleId vehicle : player->streamed) {
+        found.emplace_back(shared::EntityKind::Vehicle, vehicle);
+    }
+
+    for (const shared::ObjectId object : player->streamedObjects) {
+        found.emplace_back(shared::EntityKind::Object, object);
+    }
+
+    for (const shared::PedId ped : player->streamedPeds) {
+        found.emplace_back(shared::EntityKind::Ped, ped);
+    }
+
+    return found;
+}
+
 bool ServerCore::askResource(std::string_view name, script::ResourceAction action) {
     return sink_->resourceAsked(name, action);
 }

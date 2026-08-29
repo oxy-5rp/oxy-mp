@@ -273,6 +273,9 @@ public:
 
     [[nodiscard]] script::ServerConfigInfo config() const override;
 
+    [[nodiscard]] std::vector<std::pair<shared::EntityKind, std::uint32_t>> streamedTo(
+        shared::PlayerId id) const override;
+
     bool askResource(std::string_view name, script::ResourceAction action) override;
 
     [[nodiscard]] bool knowsModels() const override;
