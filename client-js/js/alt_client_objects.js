@@ -21,6 +21,23 @@
         };
     }
 
+    /// Жалоба, сказанная один раз.
+    ///
+    /// Распоряжение, которого мы исполнить не умеем, обязано сказать об этом
+    /// вслух и вернуться, а не бросить: оно стоит посреди чужого обработчика, и
+    /// брошенное отсюда исключение унесло бы всё, что шло следом. Один раз, а не
+    /// на каждый вызов: признаки метки правят из кадра.
+    const warned = new Set();
+
+    function warnOnce(what, why) {
+        if (warned.has(what)) {
+            return;
+        }
+
+        warned.add(what);
+        alt.client.logWarning(`${what}: ${why}`);
+    }
+
     /// Всё, что заведено скриптом и живёт до destroy().
     class BaseObject {
         #alive = true;
@@ -77,6 +94,7 @@
         #sprite = 1;
         #color = 0;
         #alpha = 255;
+        #flashesAlternate = false;
         #scale = 1;
         #name = '';
         #shortRange = false;
@@ -140,6 +158,59 @@
         set alpha(value) {
             this.#alpha = Number(value) || 0;
             natives.setBlipAlpha(this.#handle, this.#alpha);
+        }
+
+        /// Чем игра считает эту метку: точкой, областью, сущностью.
+        ///
+        /// Спрашивается у игры, а не помнится: метку заводят три разных натива,
+        /// и род её — их следствие, а не наше решение.
+        get blipType() {
+            return natives.getBlipInfoIdType(this.#handle);
+        }
+
+        /// Прицеплена ли она к сущности. Игра отвечает её дескриптором, ноль —
+        /// «ни к чему».
+        get isAttached() {
+            return natives.getBlipInfoIdEntityIndex(this.#handle) !== 0;
+        }
+
+        get flashesAlternate() { return this.#flashesAlternate; }
+
+        /// Мигание вперемежку с соседней меткой. Игре задаётся, а обратно не
+        /// спрашивается — потому и помнится здесь.
+        set flashesAlternate(value) {
+            this.#flashesAlternate = Boolean(value);
+            natives.setBlipFlashesAlternate(this.#handle, this.#flashesAlternate);
+        }
+
+        /// Три признака, которых у игры нет нативами вовсе: alt:V правит их
+        /// прямо в своей записи метки. Отказ вслух, а не тишина — метка,
+        /// принявшая признак и не изменившаяся, выглядит исправной.
+        get isMinimalOnEdge() {
+            throw new Error('blip.isMinimalOnEdge: натива у игры нет, alt:V правит это '
+                            + 'в своей записи метки');
+        }
+
+        set isMinimalOnEdge(_value) {
+            warnOnce('blip.isMinimalOnEdge', 'натива у игры нет');
+        }
+
+        get isShortHeightThreshold() {
+            throw new Error('blip.isShortHeightThreshold: натива у игры нет, alt:V правит '
+                            + 'это в своей записи метки');
+        }
+
+        set isShortHeightThreshold(_value) {
+            warnOnce('blip.isShortHeightThreshold', 'натива у игры нет');
+        }
+
+        get useHeightIndicatorOnEdge() {
+            throw new Error('blip.useHeightIndicatorOnEdge: натива у игры нет, alt:V правит '
+                            + 'это в своей записи метки');
+        }
+
+        set useHeightIndicatorOnEdge(_value) {
+            warnOnce('blip.useHeightIndicatorOnEdge', 'натива у игры нет');
         }
 
         get scale() { return this.#scale; }
