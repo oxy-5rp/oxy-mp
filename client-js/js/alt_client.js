@@ -1277,8 +1277,25 @@
         VirtualEntity: absent('alt.VirtualEntity'),
         Voice: absent('alt.Voice'),
         Audio: absent('alt.Audio'),
+        AudioCategory: absent('alt.AudioCategory'),
+        AudioFilter: absent('alt.AudioFilter'),
+        AudioOutput: absent('alt.AudioOutput'),
         RmlDocument: absent('alt.RmlDocument'),
+        RmlElement: absent('alt.RmlElement'),
         Discord: absent('alt.Discord'),
+
+        // Три подсистемы, которых нет не по недосмотру: alt:V читает их прямо из
+        // памяти игры — управляемость машины, разметку помещений, числа оружия,
+        // — а смещения там свои у каждой сборки. Пока чтения нет, честнее
+        // отказать по имени, чем оставить `undefined`: тогда ресурс падает с
+        // «Cannot read properties of undefined», и виноватым выглядит он сам.
+        HandlingData: absent('alt.HandlingData'),
+        WeaponData: absent('alt.WeaponData'),
+        Interior: absent('alt.Interior'),
+        InteriorPortal: absent('alt.InteriorPortal'),
+        InteriorRoom: absent('alt.InteriorRoom'),
+        MapZoomData: absent('alt.MapZoomData'),
+        Profiler: absent('alt.Profiler'),
         // Распоряжения, которых мы не умеем исполнить: говорят один раз и не
         // бросают. Стоят они посреди чужих обработчиков, и брошенное отсюда
         // исключение унесло бы с собой всё, что идёт следом.
