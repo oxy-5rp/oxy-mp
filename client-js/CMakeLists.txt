@@ -57,6 +57,8 @@ oxymp_embed_text(oxymp_client_js ../script-js/js/alt_shared.js
                  altShared oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_natives_table.js
                  altNativesTable oxymp::client::js::embedded)
+oxymp_embed_text(oxymp_client_js js/alt_natives_absent.js
+                 altNativesAbsent oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_natives.js
                  altNatives oxymp::client::js::embedded)
 oxymp_embed_text(oxymp_client_js js/alt_client_entities.js
