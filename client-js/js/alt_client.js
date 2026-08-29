@@ -1103,7 +1103,19 @@
         getConfigFlag: extras.getConfigFlag,
         LocalObject: extras.LocalObject,
         LocalStorage: extras.LocalStorage,
-        Utils: extras.Utils,
+        /// Помощники alt:V. Две рисовалки текста добавляются здесь: им нужен
+        /// `everyTick`, а он живёт в этом файле, не в `alt_client_extras.js`.
+        Utils: Object.assign(extras.Utils, {
+            drawText2d(text, pos2d, font, scale, color, outline, dropShadow, textAlign) {
+                return everyTick(() => extras.Utils.drawText2dThisFrame(
+                    text, pos2d, font, scale, color, outline, dropShadow, textAlign));
+            },
+
+            drawText3d(text, pos3d, font, scale, color, outline, dropShadow, textAlign) {
+                return everyTick(() => extras.Utils.drawText3dThisFrame(
+                    text, pos3d, font, scale, color, outline, dropShadow, textAlign));
+            },
+        }),
 
         /// Метаданные сессии, присланные сервером.
         getSyncedMeta: (key) => syncedFor('global', 0).get(key),

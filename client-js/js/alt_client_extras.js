@@ -14,6 +14,22 @@
 
 (function build(alt) {
     const shared = alt.shared;
+
+    /// Жалоба, сказанная один раз.
+    ///
+    /// Один раз, а не на каждый вызов: рисование текста зовут из кадра, и
+    /// тридцать строк в секунду завалили бы журнал так, что в нём не осталось
+    /// бы ничего другого.
+    const warned = new Set();
+
+    function warnOnce(what, why) {
+        if (warned.has(what)) {
+            return;
+        }
+
+        warned.add(what);
+        alt.client.logWarning(`${what}: ${why}`);
+    }
     const natives = alt.natives;
     const entities = alt.entities;
 
@@ -441,6 +457,117 @@
             await Utils.waitFor(() => natives.hasModelLoaded(хеш) === true, timeout);
             return хеш;
         },
+
+        /// Заказ набора движений и его родни.
+        ///
+        /// Три почти одинаковых, и написаны они порознь нарочно: у игры это три
+        /// разных натива с тремя разными вопросами о готовности, и свести их в
+        /// один значило бы завести таблицу «имя — пара нативов», в которой
+        /// перепутать пару легче, чем написать три строки.
+        async requestAnimDict(dict, timeout = 5000) {
+            const имя = String(dict);
+
+            if (natives.hasAnimDictLoaded(имя) === true) {
+                return;
+            }
+
+            natives.requestAnimDict(имя);
+            await Utils.waitFor(() => natives.hasAnimDictLoaded(имя) === true, timeout);
+        },
+
+        async requestAnimSet(set, timeout = 5000) {
+            const имя = String(set);
+
+            if (natives.hasAnimSetLoaded(имя) === true) {
+                return;
+            }
+
+            natives.requestAnimSet(имя);
+            await Utils.waitFor(() => natives.hasAnimSetLoaded(имя) === true, timeout);
+        },
+
+        async requestClipSet(set, timeout = 5000) {
+            const имя = String(set);
+
+            if (natives.hasClipSetLoaded(имя) === true) {
+                return;
+            }
+
+            natives.requestClipSet(имя);
+            await Utils.waitFor(() => natives.hasClipSetLoaded(имя) === true, timeout);
+        },
+
+        async requestCutscene(name, flags = 0, timeout = 5000) {
+            if (natives.hasCutsceneLoaded() === true) {
+                return;
+            }
+
+            natives.requestCutscene(String(name), Number(flags) || 0);
+            await Utils.waitFor(() => natives.hasCutsceneLoaded() === true, timeout);
+        },
+
+        /// Надпись на экране в этом кадре.
+        ///
+        /// **Игра её не нарисует, и молчать об этом нельзя.** Текст рисует
+        /// тройка нативов, и состояние между ними игра держит у своего
+        /// скриптового потока; наш кадр идёт вне его. Подробности и полный
+        /// перечень отсеянных догадок — в `CLAUDE.md`; чинится своим потоком,
+        /// поднятым из `game::ScriptStartup`.
+        ///
+        /// Написано целиком и правильно: появится поток — заработает без единой
+        /// правки здесь.
+        drawText2dThisFrame(text, pos2d, font, scale, color, outline, dropShadow, textAlign) {
+            warnOnce('alt.Utils.drawText',
+                     'игра не рисует текст из нашего кадра: текстовым командам нужен '
+                     + 'её скриптовый поток');
+
+            const точка = pos2d ?? { x: 0.5, y: 0.5 };
+            const цвет = color ?? shared.RGBA.white;
+
+            natives.setTextFont(Number(font) || 0);
+
+            const размер = Number(scale) || 0.5;
+            natives.setTextScale(размер, размер);
+            natives.setTextColour(цвет.r, цвет.g, цвет.b, цвет.a);
+
+            if (outline === true) {
+                natives.setTextOutline();
+            }
+
+            if (dropShadow === true) {
+                natives.setTextDropShadow();
+            }
+
+            // Выравнивание alt:V переводится в нумерацию игры: у неё ноль это
+            // «влево», единица «по центру», двойка «вправо», а у alt:V
+            // Center = 0, Left = 1, Rigth = 2. Числа законны у обоих, и
+            // перепутанные они молчат.
+            const кудаИгре = [1, 0, 2][Number(textAlign) || 0] ?? 0;
+
+            natives.setTextJustification(кудаИгре);
+            natives.setTextCentre(кудаИгре === 1);
+
+            natives.beginTextCommandDisplayText('STRING');
+            natives.addTextComponentSubstringPlayerName(String(text));
+            natives.endTextCommandDisplayText(Number(точка.x) || 0, Number(точка.y) || 0, 0);
+        },
+
+        /// То же, но в точке мира.
+        drawText3dThisFrame(text, pos3d, font, scale, color, outline, dropShadow, textAlign) {
+            const точка = new shared.Vector3(pos3d);
+
+            // Начало координат отрисовки переносится в мир, и текст рисуется от
+            // него; снимать его обязательно — не снятое уносит с собой всё
+            // остальное, что игра рисует в этом кадре.
+            natives.setDrawOrigin(точка.x, точка.y, точка.z, 0);
+            Utils.drawText2dThisFrame(text, { x: 0, y: 0 }, font, scale, color, outline,
+                                      dropShadow, textAlign);
+            natives.clearDrawOrigin();
+        },
+
+        // `drawText2d` и `drawText3d` — те же, но каждым кадром — живут не
+        // здесь, а в `alt_client.js`: им нужен `everyTick`, а он собирается там
+        // же, где и сам модуль, то есть позже этого файла.
     };
 
     alt.extras = {
