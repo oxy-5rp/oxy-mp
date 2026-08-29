@@ -527,6 +527,14 @@
             this.faceCamera = false;
             this.rotate = false;
 
+            /// Текстура маркера. У alt:V это пара «набор и имя»; пусто —
+            /// маркер сплошной, как и было.
+            this.textureDict = undefined;
+            this.textureName = undefined;
+
+            /// Рисовать ли поверх сущностей, а не только по земле.
+            this.drawOnEnts = false;
+
             // Ноль означает «рисовать всегда», как у alt:V без подгрузки.
             this.#streamingDistance = useStreaming ? (Number(streamingDistance) || 0) : 0;
 
@@ -579,16 +587,22 @@
                 return;
             }
 
+            // Пустота у текстуры — нулевой указатель, а не пустая строка: игра
+            // различает их, и пустой строкой она пошла бы искать текстуру с
+            // именем «».
+            //
+            // Три последних довода были прибиты гвоздями, а у alt:V это поля
+            // маркера: `textureDict`, `textureName` и `drawOnEnts`. Молчали они
+            // ровно так же, как всё прочее такое: маркер с назначенной текстурой
+            // рисовался сплошным, и виноватым выглядело имя текстуры.
             natives.drawMarker(this.markerType, this.pos.x, this.pos.y, this.pos.z,
                                this.dir.x, this.dir.y, this.dir.z,
                                this.rot.x, this.rot.y, this.rot.z,
                                this.scale.x, this.scale.y, this.scale.z,
                                this.color.r, this.color.g, this.color.b, this.color.a,
                                this.bobUpAndDown, this.faceCamera, 2, this.rotate,
-                               // Текстуры нет: маркер сплошной. Пустота здесь —
-                               // нулевой указатель, а не пустая строка, и игра
-                               // различает их.
-                               null, null, false);
+                               this.textureDict ?? null, this.textureName ?? null,
+                               this.drawOnEnts === true);
         }
 
         destroy() {
