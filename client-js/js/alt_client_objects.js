@@ -96,6 +96,7 @@
         #name = '';
         #shortRange = false;
         #route = false;
+        #routeColor = 0;
         #priority = 0;
         #category = 0;
         #flashes = false;
@@ -195,8 +196,29 @@
             natives.setBlipCategory(this.#handle, this.#category);
         }
 
+        /// Цвет линии маршрута. Помнится нами, а не спрашивается у игры: своего
+        /// вопроса у неё нет, есть только распоряжение.
+        ///
+        /// Помнить, а не отказывать, — потому что помнить есть что: цвет
+        /// назначили мы сами, и наш ответ верен ровно до тех пор, пока игра его
+        /// не перепишет. Переписать она его не может: линия маршрута — не её
+        /// затея, а нашей метки.
+        get routeColor() { return this.#routeColor; }
+
         set routeColor(value) {
-            natives.setBlipRouteColour(this.#handle, Number(value) || 0);
+            this.#routeColor = Number(value) || 0;
+            natives.setBlipRouteColour(this.#handle, this.#routeColor);
+        }
+
+        /// Где метка стоит. У игры спрашивается, а не помнится: метку вправе
+        /// подвинуть и она сама — например, если метка привязана к сущности.
+        get pos() {
+            return new shared.Vector3(natives.getBlipCoords(this.#handle));
+        }
+
+        set pos(value) {
+            const точка = new shared.Vector3(value);
+            natives.setBlipCoords(this.#handle, точка.x, точка.y, точка.z);
         }
 
         get name() { return this.#name; }
