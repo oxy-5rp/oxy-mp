@@ -1027,6 +1027,26 @@
     }
 
     Object.defineProperties(Player.prototype, {
+        // Чего у игрока нет: облачный вход alt:V, состояние, которого нет в
+        // снимке, и признак запрета менять ведущего. Здесь, а не в блоке
+        // методов рядом: `Object.assign` копирует геттер, **вызывая** его, и
+        // весь слой перестаёт подниматься.
+        authToken: { get: absent('player.authToken') },
+        cloudAuthResult: { get: absent('player.cloudAuthResult') },
+        cloudID: { get: absent('player.cloudID') },
+        discordID: { get: absent('player.discordID') },
+        hwid3: { get: absent('player.hwid3') },
+        hwidExHash: { get: absent('player.hwidExHash') },
+        currentAnimationDict: { get: absent('player.currentAnimationDict') },
+        currentAnimationName: { get: absent('player.currentAnimationName') },
+        currentInterior: { get: absent('player.currentInterior') },
+        entityAimingAt: { get: absent('player.entityAimingAt') },
+        entityAimOffset: { get: absent('player.entityAimOffset') },
+        flashlightActive: { get: absent('player.flashlightActive') },
+        headRot: { get: absent('player.headRot') },
+        lastDamagedBodyPart: { get: absent('player.lastDamagedBodyPart') },
+        netOwnershipDisabled: { get: absent('player.netOwnershipDisabled') },
+
         /// Позиция. Присваивание переносит игрока — так же, как в alt:V.
         pos: {
             get() { return new shared.Vector3(this.position); },
@@ -2156,24 +2176,10 @@
         /// `socialID` отдаётся пустым, а не нулём: ноль читается как настоящий
         /// номер. Здесь же и строки не годится: вопрос без ответа обязан
         /// отказать вслух.
-        get authToken() { return absent('player.authToken')(); },
-        get cloudAuthResult() { return absent('player.cloudAuthResult')(); },
-        get cloudID() { return absent('player.cloudID')(); },
-        get discordID() { return absent('player.discordID')(); },
-        get hwid3() { return absent('player.hwid3')(); },
-        get hwidExHash() { return absent('player.hwidExHash')(); },
 
         /// Состояние игрока, которого нет в снимке. alt:V рассылает это своей
         /// синхронизацией; у нас по сети едет другое — точка прицела, а не цель,
         /// и направление взгляда, а не поворот головы.
-        get currentAnimationDict() { return absent('player.currentAnimationDict')(); },
-        get currentAnimationName() { return absent('player.currentAnimationName')(); },
-        get currentInterior() { return absent('player.currentInterior')(); },
-        get entityAimingAt() { return absent('player.entityAimingAt')(); },
-        get entityAimOffset() { return absent('player.entityAimOffset')(); },
-        get flashlightActive() { return absent('player.flashlightActive')(); },
-        get headRot() { return absent('player.headRot')(); },
-        get lastDamagedBodyPart() { return absent('player.lastDamagedBodyPart')(); },
 
         /// Кровь и грязь на персонаже. У alt:V это двоичный слепок, который
         /// клиент умеет читать и накладывать; у нас его нет ни в снимке, ни в
@@ -2204,7 +2210,6 @@
         /// Запрет менять ведущего и рассылка имён. Первое у нас относится к
         /// машинам (`vehicle.setNetOwner`), второе не заводилось вовсе: имена
         /// уезжают всем и всегда.
-        get netOwnershipDisabled() { return absent('player.netOwnershipDisabled')(); },
         sendNames: unperformed('player.sendNames', 'имена уезжают всем и всегда'),
 
         /// Произнести реплику голосом персонажа. Своего сообщения на это нет, а
