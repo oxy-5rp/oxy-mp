@@ -190,6 +190,11 @@
     }
 
     /// Событие внутри клиента. Сеть не задействована.
+    /// Свои общие метаданные клиента. Один склад на весь клиент, а не на
+    /// ресурс: у alt:V `alt.setMeta` видят все его ресурсы, и разделять их
+    /// значило бы отнять единственное, ради чего эти метаданные и заводят.
+    const ownGlobalMeta = new Map();
+
     function emit(name, ...args) {
         fire(name, args);
     }
@@ -1134,6 +1139,35 @@
         getSyncedMeta: (key) => syncedFor('global', 0).get(key),
         hasSyncedMeta: (key) => syncedFor('global', 0).has(key),
         getSyncedMetaKeys: () => [...syncedFor('global', 0).keys()],
+
+        /// Свои общие метаданные: те, что клиент кладёт себе сам.
+        ///
+        /// Никуда не уезжают и ниоткуда не приезжают — это склад одного
+        /// клиента. У alt:V так же: `alt.setMeta` на клиенте местный, а сетевые
+        /// — это `syncedMeta`, которые кладёт сервер.
+        ///
+        /// Нужны они затем же, зачем и `LocalStorage`: сложить что-нибудь между
+        /// ресурсами одного клиента. Отличие в том, что эти не переживают
+        /// перезапуск игры, и потому их не приходится писать на диск.
+        setMeta(key, value) {
+            shared._eachMetaPair(key, value, (name, own) => {
+                const было = ownGlobalMeta.get(name);
+
+                ownGlobalMeta.set(name, own);
+                fire('globalMetaChange', [name, own, было]);
+            });
+        },
+
+        getMeta: (key) => ownGlobalMeta.get(key),
+        hasMeta: (key) => ownGlobalMeta.has(key),
+        getMetaKeys: () => [...ownGlobalMeta.keys()],
+
+        deleteMeta(key) {
+            const было = ownGlobalMeta.get(key);
+
+            ownGlobalMeta.delete(key);
+            fire('globalMetaChange', [key, undefined, было]);
+        },
 
         // Местные сущности: те, что клиент заводит сам и видит только сам.
         // Сервер о них не знает, и потому им не нужно ни сети, ни синхронизации.
