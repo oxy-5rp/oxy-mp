@@ -822,6 +822,125 @@ function обойти(имя, объект) {
     }
 }
 
+// --- Сквозная проба записи у клиента -----------------------------------------
+//
+// То же, что на сервере, и по той же причине: свойство, принявшее присваивание и
+// не изменившееся, для всех прежних проверок выглядит исправным. Ни исключения,
+// ни строки в журнале — а режим узнаёт об этом в игре и не сразу.
+//
+// Значение подбирается по нынешнему, прочитанное сверяется, прежнее возвращается:
+// стенд не оставляет после себя изменённую сессию. Громкий отказ находкой не
+// считается — он и есть правильное поведение.
+
+const неТрогатьУКлиента = new Set([
+    'model', 'dimension', 'pos', 'rot', 'position', 'rotation', 'scriptID',
+]);
+
+function подобратьЗначение(было) {
+    if (typeof было === 'number') {
+        return Number.isInteger(было) ? было + 1 : было + 0.5;
+    }
+
+    if (typeof было === 'boolean') {
+        return !было;
+    }
+
+    if (typeof было === 'string') {
+        return `oxymp-${было.length}`;
+    }
+
+    if (было !== null && typeof было === 'object') {
+        if ('x' in было && 'y' in было && 'z' in было) {
+            return { x: было.x + 1, y: было.y, z: было.z };
+        }
+
+        if ('r' in было && 'g' in было && 'b' in было) {
+            return { r: 11, g: 22, b: 33, a: 255 };
+        }
+    }
+
+    return undefined;
+}
+
+function одинаковы(a, b) {
+    if (a !== null && typeof a === 'object' && b !== null && typeof b === 'object') {
+        return ['x', 'y', 'z', 'r', 'g', 'b', 'a']
+            .every((ось) => !(ось in a) || Math.abs((a[ось] ?? 0) - (b[ось] ?? 0)) < 0.01);
+    }
+
+    return typeof a === 'number' && typeof b === 'number'
+        ? Math.abs(a - b) < 0.01
+        : a === b;
+}
+
+function пробаЗаписи(имя, объект) {
+    if (объект === null || объект === undefined) {
+        alt.log(`[..] ${имя}: нечего пробовать`);
+        return;
+    }
+
+    const молчат = [];
+    let проверено = 0;
+
+    for (let слой = объект; слой !== null; слой = Object.getPrototypeOf(слой)) {
+        for (const ключ of Object.getOwnPropertyNames(слой)) {
+            const опись = Object.getOwnPropertyDescriptor(слой, ключ);
+
+            if (ключ === 'constructor' || опись === undefined ||
+                неТрогатьУКлиента.has(ключ) || typeof опись.value === 'function') {
+                continue;
+            }
+
+            let было;
+
+            try {
+                было = объект[ключ];
+            } catch (беда) {
+                continue;
+            }
+
+            const станет = подобратьЗначение(было);
+
+            if (станет === undefined) {
+                continue;
+            }
+
+            try {
+                объект[ключ] = станет;
+            } catch (беда) {
+                continue;
+            }
+
+            проверено += 1;
+
+            let стало;
+
+            try {
+                стало = объект[ключ];
+            } catch (беда) {
+                continue;
+            }
+
+            if (одинаковы(было, стало)) {
+                молчат.push(ключ);
+            }
+
+            try {
+                объект[ключ] = было;
+            } catch (беда) {
+                // Не вернулось — не беда: значение всё равно из этой же сессии.
+            }
+        }
+    }
+
+    say(`[ok] проба записи ${имя}: проверено ${проверено}, `
+        + `приняли и не изменились ${молчат.length}`);
+
+    if (молчат.length > 0) {
+        say(`     молча: ${молчат.join(', ')}`);
+    }
+}
+
 alt.on('connectionComplete', () => {
     setTimeout(() => {
         обойти('LocalPlayer', alt.Player.local);
@@ -833,6 +952,13 @@ alt.on('connectionComplete', () => {
 
         const маркер = new alt.Marker(1, alt.Player.local.pos, alt.RGBA.white);
         обойти('Marker', маркер);
+
+        // Проба записи — по тем же сущностям и после обхода чтением: сперва
+        // выясняем, отвечают ли они, и только потом — слушают ли.
+        пробаЗаписи('LocalPlayer', alt.Player.local);
+        пробаЗаписи('Vehicle', alt.Vehicle.all.find((one) => one.valid));
+        пробаЗаписи('Marker', маркер);
+
         маркер.destroy();
     }, 34000);
 });
