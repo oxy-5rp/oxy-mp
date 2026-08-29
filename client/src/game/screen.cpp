@@ -14,7 +14,9 @@ Screen::Screen(const NativeTable& table) noexcept
       displayHud_(table.handlerFor(natives::kDisplayHud)),
       displayRadar_(table.handlerFor(natives::kDisplayRadar)),
       revealMap_(table.handlerFor(natives::kSetMinimapRevealed)),
-      hudWhenDead_(table.handlerFor(natives::kDisplayHudWhenDeadThisFrame)) {}
+      hudWhenDead_(table.handlerFor(natives::kDisplayHudWhenDeadThisFrame)),
+      switchInProgress_(table.handlerFor(natives::kIsPlayerSwitchInProgress)),
+      stopSwitch_(table.handlerFor(natives::kStopPlayerSwitch)) {}
 
 bool Screen::ready() const noexcept {
     return shutdownLoading_ != nullptr && fadeIn_ != nullptr && fadeOut_ != nullptr &&
@@ -39,6 +41,24 @@ void Screen::keepInterfaceUp() const {
     }
 }
 
+
+bool Screen::endPlayerSwitch() const {
+    if (switchInProgress_ == nullptr || stopSwitch_ == nullptr) {
+        return false;
+    }
+
+    if (!invokeNative<bool>(switchInProgress_)) {
+        return false;
+    }
+
+    invokeNative<void>(stopSwitch_);
+
+    // Полсекунды, а не мгновенно: резкое проявление после чёрного экрана видно
+    // как вспышку, и это единственная причина числа.
+    fadeIn(500);
+
+    return true;
+}
 
 void Screen::hideLoadingScreen() const {
     if (shutdownLoading_ == nullptr) {

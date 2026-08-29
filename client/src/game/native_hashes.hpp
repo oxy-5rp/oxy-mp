@@ -187,6 +187,12 @@ inline constexpr std::uint64_t kShutdownLoadingScreen = 0XCD17096A98584C2B;
 /// DO_SCREEN_FADE_IN, канонический хеш 0XD4E8E24955024033.
 inline constexpr std::uint64_t kDoScreenFadeIn = 0X10B228D2FDB7AF16;
 
+/// IS_PLAYER_SWITCH_IN_PROGRESS, канонический хеш 0XD9D2CFFF49FAB35F.
+inline constexpr std::uint64_t kIsPlayerSwitchInProgress = 0X3555462DB47B7AB1;
+
+/// STOP_PLAYER_SWITCH, канонический хеш 0X95C0A5BBDC189AA1.
+inline constexpr std::uint64_t kStopPlayerSwitch = 0XF4DB2666A609235A;
+
 /// DO_SCREEN_FADE_OUT, канонический хеш 0X891B5B39AC6302AF.
 inline constexpr std::uint64_t kDoScreenFadeOut = 0X8F72AF14CE5AACE4;
 
