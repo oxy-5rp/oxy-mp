@@ -2033,6 +2033,70 @@
         setAmmoFlags: unperformed('player.setAmmoFlags',
                                   'признаки боеприпаса по сети не едут'),
 
+        /// Облачный вход alt:V. Своей службы входа у нас нет вовсе, и придумать
+        /// эти числа значило бы соврать: режим, пускающий по облачному номеру,
+        /// пустил бы кого угодно.
+        ///
+        /// Пустой строкой их отдать тоже нельзя — по той же причине, по которой
+        /// `socialID` отдаётся пустым, а не нулём: ноль читается как настоящий
+        /// номер. Здесь же и строки не годится: вопрос без ответа обязан
+        /// отказать вслух.
+        get authToken() { return absent('player.authToken')(); },
+        get cloudAuthResult() { return absent('player.cloudAuthResult')(); },
+        get cloudID() { return absent('player.cloudID')(); },
+        get discordID() { return absent('player.discordID')(); },
+        get hwid3() { return absent('player.hwid3')(); },
+        get hwidExHash() { return absent('player.hwidExHash')(); },
+
+        /// Состояние игрока, которого нет в снимке. alt:V рассылает это своей
+        /// синхронизацией; у нас по сети едет другое — точка прицела, а не цель,
+        /// и направление взгляда, а не поворот головы.
+        get currentAnimationDict() { return absent('player.currentAnimationDict')(); },
+        get currentAnimationName() { return absent('player.currentAnimationName')(); },
+        get currentInterior() { return absent('player.currentInterior')(); },
+        get entityAimingAt() { return absent('player.entityAimingAt')(); },
+        get entityAimOffset() { return absent('player.entityAimOffset')(); },
+        get flashlightActive() { return absent('player.flashlightActive')(); },
+        get headRot() { return absent('player.headRot')(); },
+        get lastDamagedBodyPart() { return absent('player.lastDamagedBodyPart')(); },
+
+        /// Кровь и грязь на персонаже. У alt:V это двоичный слепок, который
+        /// клиент умеет читать и накладывать; у нас его нет ни в снимке, ни в
+        /// объявлении внешности.
+        getBloodDamageBase64: absent('player.getBloodDamageBase64'),
+        setBloodDamageBase64: unperformed('player.setBloodDamageBase64',
+                                          'кровь на персонаже по сети не едет'),
+
+        /// Цвета лица из палитры. Читать их у игры нечем — см. правило о том,
+        /// что у неё на лицо и цвета только запись, — а слать вслепую значило бы
+        /// затирать назначенное.
+        getHeadBlendPaletteColor: absent('player.getHeadBlendPaletteColor'),
+        setHeadBlendPaletteColor: unperformed('player.setHeadBlendPaletteColor',
+                                              'цвета лица из палитры по сети не едут'),
+        removeHeadBlendPaletteColor: unperformed('player.removeHeadBlendPaletteColor',
+                                                 'цвета лица из палитры по сети не едут'),
+
+        /// Вещь дополнения парой «набор и место». Пары этой у нас нет и взяться
+        /// ей неоткуда — см. `setDlcClothes`; номер вещи здесь сквозной.
+        getDlcProp: absent('player.getDlcProp'),
+
+        /// Убрать персонажа из мира, оставив игрока на сервере. У нас персонаж и
+        /// игрок — одно: сервер ведёт его положение и рассылает снимки, пока
+        /// игрок здесь.
+        despawn: unperformed('player.despawn',
+                             'персонаж и игрок у нас одно, и убрать одно без другого нельзя'),
+
+        /// Запрет менять ведущего и рассылка имён. Первое у нас относится к
+        /// машинам (`vehicle.setNetOwner`), второе не заводилось вовсе: имена
+        /// уезжают всем и всегда.
+        get netOwnershipDisabled() { return absent('player.netOwnershipDisabled')(); },
+        sendNames: unperformed('player.sendNames', 'имена уезжают всем и всегда'),
+
+        /// Произнести реплику голосом персонажа. Своего сообщения на это нет, а
+        /// без него распоряжение дошло бы только до того, кто его отдал.
+        playAmbientSpeech: unperformed('player.playAmbientSpeech',
+                                       'своего сообщения на речь у протокола пока нет'),
+
         setLocalMeta(key, value) {
             shared._eachMetaPair(key, value, (name, own) => {
                 const store = localFor(this.id);
