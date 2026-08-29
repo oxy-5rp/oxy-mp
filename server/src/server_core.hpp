@@ -307,6 +307,8 @@ public:
 
     bool removeVehicle(shared::VehicleId id) override;
     bool setVehicleDimension(shared::VehicleId id, std::int32_t dimension) override;
+    bool setVehicleOwner(shared::VehicleId id, shared::PlayerId owner, bool sticky) override;
+    bool clearVehicleOwner(shared::VehicleId id) override;
     bool teleportVehicle(shared::VehicleId id, const shared::Vec3& position,
                          float heading) override;
     bool repairVehicle(shared::VehicleId id) override;

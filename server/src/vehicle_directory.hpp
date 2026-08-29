@@ -67,6 +67,12 @@ public:
         /// Кто её ведёт. kInvalidPlayerId — никто.
         shared::PlayerId owner = shared::kInvalidPlayerId;
 
+        /// Кому её назначили скриптом. kInvalidPlayerId — никому.
+        shared::PlayerId pinned = shared::kInvalidPlayerId;
+
+        /// Держится ли назначение дальше первой же раздачи.
+        bool pinnedSticky = false;
+
         /// Последняя объявленная внешность. Пусто — её ещё не объявляли.
         std::optional<shared::VehicleAppearance> appearance;
 
@@ -170,6 +176,17 @@ public:
 
     /// Переставляет машину в другой слой мира. false — машины уже нет.
     bool setDimension(shared::VehicleId id, std::int32_t dimension);
+
+    /// Назначает машине ведущего, перебивая обычный выбор.
+    ///
+    /// `sticky` — держать ли назначенного и дальше. Без него назначение
+    /// одноразовое: ведущий встанет ближайшей раздачей, а следующая пойдёт
+    /// обычным порядком. Назначенный и не сидящий за рулём всё равно уступает
+    /// водителю: за рулём и считает поездку должен быть один и тот же человек,
+    /// иначе они разъедутся мгновенно.
+    ///
+    /// `kInvalidPlayerId` снимает назначение. false — машины уже нет.
+    bool pinOwner(shared::VehicleId id, shared::PlayerId owner, bool sticky);
 
     /// Ставит машину в точку у себя.
     ///

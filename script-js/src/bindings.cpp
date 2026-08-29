@@ -1526,6 +1526,56 @@ void vehicleRepair(const v8::FunctionCallbackInfo<v8::Value>& info) {
     info.GetReturnValue().Set(resourceOf(isolate).core().repairVehicle(*id));
 }
 
+/// Назначает машине ведущего.
+///
+/// Игрок приходит сущностью, как у alt:V; числом — тоже принимаем: номер игрока
+/// у нас и есть его имя.
+void vehicleSetNetOwner(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        fail(isolate, "setNetOwner зовётся у машины");
+        return;
+    }
+
+    std::optional<shared::PlayerId> owner;
+
+    if (info.Length() >= 1) {
+        owner = idOf<shared::PlayerId>(info[0]);
+
+        if (!owner) {
+            if (const std::optional<std::int64_t> number =
+                    intFromJs(isolate->GetCurrentContext(), info[0])) {
+                owner = static_cast<shared::PlayerId>(*number);
+            }
+        }
+    }
+
+    if (!owner) {
+        fail(isolate, "setNetOwner ждёт игрока первым доводом");
+        return;
+    }
+
+    // Второй довод у alt:V называется disableMigration и по умолчанию ложь.
+    const bool sticky = info.Length() >= 2 && info[1]->BooleanValue(isolate);
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().setVehicleOwner(*id, *owner, sticky));
+}
+
+/// Возвращает выбор ведущего серверу.
+void vehicleResetNetOwner(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::VehicleId> id = idOf<shared::VehicleId>(info.This());
+    if (!id) {
+        fail(isolate, "resetNetOwner зовётся у машины");
+        return;
+    }
+
+    info.GetReturnValue().Set(resourceOf(isolate).core().clearVehicleOwner(*id));
+}
+
 /// Сажает игрока в машину: сама машина и место в ней.
 void playerSetIntoVehicle(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -3793,6 +3843,8 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     addMethod(isolate, shape, "destroy", vehicleDestroy);
     addMethod(isolate, shape, "teleport", vehicleTeleport);
     addMethod(isolate, shape, "repair", vehicleRepair);
+    addMethod(isolate, shape, "setNetOwner", vehicleSetNetOwner);
+    addMethod(isolate, shape, "resetNetOwner", vehicleResetNetOwner);
     addMethod(isolate, shape, "getModsCount", vehicleModsCount);
     addMethod(isolate, shape, "setAppearance", vehicleSetAppearance);
 

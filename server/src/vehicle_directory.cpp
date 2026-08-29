@@ -163,6 +163,17 @@ bool VehicleDirectory::setDimension(shared::VehicleId id, std::int32_t dimension
     return true;
 }
 
+bool VehicleDirectory::pinOwner(shared::VehicleId id, shared::PlayerId owner, bool sticky) {
+    const auto found = vehicles_.find(id);
+    if (found == vehicles_.end()) {
+        return false;
+    }
+
+    found->second.pinned = owner;
+    found->second.pinnedSticky = sticky;
+    return true;
+}
+
 bool VehicleDirectory::remove(shared::VehicleId id) {
     if (vehicles_.erase(id) == 0) {
         return false;
@@ -332,6 +343,14 @@ shared::PlayerId VehicleDirectory::chooseOwner(const Vehicle& vehicle,
         return driver;
     }
 
+    // Назначенный скриптом идёт сразу после водителя и раньше расстояния: ради
+    // этого назначение и заводят. Дальности он не подчиняется — назначивший
+    // знает, чего хочет, а мы не знаем, зачем.
+    if (vehicle.pinned != shared::kInvalidPlayerId &&
+        findPlayer(players, vehicle.pinned) != nullptr) {
+        return vehicle.pinned;
+    }
+
     constexpr float kRangeSquared = kOwnershipRange * kOwnershipRange;
 
     const PlayerPlacement* nearest = nullptr;
@@ -378,6 +397,13 @@ std::vector<VehicleDirectory::OwnerChange> VehicleDirectory::reassign(
 
     for (auto& [id, vehicle] : vehicles_) {
         const shared::PlayerId owner = chooseOwner(vehicle, players);
+
+        // Неудерживаемое назначение — одноразовое: оно сказало, кому вести
+        // машину сейчас, и на этом кончилось. Снимается после выбора, а не до:
+        // сниматься ему положено, только когда оно уже сработало.
+        if (vehicle.pinned != shared::kInvalidPlayerId && !vehicle.pinnedSticky) {
+            vehicle.pinned = shared::kInvalidPlayerId;
+        }
 
         if (owner == vehicle.owner) {
             continue;

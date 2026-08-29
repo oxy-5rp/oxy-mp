@@ -178,6 +178,62 @@ TEST_CASE("a passenger does not take the vehicle from the driver", "[vehicles]")
     CHECK(directory.find(id)->owner == 1);
 }
 
+TEST_CASE("a script can name who leads the vehicle", "[vehicles]") {
+    VehicleDirectory directory;
+
+    // Машина стоит вплотную к одному игроку и далеко от другого: без назначения
+    // ведущим стал бы ближний.
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+    directory.forgetPlayer(1);
+
+    REQUIRE(directory.pinOwner(id, 7, true));
+
+    const std::vector players{at(3, 1.0F), at(7, 90.0F)};
+    const auto changes = directory.reassign(players);
+
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == 7);
+}
+
+TEST_CASE("a named leader outlives the handover only if asked", "[vehicles]") {
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+    directory.forgetPlayer(1);
+
+    // Без удержания назначение одноразовое: оно говорит, кому вести машину
+    // сейчас, а дальше выбор идёт обычным порядком.
+    REQUIRE(directory.pinOwner(id, 7, false));
+
+    const std::vector players{at(3, 1.0F), at(7, 90.0F)};
+    REQUIRE(directory.reassign(players).size() == 1);
+    CHECK(directory.find(id)->owner == 7);
+
+    // Вторая раздача: назначения больше нет, и машина уходит ближнему.
+    const auto changes = directory.reassign(players);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == 3);
+}
+
+TEST_CASE("the driver outranks a named leader", "[vehicles]") {
+    // Порядок именно такой, и он не вкусовщина: ехать и считать поездку должен
+    // один и тот же человек, иначе машина у них разъедется мгновенно.
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+
+    directory.setSeat(2, id, shared::kDriverSeat);
+    REQUIRE(directory.pinOwner(id, 7, true));
+
+    const std::vector players{at(2, 0.0F), at(7, 1.0F)};
+    REQUIRE(directory.reassign(players).size() == 1);
+
+    CHECK(directory.find(id)->owner == 2);
+}
+
+TEST_CASE("naming a leader of a vehicle that is gone fails", "[vehicles]") {
+    VehicleDirectory directory;
+    CHECK_FALSE(directory.pinOwner(404, 7, true));
+}
+
 TEST_CASE("an abandoned vehicle goes to the nearest player", "[vehicles]") {
     VehicleDirectory directory;
     const shared::VehicleId id = spawn(directory, 1, 0.0F);

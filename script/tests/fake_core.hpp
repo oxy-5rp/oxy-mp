@@ -6,6 +6,7 @@
 #include <format>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace oxymp::script::testing {
 
@@ -590,6 +591,29 @@ public:
         }
 
         it->dimension = dimension;
+        return true;
+    }
+
+    /// Кому назначен ведущий и держится ли назначение. Правится проверкой.
+    std::unordered_map<shared::VehicleId, std::pair<shared::PlayerId, bool>> pinnedOwners;
+
+    bool setVehicleOwner(shared::VehicleId id, shared::PlayerId owner, bool sticky) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+        if (it == vehicleList.end() || !player(owner)) {
+            return false;
+        }
+
+        pinnedOwners[id] = {owner, sticky};
+        return true;
+    }
+
+    bool clearVehicleOwner(shared::VehicleId id) override {
+        const auto it = std::ranges::find(vehicleList, id, &VehicleInfo::id);
+        if (it == vehicleList.end()) {
+            return false;
+        }
+
+        pinnedOwners.erase(id);
         return true;
     }
 

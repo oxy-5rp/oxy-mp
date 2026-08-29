@@ -1238,6 +1238,20 @@ bool ServerCore::setVehicleDimension(shared::VehicleId id, std::int32_t dimensio
     return vehicles_->setDimension(id, dimension);
 }
 
+bool ServerCore::setVehicleOwner(shared::VehicleId id, shared::PlayerId owner, bool sticky) {
+    // Игрок проверяется здесь, а не в реестре машин: реестру нет дела до списка
+    // игроков, и знать о нём он не должен (см. PlayerPlacement).
+    if (players_->findById(owner) == nullptr) {
+        return false;
+    }
+
+    return vehicles_->pinOwner(id, owner, sticky);
+}
+
+bool ServerCore::clearVehicleOwner(shared::VehicleId id) {
+    return vehicles_->pinOwner(id, shared::kInvalidPlayerId, false);
+}
+
 /// Объявляет уход сущности — до того, как её уберут.
 ///
 /// Общее на три рода: у alt:V это одно событие `removeEntity`, а не три, и
