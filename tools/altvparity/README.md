@@ -23,6 +23,18 @@ python tools\altvparity\missing.py "$T\types-server\index.d.ts" `
 Ищет имена из объявлений в наших исходниках. **Ответ «нет» надёжен, ответ
 «есть» — оценка сверху**: одноимённое поле могло попасться и в чужом месте.
 
+**Клиентской сверке обязательно давать и общие файлы**, а не только
+`client-js/`: `alt_enums.js` и `alt_shared.js` лежат в `script-js/js/`, но
+собираются и в клиент тоже (`client-js/CMakeLists.txt`). Без них сверка
+недосчитывается семи десятков имён и объявляет несделанным сделанное:
+
+```powershell
+python tools\altvparity\missing.py "$T\types-client\index.d.ts" `
+    "client-js/js/*.js" "client-js/src/*.cpp" `
+    "client/src/*.cpp" "client/src/game/*.cpp" `
+    "script-js/js/alt_enums.js" "script-js/js/alt_shared.js"
+```
+
 ## `used_by_mode.py` — чего нет из того, что зовёт живой режим
 
 ```powershell
