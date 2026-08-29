@@ -315,6 +315,34 @@ void Peds::noticeDamage(shared::PedId id, Entry& entry, int localPed) {
     }
 }
 
+std::vector<std::pair<shared::PedId, int>> Peds::all() const {
+    std::vector<std::pair<shared::PedId, int>> found;
+    found.reserve(peds_.size());
+
+    for (const auto& [id, entry] : peds_) {
+        found.emplace_back(id, entry.handle);
+    }
+
+    return found;
+}
+
+shared::PedId Peds::idOf(int handle) const {
+    if (handle == 0) {
+        return shared::kInvalidPedId;
+    }
+
+    // Перебором, а не обратным реестром: кукол в сессии десятки, а спрашивают об
+    // этом не в каждом кадре. Второй реестр пришлось бы держать согласованным с
+    // первым, и разошлись бы они молча.
+    for (const auto& [id, entry] : peds_) {
+        if (entry.handle == handle) {
+            return id;
+        }
+    }
+
+    return shared::kInvalidPedId;
+}
+
 int Peds::handleFor(shared::PedId id) const {
     const auto found = peds_.find(id);
     return found == peds_.end() ? 0 : found->second.handle;

@@ -106,9 +106,17 @@
     const kPlayerKind = 0;
     const kVehicleKind = 1;
 
+    /// Прохожие, заведённые сервером. Не те, что расставила игра: у этих есть
+    /// номер сессии, они одни и те же у всех игроков.
+    const kPedKind = 2;
+
     /// Как род зовётся в метаданных. Те же слова, что и на сервере: разойдись
     /// они — `syncedMeta` перестала бы находиться, и без единой жалобы.
-    const kMetaName = { [kPlayerKind]: 'player', [kVehicleKind]: 'vehicle' };
+    const kMetaName = {
+        [kPlayerKind]: 'player',
+        [kVehicleKind]: 'vehicle',
+        [kPedKind]: 'ped',
+    };
 
     /// Место в машине: у игры своя нумерация, у alt:V своя.
     ///
@@ -944,6 +952,22 @@
         }
     }
 
+    /// Прохожий сессии: тот, кого сервер зовёт номером.
+    ///
+    /// Своим именем, как и `SessionVehicle`, и по той же причине: обычный `Ped`
+    /// оборачивает дескриптор, отданный нативом, и живёт ровно столько, сколько
+    /// живёт этот дескриптор. У этого есть номер сервера, и он один для всех.
+    class SessionPed extends Ped {
+        constructor(id) {
+            super(0);
+            numbers.set(this, { kind: kPedKind, id });
+        }
+
+        toString() {
+            return `Ped{ id: ${this.sessionId} }`;
+        }
+    }
+
     // --- Реестр сущностей сессии ----------------------------------------------
 
     /// Один объект на номер, а не новый на каждое обращение.
@@ -955,7 +979,11 @@
     /// ключу текли бы, и найти причину было бы не по чему: всё выглядит верным.
     ///
     /// Правды объект при этом не хранит: все его свойства спрашиваются заново.
-    const registry = { [kPlayerKind]: new Map(), [kVehicleKind]: new Map() };
+    const registry = {
+        [kPlayerKind]: new Map(),
+        [kVehicleKind]: new Map(),
+        [kPedKind]: new Map(),
+    };
 
     /// Свой персонаж заводится один раз и живёт до конца сессии.
     let local = null;
@@ -981,7 +1009,9 @@
         let found = known.get(id);
 
         if (found === undefined) {
-            found = kind === kVehicleKind ? new SessionVehicle(id) : new Player(id);
+            found = kind === kVehicleKind ? new SessionVehicle(id)
+                  : kind === kPedKind ? new SessionPed(id)
+                                      : new Player(id);
             known.set(id, found);
         }
 
@@ -1041,7 +1071,14 @@
 
     /// Персонаж по дескриптору: игрок сессии, если он игрок, иначе просто ped.
     function pedByHandle(handle) {
-        return trackedByHandle(kPlayerKind, handle) ?? new Ped(handle);
+        // Игроки сперва, прохожие сессии следом, и только потом голая обёртка.
+        //
+        // Порядок значим: тело игрока — тоже ped, и спроси мы сперва про
+        // прохожих, свой игрок нашёлся бы среди них. Голая обёртка последняя:
+        // это случайный прохожий самой игры, у которого номера сессии нет.
+        return trackedByHandle(kPlayerKind, handle)
+            ?? trackedByHandle(kPedKind, handle)
+            ?? new Ped(handle);
     }
 
     /// То же для машины.
@@ -1057,6 +1094,7 @@
     const bodied = {
         [kPlayerKind]: new Set(),
         [kVehicleKind]: new Set(),
+        [kPedKind]: new Set(),
     };
 
     /// Сверяет, у кого тело появилось, а у кого пропало.
@@ -1203,6 +1241,7 @@
         WorldObject,
         Entity,
         Ped,
+        SessionPed,
         Player,
         Vehicle,
         LocalPlayer,
@@ -1213,6 +1252,7 @@
 
         players: (streamedOnly) => listOf(kPlayerKind, streamedOnly === true),
         vehicles: (streamedOnly) => listOf(kVehicleKind, streamedOnly === true),
+        peds: (streamedOnly) => listOf(kPedKind, streamedOnly === true),
 
         /// Игрок сессии по его номеру. Пусто — такого в сессии нет.
         ///
@@ -1232,6 +1272,11 @@
         vehicleById(id) {
             const число = Number(id);
             return listOf(kVehicleKind, false).find((что) => что.sessionId === число) ?? null;
+        },
+
+        pedById(id) {
+            const число = Number(id);
+            return listOf(kPedKind, false).find((кто) => кто.sessionId === число) ?? null;
         },
 
         /// Сущность по дескриптору игры.

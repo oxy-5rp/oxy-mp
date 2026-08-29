@@ -194,14 +194,28 @@ std::uint32_t onListEntities(void*, OxympJsEntityKind kind, OxympJsEntity* entit
         return 0;
     }
 
-    const auto& source = kind == kOxympJsEntityVehicle ? state->hooks.entities.vehicles
-                                                       : state->hooks.entities.players;
+    // Родов три, и выбор написан переключателем, а не парой тернарных: с
+    // четвёртым родом цепочка тернарных перестаёт читаться, а ошибка в ней
+    // молчит — список просто окажется чужим.
+    const std::function<std::vector<ScriptHost::Hooks::Entity>()>* source = nullptr;
 
-    if (!source) {
+    switch (kind) {
+    case kOxympJsEntityVehicle:
+        source = &state->hooks.entities.vehicles;
+        break;
+    case kOxympJsEntityPed:
+        source = &state->hooks.entities.peds;
+        break;
+    case kOxympJsEntityPlayer:
+        source = &state->hooks.entities.players;
+        break;
+    }
+
+    if (source == nullptr || !*source) {
         return 0;
     }
 
-    const std::vector<ScriptHost::Hooks::Entity> found = source();
+    const std::vector<ScriptHost::Hooks::Entity> found = (*source)();
 
     for (std::size_t i = 0; i < found.size() && i < capacity; ++i) {
         entities[i] = OxympJsEntity{.id = found[i].id, .handle = found[i].handle};
@@ -217,10 +231,21 @@ std::int32_t onEntityHandle(void*, OxympJsEntityKind kind, std::int32_t id) {
         return 0;
     }
 
-    const auto& resolve = kind == kOxympJsEntityVehicle ? state->hooks.entities.carOf
-                                                        : state->hooks.entities.pedOf;
+    const std::function<std::int32_t(std::int32_t)>* resolve = nullptr;
 
-    return resolve ? resolve(id) : 0;
+    switch (kind) {
+    case kOxympJsEntityVehicle:
+        resolve = &state->hooks.entities.carOf;
+        break;
+    case kOxympJsEntityPed:
+        resolve = &state->hooks.entities.sessionPedOf;
+        break;
+    case kOxympJsEntityPlayer:
+        resolve = &state->hooks.entities.pedOf;
+        break;
+    }
+
+    return resolve != nullptr && *resolve ? (*resolve)(id) : 0;
 }
 
 std::int32_t onEntityId(void*, OxympJsEntityKind kind, std::int32_t handle) {
@@ -230,10 +255,21 @@ std::int32_t onEntityId(void*, OxympJsEntityKind kind, std::int32_t handle) {
         return -1;
     }
 
-    const auto& resolve = kind == kOxympJsEntityVehicle ? state->hooks.entities.vehicleAt
-                                                        : state->hooks.entities.playerAt;
+    const std::function<std::int32_t(std::int32_t)>* resolve = nullptr;
 
-    return resolve ? resolve(handle) : -1;
+    switch (kind) {
+    case kOxympJsEntityVehicle:
+        resolve = &state->hooks.entities.vehicleAt;
+        break;
+    case kOxympJsEntityPed:
+        resolve = &state->hooks.entities.sessionPedAt;
+        break;
+    case kOxympJsEntityPlayer:
+        resolve = &state->hooks.entities.playerAt;
+        break;
+    }
+
+    return resolve != nullptr && *resolve ? (*resolve)(handle) : -1;
 }
 
 OxympJsPlayerState onPlayerState(void*, std::int32_t id) {

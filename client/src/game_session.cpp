@@ -1316,6 +1316,29 @@ void GameSession::runScripts() {
             return found;
         };
 
+        hooks.entities.peds = [this] {
+            std::vector<ScriptHost::Hooks::Entity> found;
+
+            for (const auto& [id, handle] : peds_.all()) {
+                found.push_back(ScriptHost::Hooks::Entity{
+                    .id = static_cast<std::int32_t>(id),
+                    .handle = handle,
+                });
+            }
+
+            return found;
+        };
+
+        hooks.entities.sessionPedOf = [this](std::int32_t id) -> std::int32_t {
+            return peds_.handleFor(static_cast<shared::PedId>(id));
+        };
+
+        hooks.entities.sessionPedAt = [this](std::int32_t handle) -> std::int32_t {
+            const shared::PedId id = peds_.idOf(handle);
+
+            return id == shared::kInvalidPedId ? -1 : static_cast<std::int32_t>(id);
+        };
+
         hooks.entities.pedOf = [this](std::int32_t id) {
             const shared::PlayerId self = status_.snapshot().playerId;
 

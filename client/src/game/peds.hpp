@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace oxymp::client::game {
 
@@ -65,6 +67,17 @@ public:
     [[nodiscard]] int handleFor(shared::PedId id) const;
 
     [[nodiscard]] std::size_t shown() const noexcept { return peds_.size(); }
+
+    /// Прохожие сессии: номер и дескриптор на каждого.
+    ///
+    /// Списком пар, а не ссылкой на реестр: наружу отдаётся то, что нужно
+    /// скриптовому мостику, и не более. Дескриптор здесь может быть нулевым —
+    /// прохожий в сессии есть, а тела у него ещё нет, — и это правда, а не
+    /// пробел.
+    [[nodiscard]] std::vector<std::pair<shared::PedId, int>> all() const;
+
+    /// Номер прохожего по его телу. kInvalidPedId — тело не наше.
+    [[nodiscard]] shared::PedId idOf(int handle) const;
 
 private:
     /// Прохожий и всё, что мы о нём помним.

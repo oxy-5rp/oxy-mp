@@ -1003,7 +1003,20 @@
         Entity: Object.defineProperties(entities.Entity, {
             getByScriptID: { value: entities.fromScriptID, configurable: true },
         }),
+        /// Прохожие, заведённые сервером.
+        ///
+        /// `all` и `streamedIn` разведены так же, как у игроков и машин: первое
+        /// — все, о ком сказал сервер, второе — те, у кого здесь есть тело.
+        /// Случайные прохожие самой игры сюда не попадают: у них нет номера
+        /// сессии, и сервер о них не знает.
         Ped: Object.defineProperties(entities.Ped, {
+            all: { get: () => entities.peds(), configurable: true },
+            streamedIn: { get: () => entities.peds(true), configurable: true },
+            count: { get: () => entities.peds().length, configurable: true },
+
+            getByID: { value: (id) => entities.pedById(id), configurable: true },
+            getByRemoteID: { value: (id) => entities.pedById(id), configurable: true },
+
             getByScriptID: {
                 value: (handle) => {
                     const found = entities.fromScriptID(handle);

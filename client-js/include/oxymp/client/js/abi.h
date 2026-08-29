@@ -44,7 +44,7 @@ extern "C" {
  *
  * Увеличивается при всяком изменении состава или порядка полей ниже.
  */
-#define OXYMP_CLIENT_JS_ABI_VERSION 4u
+#define OXYMP_CLIENT_JS_ABI_VERSION 5u
 
 /* Строка: указатель и длина. Нулём оканчиваться не обязана. */
 typedef struct OxympJsText {
@@ -83,7 +83,13 @@ typedef enum OxympJsLogLevel {
  */
 typedef enum OxympJsEntityKind {
     kOxympJsEntityPlayer = 0,
-    kOxympJsEntityVehicle = 1
+    kOxympJsEntityVehicle = 1,
+
+    /* Прохожие, заведённые сервером. Не те, что расставила игра: у этих есть
+     * номер сессии, они одни и те же у всех игроков, и распоряжается ими
+     * сервер.
+     */
+    kOxympJsEntityPed = 2
 } OxympJsEntityKind;
 
 /* Сущность сессии: чем её зовёт сервер и чем её зовёт игра.

@@ -97,8 +97,18 @@ constexpr std::uint32_t kEntitiesOnStack = 256;
         (void)info[0]->NumberValue(info.GetIsolate()->GetCurrentContext()).To(&asNumber);
     }
 
-    return static_cast<int>(asNumber) == kOxympJsEntityVehicle ? kOxympJsEntityVehicle
-                                                               : kOxympJsEntityPlayer;
+    // Переключателем, а не цепочкой тернарных: с третьим родом цепочка сводила
+    // всё незнакомое к игроку — и `alt.Ped.all` отдавал список игроков, ничем не
+    // жалуясь. Незнакомое по-прежнему считается игроком, но теперь это написано
+    // отдельной веткой, а не остатком.
+    switch (static_cast<int>(asNumber)) {
+    case kOxympJsEntityVehicle:
+        return kOxympJsEntityVehicle;
+    case kOxympJsEntityPed:
+        return kOxympJsEntityPed;
+    default:
+        return kOxympJsEntityPlayer;
+    }
 }
 
 /// Целое, названное доводом под этим номером.
