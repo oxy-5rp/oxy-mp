@@ -754,6 +754,33 @@ TEST_CASE("what is not done yet refuses out loud", "[client][js]") {
     CHECK(said("отказ: alt.Voice: в oxyMP этого ещё нет"));
 }
 
+TEST_CASE("a missing native that answers nothing does not break the handler",
+          "[client][js]") {
+    // Натив, объявленный у alt:V `void`, — распоряжение, и отказ ему шепчется в
+    // журнал. Брошенное отсюда исключение унесло бы с собой весь чужой
+    // обработчик: живой режим звал такой натив из everyTick, и обрывался у него
+    // каждый кадр весь кадровый обработчик, а не один вызов.
+    REQUIRE(run("quiet",
+                "const alt = require('alt-client');\n"
+                "const natives = require('natives');\n"
+                "natives.hudSuppressWeaponWheelResultsThisFrame();\n"
+                "alt.log('строка после вызова дошла');\n"));
+
+    CHECK(said("строка после вызова дошла"));
+}
+
+TEST_CASE("a missing native that owes an answer refuses out loud", "[client][js]") {
+    // А вопрос отказывает вслух: молчаливый ответ на вопрос — ложь, и принявший
+    // её за правду унесёт её дальше.
+    REQUIRE(run("loud",
+                "const alt = require('alt-client');\n"
+                "const natives = require('natives');\n"
+                "try { natives.getAchievementProgress(1); }\n"
+                "catch (e) { alt.log('отказ дошёл'); }\n"));
+
+    CHECK(said("отказ дошёл"));
+}
+
 TEST_CASE("the entity layer is built on natives", "[client][js]") {
     // Свойство, которое можно спросить у игры, спрашивается у игры — и никогда
     // не кешируется: она меняет их каждый кадр.

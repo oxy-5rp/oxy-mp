@@ -24,11 +24,20 @@ import re
 import sys
 
 
-def theirs(path: pathlib.Path) -> set[str]:
+def theirs(path: pathlib.Path) -> dict[str, bool]:
+    """Имя натива → правда ли, что он ничего не возвращает.
+
+    Тип ответа здесь не украшение: от него зависит, как отказывать. Натив,
+    объявленный `void`, — распоряжение, и отказ ему шепчется в журнал; всякий
+    другой — вопрос, и молчаливый ответ на вопрос был бы ложью.
+    """
     text = io.open(path, encoding="utf-8", errors="replace").read()
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
 
-    return {found.group(1) for found in re.finditer(r"export function (\w+)\(", text)}
+    объявление = re.compile(r"export function (\w+)\((.*?)\):\s*([^;]+);", re.S)
+
+    return {found.group(1): found.group(3).strip() == "void"
+            for found in объявление.finditer(text)}
 
 
 def ours(path: pathlib.Path) -> set[str]:
@@ -45,8 +54,11 @@ def main() -> int:
         print(__doc__)
         return 2
 
-    нехватка = sorted(theirs(pathlib.Path(sys.argv[1]))
-                      - ours(pathlib.Path("client-js/js/alt_natives_table.js")))
+    объявлено = theirs(pathlib.Path(sys.argv[1]))
+    наши = ours(pathlib.Path("client-js/js/alt_natives_table.js"))
+
+    нехватка = sorted(set(объявлено) - наши)
+    молчащие = sorted(name for name in нехватка if объявлено[name])
 
     print("// Нативы, которые объявляет alt:V, а у нас их нет.")
     print("//")
@@ -58,6 +70,10 @@ def main() -> int:
     print("//")
     print("// Хешей здесь нет и быть не может: их нет ни в открытой базе имён, ни в")
     print("// объявлениях alt:V, а выдумывать нельзя — неверный роняет игру.")
+    print("//")
+    print("// Списка два, и делятся они по тому же правилу, что и весь слой alt:V:")
+    print("// натив, объявленный `void`, — распоряжение, и отказ ему шепчется в")
+    print("// журнал один раз; всякий другой — вопрос, и на вопрос отказывают вслух.")
     print("")
     print("'use strict';")
     print("")
@@ -68,9 +84,18 @@ def main() -> int:
         print("        '%s'," % name)
 
     print("    ]);")
+    print("")
+    print("    // Из них те, что ничего не возвращают: распоряжения.")
+    print("    alt.nativesAbsentQuiet = new Set([")
+
+    for name in молчащие:
+        print("        '%s'," % name)
+
+    print("    ]);")
     print("})(globalThis.__oxympAlt);")
 
-    print("// имён: %d" % len(нехватка), file=sys.stderr)
+    print("// имён: %d, из них распоряжений: %d" % (len(нехватка), len(молчащие)),
+          file=sys.stderr)
     return 0
 
 
