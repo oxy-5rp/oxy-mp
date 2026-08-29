@@ -656,6 +656,11 @@
         }
     }
 
+    /// Смена помещения приезжает от клиента: у сервера нет ни персонажа, ни
+    /// натива, чтобы спросить, — а событие такое у alt:V есть и на его стороне.
+    onClient('__oxymp:interior', (player, было, стало) =>
+        fire('playerInteriorChange', [player, было, стало]));
+
     onClient('__oxymp:rpc:call', (player, id, name, args) =>
         answerRpc(player, id, name, Array.isArray(args) ? args : []));
 
