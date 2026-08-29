@@ -33,7 +33,8 @@ void printUsage() {
                  "  oxymp [--server <address:port>] [--nickname <name>]\n"
                  "        [--game <game folder>] [--client <module path>]\n"
                  "        [--setup] [--direct | --attach | --standalone] [--freemode]\n"
-                 "        [--netgame | --netgame-full] [--session] [--no-ui]\n\n"
+                 "        [--netgame | --netgame-full] [--no-session | --session-raw]\n"
+                 "        [--no-ui]\n\n"
                  "  (default)  show the launcher window and start the game the same way\n"
                  "             alt:V does: the platform the game was bought on is asked to\n"
                  "             start it (Rockstar Games Launcher, Steam or Epic Games Store),\n"
@@ -64,9 +65,12 @@ void printUsage() {
                  "             expected outcome. What changed is in the client log.\n"
                  "  --netgame-full  the same plus the intermediate 'connecting' state. That\n"
                  "             flag sits closer to the session state machine and is stricter.\n"
-                 "  --session  ask the game to bring up a real network session with its own\n"
-                 "             function. Unlike --netgame the flag is set by the game itself,\n"
-                 "             together with the session objects the fake was missing.\n";
+                 "  --no-session  do not ask the game for a network session. Without one the\n"
+                 "             game is single player: the fake flag alone gives the branches\n"
+                 "             but not the session objects behind them, and it crashes.\n"
+                 "  --session-raw  bring the session up without holding network_bail. The\n"
+                 "             game then leaves it within a second - for measuring, not\n"
+                 "             for playing.\n";
 }
 
 /// Что лаунчер берёт из настроек рядом с собой.

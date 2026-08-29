@@ -82,9 +82,14 @@
     ///
     /// Вопросы этим не покрываются и покрываться не должны: у вопроса без
     /// ответа тишина — это ложь, и `absent` для них остаётся.
-    function unperformed(what, why) {
+    /// `answer` — что вернуть. У alt:V многие распоряжения отвечают признаком
+    /// «получилось», и `undefined` вместо него — та же ложь, что и заглушка:
+    /// оно ложно, но ложно случайно, а не потому, что мы это сказали. Сверка
+    /// машинная: `tools/altvparity/refusal_kind.py`.
+    function unperformed(what, why, answer) {
         return function () {
             warnOnce(what, why);
+            return answer;
         };
     }
 
@@ -1245,7 +1250,7 @@
         /// показан куклой, и умытым бы он у них не стал.
         clearBloodDamage: {
             value() {
-                __oxymp.clearBlood(this.id);
+                return native.clearBlood(this.id);
             },
         },
         /// Одежда и аксессуары есть у ядра и работают: `setClothes`, `setProp`
@@ -1264,11 +1269,12 @@
         setDlcClothes: {
             value: unperformed('player.setDlcClothes',
                                'одежду из наборов зовите setClothes со сквозным номером: ' +
-                               'вещи наборов идут следом за основными'),
+                               'вещи наборов идут следом за основными', false),
         },
         setDlcProp: {
             value: unperformed('player.setDlcProp',
-                               'аксессуары из наборов зовите setProp со сквозным номером'),
+                               'аксессуары из наборов зовите setProp со сквозным номером',
+                               false),
         },
         /// Вопрос, а не распоряжение: молча ответить нечем, и потому он
         /// отказывает вслух. Ответ «набор нулевой» был бы ложью про всякую
@@ -2294,7 +2300,7 @@
         /// затирать назначенное.
         getHeadBlendPaletteColor: absent('player.getHeadBlendPaletteColor'),
         setHeadBlendPaletteColor: unperformed('player.setHeadBlendPaletteColor',
-                                              'цвета лица из палитры по сети не едут'),
+                                              'цвета лица из палитры по сети не едут', false),
         removeHeadBlendPaletteColor: unperformed('player.removeHeadBlendPaletteColor',
                                                  'цвета лица из палитры по сети не едут'),
 

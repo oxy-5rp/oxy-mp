@@ -127,6 +127,60 @@ alt:V. Таблица порождается из открытой базы им
 `tools/nativegen/nativetable.py`. Правка в готовой таблице пропала бы при первой
 же пересборке.
 
+## `refusal_kind.py` — вопрос ли кричит и распоряжение ли шепчет
+
+```powershell
+python tools\altvparity\refusal_kind.py "$T\types-server\index.d.ts" `
+    script-js\js\alt_server.js
+
+python tools\altvparity\refusal_kind.py "$T\types-client\index.d.ts" `
+    client-js\js\alt_client.js client-js\js\alt_client_entities.js `
+    client-js\js\alt_client_extras.js client-js\js\alt_client_objects.js
+```
+
+Правило слоя делит отказы по роду: вопрос без ответа бросает, распоряжение
+говорит о себе раз в журнал и возвращается. Род берётся у alt:V — объявленный
+`void` распоряжение, всякий другой вопрос.
+
+Перепутанные они дают две разные беды, и обе молчат. Распоряжение, которое
+бросает, уносит с собой весь чужой обработчик — так `player.model` однажды унёс
+вход игрока целиком. Вопрос, который шепчет, отдаёт `undefined`, и принявший его
+за ответ понесёт эту ложь дальше.
+
+Первый прогон нашёл троих: `setDlcClothes`, `setDlcProp` и
+`setHeadBlendPaletteColor` отвечают у alt:V признаком «получилось», а у нас
+отвечали пустотой. Пустота там ложна случайно (`undefined` ложен), а не потому,
+что мы это сказали, — теперь отвечают `false` прямо.
+
+Отвечающее в счёт не идёт, и это не послабление: `warnOnce`, за которым стоит
+настоящий `return`, — не отказ, а оговорка при неполном ответе
+(`vehicle.getDamageStatusBase64` сообщает, что вмятин в записи нет, и отдаёт
+запись). Проверено подсадкой: `unperformed` → `absent` у `player.setWeather`
+сверка ловит.
+
+## `core_calls.py` — не зовёт ли слой того, чего у ядра нет
+
+```powershell
+python tools\altvparity\core_calls.py script-js\src\bindings.cpp `
+    script-js\js\alt_server.js
+
+python tools\altvparity\core_calls.py client-js\src\bindings.cpp `
+    client-js\js\alt_client*.js client-js\js\alt_natives.js
+```
+
+Имена ядру заводит C++ строкой — `addFunction(context, oxymp, "playSpeech", …)`,
+— и опечатка в слое не даёт ни ошибки сборки, ни строки в журнале до самого
+вызова. А вызов стоит посреди чужого обработчика, и `ReferenceError` уносит с
+собой всё, что шло следом.
+
+Завелась эта сверка по случаю: `__oxymp.clearBlood` вместо `native.clearBlood`
+унёс весь `playerConnect` живого режима — при зелёном наборе из 594 проверок.
+Набор такого не видит, потому что метод, которого никто в проверках не зовёт,
+для него не существует; живой режим зовёт его первым делом.
+
+Машинное продолжение правила из `CLAUDE.md`: **заводя дорогу от слоя к ядру,
+проверяйте, что по ней кто-то ходит.**
+
 ## Чего они не заменяют
 
 Ни один из четырёх не говорит, что найденное **работает**. Разошедшийся довод
