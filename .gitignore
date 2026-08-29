@@ -24,3 +24,4 @@ CMakeFiles/
 /logs/
 oxymp.json
 server.json
+__pycache__/
