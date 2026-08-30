@@ -4,6 +4,7 @@
 #include "convert.hpp"
 
 #include <oxymp/script/js/alt_seat.hpp>
+#include <oxymp/shared/math/joaat.hpp>
 
 #include <alt_bootstrap.hpp>
 #include <alt_enums.hpp>
@@ -20,6 +21,21 @@
 
 namespace oxymp::script::js {
 namespace {
+
+/// Имя движения числом, как его отдаёт alt:V.
+///
+/// У него `currentAnimationDict` и доводы `playerAnimationChange` объявлены
+/// числами, а не строками: в его дереве синхронизации лежат хеши. Отдай мы
+/// строку — сравнение с `alt.hash('...')`, каким его пишут в режимах, не
+/// сошлось бы никогда, и молча.
+///
+/// Пусто означает «не играет ничего», и это ноль, а не хеш пустой строки: ноль
+/// у alt:V и означает пустоту.
+[[nodiscard]] v8::Local<v8::Value> animationHash(v8::Isolate* isolate,
+                                                 const std::string& name) {
+    return v8::Number::New(isolate,
+                           name.empty() ? 0.0 : static_cast<double>(shared::joaat(name)));
+}
 
 /// Как событие сессии называется в скрипте.
 ///
@@ -56,6 +72,8 @@ namespace {
         return "playerChangedVehicleSeat";
     case EventKind::PlayerWeaponChange:
         return "playerWeaponChange";
+    case EventKind::PlayerAnimationChange:
+        return "playerAnimationChange";
     case EventKind::PlayerDamage:
         return "playerDamage";
     case EventKind::ServerStarted:
@@ -557,6 +575,17 @@ bool Resource::dispatch(const Event& event) {
         arguments.push_back(wrapPlayer(*this, context, event.player.id()));
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weaponWas)));
         arguments.push_back(v8::Number::New(isolate, static_cast<double>(event.weapon)));
+        break;
+
+    case EventKind::PlayerAnimationChange:
+        // Порядок доводов — alt:V: игрок, прежний набор, нынешний набор,
+        // прежнее имя, нынешнее. Наборы идут парой и имена парой, а не
+        // «прежнее целиком, потом нынешнее», и переставлять их нельзя.
+        arguments.push_back(wrapPlayer(*this, context, event.player.id()));
+        arguments.push_back(animationHash(isolate, event.animationDictionaryWas));
+        arguments.push_back(animationHash(isolate, event.animationDictionary));
+        arguments.push_back(animationHash(isolate, event.animationNameWas));
+        arguments.push_back(animationHash(isolate, event.animationName));
         break;
 
     case EventKind::PlayerDamage:

@@ -22,8 +22,8 @@ class ScriptedMotion {
 public:
     explicit ScriptedMotion(const NativeTable& table) noexcept;
 
-    /// Запоминает начатое движение. `now` — часы игры.
-    void begin(const shared::PlayerAnimation& animation, std::int32_t now);
+    /// Запоминает начатое движение.
+    void begin(const shared::PlayerAnimation& animation);
 
     /// Забывает движение, не спрашивая игру. Для тех случаев, когда его сняли
     /// мы сами: зачисткой задач, смертью, пересозданием тела.
@@ -35,7 +35,7 @@ public:
     ///
     /// Кончившееся забывается тут же: держать за телом движение, которого нет,
     /// значит не вести его вовсе.
-    [[nodiscard]] bool playing(int ped, std::int32_t now);
+    [[nodiscard]] bool playing(int ped);
 
     /// Набор и имя того, что играет. Пусто — не играет ничего.
     ///
@@ -47,8 +47,15 @@ public:
     [[nodiscard]] bool named() const noexcept { return !dictionary_.empty() || scenario_; }
 
 private:
+    /// Часы игры в миллисекундах.
+    [[nodiscard]] std::int32_t now() const;
+
     NativeHandler playingAnim_ = nullptr;
     NativeHandler usingScenario_ = nullptr;
+
+    /// Часы спрашиваются здесь, а не приходят доводом, и это не мелочь: отсрочку
+    /// меряют двое, и разные часы у них означали бы разную отсрочку.
+    NativeHandler gameTimer_ = nullptr;
 
     /// Пустой набор означает, что такого движения нет. Хранятся строками, а не
     /// взглядом на них: имя приходит в сообщении, которое кончится раньше, чем

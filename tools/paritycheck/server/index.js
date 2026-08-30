@@ -74,6 +74,46 @@ alt.on('playerChangedVehicleSeat', (player, vehicle, was, now) =>
 alt.on('playerWeaponChange', (player, was, now) =>
     alt.log(`[ok] playerWeaponChange ${player.name}: ${was} -> ${now}`));
 
+// Движение, которое велел сервер. Проверяется вся цепочка целиком: начало
+// объявляет сервер (он и велел), а конец узнаёт от хозяина — доигрывает
+// движение игра у него, и признак в снимке единственное, чем он об этом
+// говорит. Ошибись мы в любом звене, конца не пришло бы вовсе, и движение
+// осталось бы за игроком до конца сессии.
+alt.on('playerAnimationChange', (player, wasDict, nowDict, wasName, nowName) =>
+    alt.log(`[ok] playerAnimationChange ${player.name}: ` +
+            `${wasDict}/${wasName} -> ${nowDict}/${nowName}`));
+
+alt.on('playerConnect', (player) => {
+    setTimeout(() => {
+        if (!player.valid) {
+            return;
+        }
+
+        const dict = 'amb@world_human_hang_out_street@male_c@base';
+
+        alt.log(`[движение] велим ${dict}`);
+        player.playAnimation(dict, 'base', 8.0, 8.0, 4000, 0);
+        alt.emitClient(player, 'паритет:движение', dict, 'base');
+
+        // Свойства спрашиваются числами: у alt:V они хеши, а не строки.
+        setTimeout(() => {
+            if (player.valid) {
+                alt.log(`[движение] идёт: набор ${player.currentAnimationDict}, ` +
+                        `имя ${player.currentAnimationName}, ` +
+                        `ждём ${alt.hash(dict)}/${alt.hash('base')}`);
+            }
+        }, 1500);
+
+        // И через срок больше четырёх секунд — должно кончиться само.
+        setTimeout(() => {
+            if (player.valid) {
+                alt.log(`[движение] после конца: набор ${player.currentAnimationDict}, ` +
+                        `имя ${player.currentAnimationName} (ждём 0/0)`);
+            }
+        }, 7000);
+    }, 12000);
+});
+
 alt.on('weaponDamage', (source, target, weapon, damage) => {
     alt.log(`[ok] weaponDamage ${source?.name} -> ${target.name}, ${damage} из ${weapon}`);
     // Не отменяем: цель проверки — что событие приходит, а не что оно работает
@@ -1289,8 +1329,18 @@ alt.onClient('paritycheck:своиЧисла', (player, увиденное) => {
 // спросить. Проверяется переносом в помещение и обратно — иначе его не увидеть,
 // пока игрок сам не зайдёт в здание.
 
-alt.on('playerInteriorChange', (player, было, стало) =>
-    alt.log(`[ok] playerInteriorChange у ${player.name}: ${было} -> ${стало}`));
+alt.on('playerInteriorChange', (player, было, стало) => {
+    alt.log(`[ok] playerInteriorChange у ${player.name}: ${было} -> ${стало}`);
+
+    // Событие и свойство обязаны говорить одно: свойство отвечает из той же
+    // памяти, которую наполняет это событие. Разойдись они — режим, спросивший
+    // «где он сейчас», получил бы вчерашний ответ.
+    if (player.currentInterior === стало) {
+        alt.log('[ok] currentInterior сошлось с событием');
+    } else {
+        alt.log(`[БЕДА] currentInterior ${player.currentInterior}, а событие ${стало}`);
+    }
+});
 
 alt.on('playerConnect', (player) => {
     setTimeout(() => {

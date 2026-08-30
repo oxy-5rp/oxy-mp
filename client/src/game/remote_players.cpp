@@ -841,7 +841,7 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
                 .flags = player.state.flags,
                 .verticalSpeed = player.state.velocity.z,
                 .limp = limp,
-                .scripted = !limp && scripted(puppet, now),
+                .scripted = !limp && scripted(puppet),
                 .leaving = puppet.leavingSince != 0,
                 .carried = shared::has(player.state.flags, shared::PlayerFlag::InVehicle) &&
                            vehicles_.handleFor(player.state.vehicleId) != 0,
@@ -1403,8 +1403,7 @@ bool RemotePlayers::animate(shared::PlayerId player, const shared::PlayerAnimati
         known->second.scripted.emplace(table_);
     }
 
-    known->second.scripted->begin(
-        animation, gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0);
+    known->second.scripted->begin(animation);
 
     return true;
 }
@@ -1426,8 +1425,8 @@ bool RemotePlayers::stopAnimating(shared::PlayerId player) {
     return true;
 }
 
-bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
-    return puppet.scripted && puppet.scripted->playing(puppet.ped, now);
+bool RemotePlayers::scripted(Puppet& puppet) const {
+    return puppet.scripted && puppet.scripted->playing(puppet.ped);
 }
 
 bool RemotePlayers::ownFire(const Puppet& puppet) const {

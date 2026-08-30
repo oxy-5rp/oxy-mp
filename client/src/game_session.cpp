@@ -153,6 +153,7 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
       world_(table),
       frontend_(table),
       pedAnimation_(table),
+      ownMotion_(table),
       explosions_(table),
       vehicleEntry_(table),
       blips_(table),
@@ -1032,10 +1033,15 @@ void GameSession::applyAnimations(int ped) {
             if (ped != 0) {
                 if (clearing) {
                     pedAnimation_.clearTasks(ped);
+                    ownMotion_.forget();
                     return true;
                 }
 
                 if (pedAnimation_.playNamed(ped, pending.animation)) {
+                    // Помним ровно затем, чтобы сказать серверу, когда оно
+                    // кончится: доигрывает его игра здесь, и узнать об этом
+                    // больше некому.
+                    ownMotion_.begin(pending.animation);
                     return true;
                 }
             }
@@ -1506,6 +1512,7 @@ void GameSession::runScripts() {
 
             hooks.showView = views.show;
             hooks.focusView = views.focus;
+            hooks.showCursor = views.cursor;
         } else {
             spdlog::warn("no interface layer: resource windows will not open");
         }
@@ -1894,6 +1901,13 @@ void GameSession::publishLocalState(int player, int ped, bool dead) {
     // этого мы для них не существуем: сервер рассылает лишь то, что ему
     // прислали.
     shared::PlayerState state = player_.snapshot(player, ped, dead);
+
+    // Идёт ли ещё движение, которое велел сервер. Спрашивается у игры каждый
+    // кадр, а не считается по времени: у движения бывает и повтор без конца, и
+    // своя длительность, и досрочный конец от чужой задачи.
+    if (ownMotion_.playing(ped)) {
+        state.flags |= static_cast<std::uint32_t>(shared::PlayerFlag::Animating);
+    }
 
     // Машина, до которой нам есть дело: та, в которой сидим, а если ни в какой,
     // то та, в которую лезем. Второе объявляется наравне с первым и не для

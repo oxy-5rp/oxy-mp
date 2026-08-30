@@ -389,7 +389,6 @@
         ['connectionQueueAdd', 'очереди подключений у нас нет'],
         ['connectionQueueRemove', 'очереди подключений у нас нет'],
         ['givePedScriptedTask', 'задачи прохожих по сети не едут'],
-        ['playerAnimationChange', 'состояние движения по сети не едет'],
         ['playerRequestControl', 'прав на сущность клиент не просит: ведущего назначает сервер'],
         ['requestSyncedScene', 'согласованных сцен у нас нет'],
         ['startSyncedScene', 'согласованных сцен у нас нет'],
@@ -704,10 +703,19 @@
         }
     }
 
+    /// В каком помещении какой игрок, по последнему его сообщению.
+    ///
+    /// Ключ — номер игрока, и потому запись обязательно убирается по выходу:
+    /// номера сервер выдаёт заново, и оставленное досталось бы следующему под
+    /// тем же номером. Ноль означает «под открытым небом» — так же, как у игры.
+    const помещения = new Map();
+
     /// Смена помещения приезжает от клиента: у сервера нет ни персонажа, ни
     /// натива, чтобы спросить, — а событие такое у alt:V есть и на его стороне.
-    onClient('__oxymp:interior', (player, было, стало) =>
-        fire('playerInteriorChange', [player, было, стало]));
+    onClient('__oxymp:interior', (player, было, стало) => {
+        помещения.set(player.id, стало);
+        fire('playerInteriorChange', [player, было, стало]);
+    });
 
     onClient('__oxymp:rpc:call', (player, id, name, args) =>
         answerRpc(player, id, name, Array.isArray(args) ? args : []));
@@ -1133,9 +1141,16 @@
         discordID: { get: absent('player.discordID') },
         hwid3: { get: absent('player.hwid3') },
         hwidExHash: { get: absent('player.hwidExHash') },
-        currentAnimationDict: { get: absent('player.currentAnimationDict') },
-        currentAnimationName: { get: absent('player.currentAnimationName') },
-        currentInterior: { get: absent('player.currentInterior') },
+        /// Помещение, в котором игрок стоит. Ноль — под открытым небом.
+        ///
+        /// Приезжает от клиента: у сервера нет ни персонажа, ни натива, чтобы
+        /// спросить. До первого его сообщения — ноль, и это не ложь: игрок
+        /// появляется на улице, а о входе внутрь клиент сообщает сразу.
+        currentInterior: {
+            get() {
+                return помещения.get(this.id) ?? 0;
+            },
+        },
         entityAimingAt: { get: absent('player.entityAimingAt') },
         entityAimOffset: { get: absent('player.entityAimOffset') },
         flashlightActive: { get: absent('player.flashlightActive') },
@@ -2412,6 +2427,7 @@
 
     // Уходящий уносит свои личные метаданные с собой: номер игрока сервер
     // выдаёт заново, и оставленное досталось бы следующему под тем же номером.
+    on('playerDisconnect', (player) => помещения.delete(player.id));
     on('playerDisconnect', (player) => localStore.delete(player.id));
     on('playerDisconnect', (player) => forget('player', player.id));
     on('vehicleDestroy', (vehicle) => forget('vehicle', vehicle.id));

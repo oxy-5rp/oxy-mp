@@ -44,7 +44,7 @@ extern "C" {
  *
  * Увеличивается при всяком изменении состава или порядка полей ниже.
  */
-#define OXYMP_CLIENT_JS_ABI_VERSION 6u
+#define OXYMP_CLIENT_JS_ABI_VERSION 7u
 
 /* Строка: указатель и длина. Нулём оканчиваться не обязана. */
 typedef struct OxympJsText {
@@ -257,6 +257,18 @@ typedef struct OxympJsHost {
     /* Показывать ли окно и брать ли им мышь. */
     void (*setWebViewVisible)(void* context, uint32_t view, int32_t visible);
     void (*setWebViewFocused)(void* context, uint32_t view, int32_t focused);
+
+    /* Просит показать указатель мыши или отпускает эту просьбу.
+     *
+     * Счётчиком, а не признаком: два окна режима просят его независимо, и
+     * закрытие одного не должно отнимать указатель у второго. Так же считает и
+     * alt:V.
+     *
+     * Нужно отдельно от setWebViewFocused, потому что просьбы разные: внимание
+     * отдают одному окну, а указатель показывают поверх всего кадра — и
+     * попросить его может режим, у которого окна нет вовсе.
+     */
+    void (*showCursor)(void* context, int32_t show);
 } OxympJsHost;
 
 /* Что умеет машина.

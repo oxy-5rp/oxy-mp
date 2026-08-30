@@ -205,6 +205,12 @@ public:
 
         /// Модель машины, какой обработчик увидел её в это мгновение.
         std::uint32_t vehicleModel = 0;
+
+        /// Движение: прежнее и нынешнее, набором и именем.
+        std::string wasDictionary;
+        std::string wasName;
+        std::string dictionary;
+        std::string name;
     };
 
     std::vector<Seen> seen;
@@ -215,6 +221,10 @@ public:
             .player = event.player.valid() ? event.player.id() : shared::kInvalidPlayerId,
             .killer = event.killer.valid() ? event.killer.id() : shared::kInvalidPlayerId,
             .vehicleModel = event.vehicle.model(),
+            .wasDictionary = event.animationDictionaryWas,
+            .wasName = event.animationNameWas,
+            .dictionary = event.animationDictionary,
+            .name = event.animationName,
         });
 
         return true;
@@ -980,6 +990,88 @@ TEST_CASE("moving a player to the layer it is already in says nothing",
     REQUIRE(session.core.setDimension(player.id, 7));
 
     CHECK(recorder.seen.empty());
+}
+
+// Начало движения известно самому серверу — он его и велел, — и объявляется
+// оттуда же. Конец известен только хозяину и приходит признаком в снимке.
+TEST_CASE("telling a player to move announces the change", "[server][script]") {
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+    session.events.subscribe(&recorder);
+
+    script::AnimationInfo animation;
+    animation.dictionary = "amb@world_human_hang_out_street@male_c@base";
+    animation.name = "base";
+
+    REQUIRE(session.core.playAnimation(player.id, animation));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PlayerAnimationChange);
+    CHECK(recorder.seen.front().wasDictionary.empty());
+    CHECK(recorder.seen.front().dictionary == animation.dictionary);
+    CHECK(recorder.seen.front().name == "base");
+}
+
+TEST_CASE("clearing tasks ends the movement the server asked for", "[server][script]") {
+    // Не объяви мы этого, сервер до срока считал бы движение идущим — а клиент
+    // снял его в тот же миг.
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+
+    script::AnimationInfo animation;
+    animation.dictionary = "набор";
+    animation.name = "движение";
+    REQUIRE(session.core.playAnimation(player.id, animation));
+
+    session.events.subscribe(&recorder);
+    REQUIRE(session.core.clearTasks(player.id));
+
+    REQUIRE(recorder.seen.size() == 1);
+    CHECK(recorder.seen.front().kind == script::EventKind::PlayerAnimationChange);
+    CHECK(recorder.seen.front().wasDictionary == "набор");
+    CHECK(recorder.seen.front().wasName == "движение");
+    CHECK(recorder.seen.front().dictionary.empty());
+    CHECK(recorder.seen.front().name.empty());
+}
+
+TEST_CASE("the same movement twice is not a change", "[server][script]") {
+    // Иначе повторное распоряжение о том же самом объявлялось бы сменой, и
+    // режим, считающий их, насчитал бы вдвое больше.
+    Session session;
+    Recorder recorder;
+
+    Player& player = session.join(1, "oxy");
+
+    script::AnimationInfo animation;
+    animation.dictionary = "набор";
+    animation.name = "движение";
+    REQUIRE(session.core.playAnimation(player.id, animation));
+
+    session.events.subscribe(&recorder);
+    REQUIRE(session.core.playAnimation(player.id, animation));
+
+    CHECK(recorder.seen.empty());
+}
+
+TEST_CASE("a scenario is not a movement with a dictionary", "[server][script]") {
+    // У alt:V сценарий в currentAnimationDict не попадает: имя его — одно слово,
+    // а не пара «набор и движение».
+    Session session;
+
+    Player& player = session.join(1, "oxy");
+
+    script::AnimationInfo scenario;
+    scenario.scenario = "WORLD_HUMAN_SMOKING";
+    REQUIRE(session.core.playAnimation(player.id, scenario));
+
+    const auto info = session.core.player(player.id);
+    REQUIRE(info.has_value());
+    CHECK(info->animationDictionary.empty());
+    CHECK(info->animationName.empty());
 }
 
 TEST_CASE("healing is told apart from taking damage", "[server][script]") {

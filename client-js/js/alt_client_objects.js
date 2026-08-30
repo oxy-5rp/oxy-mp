@@ -11,6 +11,7 @@
 
 (function build(alt) {
     const shared = alt.shared;
+    const native = alt.native;
     const natives = alt.natives;
 
     /// Отказ вслух. Тот же, что у сущностей: вопрос без ответа обязан отказать,
@@ -805,10 +806,20 @@
     let cursorRequests = 0;
 
     function showCursor(show) {
+        const было = cursorRequests;
+
         cursorRequests += show ? 1 : -1;
 
         if (cursorRequests < 0) {
             cursorRequests = 0;
+        }
+
+        // Клиенту говорится только о переходе через ноль: у игры свой указатель
+        // на кадр, а у Windows — свой, и второй показывается перехватом ввода.
+        // Без него указателя не появлялось вовсе: игра рисует свой поверх кадра,
+        // а окно ресурса живёт в Chromium, которому нужен настоящий.
+        if ((было === 0) !== (cursorRequests === 0)) {
+            native.showCursor(cursorRequests > 0);
         }
     }
 

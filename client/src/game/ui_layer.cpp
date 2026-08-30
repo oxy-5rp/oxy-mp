@@ -393,6 +393,12 @@ struct UiLayer::State {
         }
     }
 
+    /// Сколько раз просили показать указатель мыши.
+    ///
+    /// Атомарный: просьба приходит из потока скриптовой машины, а спрашивает о
+    /// ней перехват ввода в своём.
+    std::atomic<int> cursorRequests{0};
+
     /// Просит ли ввод хоть одно окно ресурса.
     [[nodiscard]] bool viewWantsInput() {
         const std::lock_guard guard{viewsMutex};
@@ -453,8 +459,33 @@ struct UiLayer::State {
     ///
     /// Не то же самое, что «открыто меню»: консоль страницы живёт поверх меню и
     /// вне его — открытая при закрытом меню, она всё равно принимает набор.
-    [[nodiscard]] bool pageWantsInput() const {
-        return menu != nullptr && (menu->opened() || menu->consoleOpen());
+    [[nodiscard]] bool pageWantsInput() {
+        // Окна ресурсов спрашиваются наравне с нашим меню, и об этом однажды
+        // забыли: `viewWantsInput` был написан и не звался ниоткуда. Наружу это
+        // выходило так, что открытое режимом окно не получало ни мыши, ни
+        // указателя — «мышка не появляется, даже если её вызывает мод».
+        return (menu != nullptr && (menu->opened() || menu->consoleOpen())) ||
+               viewWantsInput() || cursorRequests.load() > 0;
+    }
+
+    /// Окно ресурса, которому сейчас отдавать ввод. Пусто — нашему меню.
+    ///
+    /// Наше меню сильнее: открытое поверх окна режима, оно и должно принимать
+    /// нажатия — иначе из него нельзя было бы выйти.
+    [[nodiscard]] cefui::Browser* focusedView() {
+        if (menu != nullptr && (menu->opened() || menu->consoleOpen())) {
+            return nullptr;
+        }
+
+        const std::lock_guard guard{viewsMutex};
+
+        for (const std::unique_ptr<ResourceView>& each : views) {
+            if (each->focused && each->surface.browser != nullptr) {
+                return each->surface.browser.get();
+            }
+        }
+
+        return nullptr;
     }
 
     /// Просит выйти из игры так, как об этом просят у alt:V.
@@ -496,6 +527,7 @@ struct UiLayer::State {
         actions.console = [this] { menu->toggleConsole(); };
         actions.askExit = [this] { askExit(); };
         actions.exitNow = quit;
+        actions.target = [this] { return focusedView(); };
 
         // Клавиши игры уходят клиентским половинам ресурсов. Обработчик
         // спрашивается на каждое нажатие, а не запоминается: слой поднимается
@@ -768,6 +800,21 @@ void UiLayer::focusView(std::uint32_t view, bool focused) {
 
     state_->viewRequests.push_back(State::ViewRequest{
         .kind = State::ViewRequest::Kind::Focus, .view = view, .flag = focused});
+}
+
+void UiLayer::showCursor(bool show) {
+    if (state_ == nullptr) {
+        return;
+    }
+
+    // Считается здесь, а не в слое alt:V, и это не дублирование: слой считает
+    // просьбы одного ресурса, а сюда сходятся все — и указатель должен гаснуть
+    // только когда его отпустил последний.
+    state_->cursorRequests.fetch_add(show ? 1 : -1);
+
+    if (state_->cursorRequests.load() < 0) {
+        state_->cursorRequests.store(0);
+    }
 }
 
 void UiLayer::onGameKey(GameKeyHandler handler) {

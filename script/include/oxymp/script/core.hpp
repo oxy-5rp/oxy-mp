@@ -88,6 +88,14 @@ struct PlayerInfo {
     std::uint32_t weapon = 0;
     std::uint16_t ammo = 0;
 
+    /// Движение, которое велел сервер и которое ещё идёт. Пусто — не идёт
+    /// ничего.
+    ///
+    /// Строками, а не хешами, хотя наружу они уходят числами: строку сервер и
+    /// велел, а посчитать из неё хеш можно, обратно — нет.
+    std::string animationDictionary;
+    std::string animationName;
+
     /// В каком слое мира находится. См. dimension.hpp.
     std::int32_t dimension = kDefaultDimension;
 

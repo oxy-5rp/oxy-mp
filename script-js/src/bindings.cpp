@@ -520,6 +520,29 @@ void playerHasWeapon(const v8::FunctionCallbackInfo<v8::Value>& info) {
 /// Ствол в руках называет снимок, а его подробности лежат в снаряжении: это
 /// два разных источника, и сводятся они здесь. Пустота означает «в руках
 /// ничего, о чём мы знаем» — кулаки в снаряжении не числятся.
+/// Набор или имя идущего движения — числом, как у alt:V.
+///
+/// У него `currentAnimationDict` и `currentAnimationName` объявлены числами, а
+/// не строками: в его дереве синхронизации лежат хеши. Отдай мы строку — сравнение
+/// с `alt.hash('...')`, каким его пишут в режимах, не сошлось бы никогда, и молча.
+///
+/// Ноль означает «не играет ничего», и это ноль alt:V, а не хеш пустой строки.
+template<std::string PlayerInfo::*Field>
+void playerAnimationPart(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Isolate* const isolate = info.GetIsolate();
+
+    const std::optional<shared::PlayerId> id = selfPlayer(info);
+    if (!id) {
+        return;
+    }
+
+    const std::optional<PlayerInfo> player = resourceOf(isolate).core().player(*id);
+    const std::string name = player ? (*player).*Field : std::string{};
+
+    info.GetReturnValue().Set(
+        v8::Number::New(isolate, name.empty() ? 0.0 : static_cast<double>(shared::joaat(name))));
+}
+
 template<bool Components>
 void playerHeldWeaponDetail(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
     v8::Isolate* const isolate = info.GetIsolate();
@@ -3714,6 +3737,12 @@ void addGetter(v8::Isolate* isolate, const v8::Local<v8::FunctionTemplate>& shap
     // ехали в снимке с самого начала.
     addGetter(isolate, shape, "currentWeapon", playerField<&PlayerInfo::weapon>);
     addGetter(isolate, shape, "aimPos", playerField<&PlayerInfo::aimAt>);
+
+    // Движение, которое велел сервер и которое ещё идёт. Числами, как у alt:V.
+    addGetter(isolate, shape, "currentAnimationDict",
+              playerAnimationPart<&PlayerInfo::animationDictionary>);
+    addGetter(isolate, shape, "currentAnimationName",
+              playerAnimationPart<&PlayerInfo::animationName>);
 
     // Признаки состояния. Имена и их набор взяты у alt:V дословно, порядок —
     // его же; наши имена признаков (Melee, ExitingVehicle, Ragdoll) с ними не

@@ -394,7 +394,7 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
         return true;
     }
 
-    browser_->sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up, key,
+    page().sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up, key,
                       scan, held(VK_SHIFT), held(VK_CONTROL), held(VK_MENU));
 
     if (down && !isModifier(key)) {
@@ -411,6 +411,16 @@ bool MenuInput::handleQueuedKey(const MSG& message) {
     //
     // Смену раскладки это не ломает: круг раскладок ведём мы сами, выше.
     return true;
+}
+
+cefui::Browser& MenuInput::page() const {
+    if (actions_.target) {
+        if (cefui::Browser* const view = actions_.target(); view != nullptr) {
+            return *view;
+        }
+    }
+
+    return *browser_;
 }
 
 bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
@@ -487,12 +497,12 @@ bool MenuInput::handleKey(unsigned key, unsigned scan, bool down) {
     // Управляющие клавиши доходят до страницы, но не отбираются: ими Windows
     // разбирает свои сочетания.
     if (isModifier(key)) {
-        browser_->sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up,
+        page().sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up,
                           key, scan, held(VK_SHIFT), held(VK_CONTROL), held(VK_MENU));
         return false;
     }
 
-    browser_->sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up, key,
+    page().sendKey(down ? cefui::Browser::KeyAction::Down : cefui::Browser::KeyAction::Up, key,
                       scan, held(VK_SHIFT), held(VK_CONTROL), held(VK_MENU));
 
     if (down) {
@@ -570,7 +580,7 @@ void MenuInput::sendCharacters(unsigned key, unsigned scan) {
             spdlog::debug("буквы отдаются странице: первая — {:#06x}", symbol);
         }
 
-        browser_->sendKey(cefui::Browser::KeyAction::Char, symbol, scan, held(VK_SHIFT),
+        page().sendKey(cefui::Browser::KeyAction::Char, symbol, scan, held(VK_SHIFT),
                           held(VK_CONTROL), held(VK_MENU));
     }
 }
@@ -685,21 +695,21 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
         // Внимание отдаётся странице прямо: окна у неё нет, и Windows не может
         // отнять его в её пользу сама. Без этого поля ввода не показывают
         // курсора и не принимают набранного.
-        browser_->setFocus(open);
+        page().setFocus(open);
 
         // Указатель показывается, пока меню открыто, и прячется, когда оно
         // закрылось. Подробности — у showCursor: там счётчик, а не выключатель.
         showCursor(open, raised_);
 
         if (!open) {
-            browser_->releaseMouse();
+            page().releaseMouse();
         }
     }
 
     // Окно игры снова стало главным — внимание возвращается странице. Сообщение
     // при этом не съедается: игре оно нужно не меньше, чем нам.
     if (open && (message == WM_ACTIVATE || message == WM_SETFOCUS)) {
-        browser_->setFocus(true);
+        page().setFocus(true);
     }
 
     // Раскладку игрового потока мы не трогаем, и это записано кровью.
@@ -734,7 +744,7 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
         return TRUE;
 
     case WM_MOUSEMOVE:
-        browser_->moveMouse(mouseX(lparam), mouseY(lparam));
+        page().moveMouse(mouseX(lparam), mouseY(lparam));
         return 0;
 
     case WM_LBUTTONDOWN:
@@ -751,21 +761,21 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
         //
         // Щелчок — то самое мгновение, когда фокус и требуется: игрок именно
         // что показывает, куда он собрался писать.
-        browser_->setFocus(true);
+        page().setFocus(true);
 
-        browser_->clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Left,
+        page().clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Left,
                              message == WM_LBUTTONDOWN);
         return 0;
 
     case WM_RBUTTONDOWN:
     case WM_RBUTTONUP:
-        browser_->clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Right,
+        page().clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Right,
                              message == WM_RBUTTONDOWN);
         return 0;
 
     case WM_MBUTTONDOWN:
     case WM_MBUTTONUP:
-        browser_->clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Middle,
+        page().clickMouse(mouseX(lparam), mouseY(lparam), cefui::Browser::MouseButton::Middle,
                              message == WM_MBUTTONDOWN);
         return 0;
 
@@ -776,7 +786,7 @@ std::optional<LRESULT> MenuInput::handle(UINT message, WPARAM wparam, LPARAM lpa
         POINT point{mouseX(lparam), mouseY(lparam)};
         ::ScreenToClient(window_, &point);
 
-        browser_->scrollMouse(point.x, point.y, GET_WHEEL_DELTA_WPARAM(wparam));
+        page().scrollMouse(point.x, point.y, GET_WHEEL_DELTA_WPARAM(wparam));
         return 0;
     }
 

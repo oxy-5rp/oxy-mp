@@ -362,6 +362,14 @@ void onSetWebViewFocused(void*, std::uint32_t view_, std::int32_t focused) {
     }
 }
 
+void onShowCursor(void*, std::int32_t show) {
+    ScriptHost::State* const state = current();
+
+    if (state != nullptr && state->hooks.showCursor) {
+        state->hooks.showCursor(show != 0);
+    }
+}
+
 } // namespace
 
 std::unique_ptr<ScriptHost> ScriptHost::load(const std::filesystem::path& clientDirectory,
@@ -423,6 +431,7 @@ std::unique_ptr<ScriptHost> ScriptHost::load(const std::filesystem::path& client
     state->host.emitWebView = &onEmitWebView;
     state->host.setWebViewVisible = &onSetWebViewVisible;
     state->host.setWebViewFocused = &onSetWebViewFocused;
+    state->host.showCursor = &onShowCursor;
 
     // Одиночка ставится до сверки версии: первое, что машина делает в ответ на
     // отказ, — говорит об этом в журнал, а журнал ей отдаём мы.

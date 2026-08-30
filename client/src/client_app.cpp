@@ -1376,7 +1376,8 @@ void run() {
                 },
                 .focus = [layer](std::uint32_t view, bool focused) {
                     layer->focusView(view, focused);
-                }});
+                },
+                .cursor = [layer](bool show) { layer->showCursor(show); }});
 
             // Событие от страницы кладётся в почту, а исполняет его игровой
             // поток: зовут этот обработчик из потока CEF, и трогать оттуда

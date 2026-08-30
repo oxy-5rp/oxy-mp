@@ -975,6 +975,32 @@ TEST_CASE("an unknown order survives the trip unchanged", "[messages]") {
     CHECK(received->order == 200);
 }
 
+TEST_CASE("a movement the server asked for says so in the flags", "[messages]") {
+    // Единственное, что клиент может сказать о движении: идёт оно или нет.
+    // Какое именно — сервер помнит сам, он его и велел; спросить у игры «что
+    // сейчас играет» нечем.
+    PlayerState sent;
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::Animating);
+
+    const auto received = roundTrip(sent);
+
+    REQUIRE(received.has_value());
+    CHECK(has(received->flags, PlayerFlag::Animating));
+}
+
+TEST_CASE("a movement ending is a change worth sending", "[messages]") {
+    // Иначе конец движения доехал бы до сервера только со следующим шагом
+    // хозяина, а у стоящего не доехал бы вовсе — и режим, ждущий конца, не
+    // дождался бы его никогда.
+    PlayerState sent;
+    sent.flags = static_cast<std::uint32_t>(PlayerFlag::Animating);
+
+    PlayerState fresh = sent;
+    fresh.flags = 0;
+
+    CHECK(differs(sent, fresh));
+}
+
 TEST_CASE("standing on a vehicle is not sitting in one", "[messages]") {
     // Два разных признака, и путать их нельзя: сидящий внутри занимает место, а
     // стоящий на крыше — нет, и наложение места усадило бы его в салон.

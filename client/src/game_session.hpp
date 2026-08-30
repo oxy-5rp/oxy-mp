@@ -19,6 +19,7 @@
 #include "game/markers.hpp"
 #include "game/nameplates.hpp"
 #include "game/ped_animation.hpp"
+#include "game/scripted_motion.hpp"
 #include "game/net_session.hpp"
 #include "game/network_bail.hpp"
 #include "game/network_game.hpp"
@@ -401,6 +402,13 @@ private:
     /// ресурса — и играет их в том числе на нашем собственном персонаже,
     /// которого RemotePlayers не касается вовсе.
     game::PedAnimation pedAnimation_;
+
+    /// Движение, которое сервер велел нашему собственному персонажу.
+    ///
+    /// Нужно затем, чтобы сказать серверу, когда оно кончилось: сам он этого не
+    /// узнает — движение доигрывает игра у хозяина. Правило то же, что у кукол,
+    /// и оно нарочно одно на двоих (`scripted_motion.hpp`).
+    game::ScriptedMotion ownMotion_;
 
     /// Взрывы, которые устроил сервер. Своего номера у них нет: взрыв
     /// случается и кончается, помнить о нём нечего.

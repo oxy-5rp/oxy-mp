@@ -283,6 +283,13 @@ public:
     bool playSpeech(shared::PlayerId id, const std::string& speech, const std::string& params,
                     const std::string& voice) override;
     bool clearBlood(shared::PlayerId id) override;
+
+    /// Запоминает движение, которое велели игроку, и объявляет смену.
+    ///
+    /// Объявляет отсюда, а не из разбора снимков, потому что начало движения
+    /// известно нам самим: мы его и велели. Конец известен только хозяину, и
+    /// приходит он признаком в снимке — там же и объявляется, пустым движением.
+    void rememberAnimation(Player& player, std::string dictionary, std::string name);
     bool clearTasks(shared::PlayerId id) override;
     void explode(const script::ExplosionInfo& explosion) override;
 

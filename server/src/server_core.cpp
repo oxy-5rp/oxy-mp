@@ -40,6 +40,11 @@ namespace {
         .weapon = player.state.weapon,
         .ammo = player.state.ammo,
 
+        // Движение помнит сервер: он его и велел. Снимок говорит лишь, идёт ли
+        // оно ещё, — по этому признаку сервер и стирает свою память.
+        .animationDictionary = player.animationDictionary,
+        .animationName = player.animationName,
+
         .dimension = player.dimension,
 
         // Адрес и задержка спрашиваются у рассылки: знает их транспорт, а до
@@ -983,10 +988,15 @@ bool ServerCore::setFaceFeature(shared::PlayerId id, std::uint8_t index, float s
 }
 
 bool ServerCore::playAnimation(shared::PlayerId id, const script::AnimationInfo& animation) {
-    const Player* const player = players_->findById(id);
+    Player* const player = players_->findById(id);
     if (player == nullptr) {
         return false;
     }
+
+    // Сценарий у alt:V своим движением не считается: его имя не пара «набор и
+    // движение», а одно слово, и в `currentAnimationDict` ему места нет.
+    rememberAnimation(*player, animation.scenario.empty() ? animation.dictionary : std::string{},
+                      animation.scenario.empty() ? animation.name : std::string{});
 
     shared::PlayerAnimation message;
     message.playerId = id;
@@ -1036,6 +1046,30 @@ void ServerCore::explode(const script::ExplosionInfo& explosion) {
     sink_->exploded(message, explosion.dimension);
 }
 
+void ServerCore::rememberAnimation(Player& player, std::string dictionary, std::string name) {
+    if (player.animationDictionary == dictionary && player.animationName == name) {
+        return;
+    }
+
+    // Смена объявляется отсюда, а не из разбора снимков, и в этом весь порядок:
+    // начало движения известно нам самим — мы его и велели, — а конец известен
+    // только хозяину, и приходит он признаком в снимке.
+    script::Event event;
+    event.kind = script::EventKind::PlayerAnimationChange;
+    event.player = script::Player{*this, player.id};
+    event.animationDictionaryWas = player.animationDictionary;
+    event.animationNameWas = player.animationName;
+    event.animationDictionary = dictionary;
+    event.animationName = name;
+
+    player.animationDictionary = std::move(dictionary);
+    player.animationName = std::move(name);
+    player.animationAt = std::chrono::steady_clock::now();
+    player.animationSeen = false;
+
+    events_->dispatch(event);
+}
+
 bool ServerCore::clearBlood(shared::PlayerId id) {
     const Player* const player = players_->findById(id);
     if (player == nullptr) {
@@ -1051,10 +1085,14 @@ bool ServerCore::clearBlood(shared::PlayerId id) {
 }
 
 bool ServerCore::clearTasks(shared::PlayerId id) {
-    const Player* const player = players_->findById(id);
+    Player* const player = players_->findById(id);
     if (player == nullptr) {
         return false;
     }
+
+    // Зачистка снимает и заданное движение — то же самое сделает у себя клиент.
+    // Не объяви мы этого здесь, сервер до срока считал бы движение идущим.
+    rememberAnimation(*player, {}, {});
 
     // Пустой набор означает «снять задачи»: по сети это то же самое
     // распоряжение — «перестань делать то, что делаешь».

@@ -262,8 +262,23 @@ private:
                                  shared::VehicleId trailerBefore,
                                  shared::VehicleId trailerAfter);
 
-    void tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
+    void tellScriptsAboutChanges(Player& player, const shared::PlayerState& before,
                                  const shared::PlayerState& after);
+
+    /// Объявляет конец движения, заданного сервером.
+    ///
+    /// Узнать о нём больше неоткуда: доигрывает движение игра у хозяина, и
+    /// признак `Animating` в снимке — единственное, чем он об этом говорит.
+    void settleAnimation(Player& player, const shared::PlayerState& before,
+                         const shared::PlayerState& after);
+
+    /// Сколько сервер ждёт подтверждения, что заданное движение пошло.
+    ///
+    /// Нужно для движения, кончившегося раньше первого снимка: перехода «шло и
+    /// перестало» сервер не увидел бы вовсе, и движение осталось бы за игроком
+    /// до конца сессии. Секунды хватает с запасом: распоряжение доезжает за
+    /// десятки миллисекунд, а снимки идут по тридцать в секунду.
+    static constexpr auto kAnimationWait = std::chrono::seconds{1};
 
     /// Сколько игрок лежит мёртвым, прежде чем сервер поднимет его.
     static constexpr auto kRespawnDelay = std::chrono::seconds{5};

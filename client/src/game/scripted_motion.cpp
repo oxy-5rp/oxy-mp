@@ -20,13 +20,18 @@ constexpr int kPlayingAnimTaskFlag = 3;
 
 ScriptedMotion::ScriptedMotion(const NativeTable& table) noexcept
     : playingAnim_(table.handlerFor(natives::kIsEntityPlayingAnim)),
-      usingScenario_(table.handlerFor(natives::kIsPedUsingScenario)) {}
+      usingScenario_(table.handlerFor(natives::kIsPedUsingScenario)),
+      gameTimer_(table.handlerFor(natives::kGetGameTimer)) {}
 
-void ScriptedMotion::begin(const shared::PlayerAnimation& animation, std::int32_t now) {
+std::int32_t ScriptedMotion::now() const {
+    return gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0;
+}
+
+void ScriptedMotion::begin(const shared::PlayerAnimation& animation) {
     dictionary_ = animation.dictionary;
     scenario_ = !animation.scenario.empty();
     name_ = scenario_ ? animation.scenario : animation.name;
-    startedAt = now;
+    startedAt = now();
 }
 
 void ScriptedMotion::forget() noexcept {
@@ -36,12 +41,12 @@ void ScriptedMotion::forget() noexcept {
     startedAt = 0;
 }
 
-bool ScriptedMotion::playing(int ped, std::int32_t now) {
+bool ScriptedMotion::playing(int ped) {
     if (!named()) {
         return false;
     }
 
-    if (startedAt != 0 && now - startedAt < kGrace) {
+    if (startedAt != 0 && now() - startedAt < kGrace) {
         return true;
     }
 

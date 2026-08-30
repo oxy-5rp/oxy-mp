@@ -2531,7 +2531,7 @@ void Server::tellScriptsAboutVehicle(const Player& owner, shared::VehicleId vehi
     }
 }
 
-void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerState& before,
+void Server::tellScriptsAboutChanges(Player& player, const shared::PlayerState& before,
                                      const shared::PlayerState& after) {
     // Событий здесь пять, и все они — разница, а не сообщение. Если разницы
     // нет, не должно быть и работы: снимок приходит тридцать раз в секунду на
@@ -2596,6 +2596,14 @@ void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerS
              before.seat);
     }
 
+    // Движение, заданное сервером, кончилось. Узнать об этом больше неоткуда:
+    // доигрывает его игра у хозяина, и признак в снимке — единственное, чем он
+    // об этом говорит.
+    //
+    // Объявляется по спаду признака, а не по его отсутствию: распоряжение
+    // доезжает до хозяина не мгновенно, и все снимки до того признака не несут.
+    settleAnimation(player, before, after);
+
     // Оружие в руках. Ноль — безоружен, и переход в ноль такое же событие, как
     // и всякий другой: убрать ствол значит его сменить.
     if (after.weapon != before.weapon) {
@@ -2606,6 +2614,33 @@ void Server::tellScriptsAboutChanges(const Player& player, const shared::PlayerS
         event.weapon = after.weapon;
 
         (void)events_.dispatch(event);
+    }
+}
+
+void Server::settleAnimation(Player& player, const shared::PlayerState& before,
+                             const shared::PlayerState& after) {
+    if (player.animationDictionary.empty() && player.animationName.empty()) {
+        return;
+    }
+
+    if (shared::has(after.flags, shared::PlayerFlag::Animating)) {
+        // Хозяин подтвердил, что движение пошло. До этого мгновения его конец
+        // распознать нельзя: признака нет и не было.
+        player.animationSeen = true;
+        return;
+    }
+
+    const bool stopped = shared::has(before.flags, shared::PlayerFlag::Animating);
+
+    // Срок нужен для движения, которое кончилось раньше первого снимка: перехода
+    // «шло и перестало» сервер не увидел бы вовсе, и движение осталось бы за
+    // игроком до конца сессии. Так же, как у всякого состояния, которого мы не
+    // ведём сами.
+    const bool waited = !player.animationSeen &&
+                        std::chrono::steady_clock::now() - player.animationAt > kAnimationWait;
+
+    if (stopped || waited) {
+        core_.rememberAnimation(player, {}, {});
     }
 }
 

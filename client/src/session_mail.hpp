@@ -677,6 +677,10 @@ public:
         std::function<void(std::uint32_t view, std::string name, std::string arguments)> emit;
         std::function<void(std::uint32_t view, bool visible)> show;
         std::function<void(std::uint32_t view, bool focused)> focus;
+
+        /// Просьба показать указатель мыши. Не про окно: просить его может и
+        /// режим, у которого окна нет вовсе.
+        std::function<void(bool show)> cursor;
     };
 
     void setViewBridge(ViewBridge bridge) {

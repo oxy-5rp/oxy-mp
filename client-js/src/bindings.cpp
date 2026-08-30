@@ -367,6 +367,16 @@ void setWebViewVisible(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
 }
 
+/// Показать указатель мыши или отпустить просьбу о нём.
+void showCursor(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const OxympJsHost& host = resourceOf(info.GetIsolate()).host();
+
+    if (host.showCursor != nullptr) {
+        host.showCursor(host.context,
+                        info.Length() >= 1 && info[0]->BooleanValue(info.GetIsolate()) ? 1 : 0);
+    }
+}
+
 void setWebViewFocused(const v8::FunctionCallbackInfo<v8::Value>& info) {
     const OxympJsHost& host = resourceOf(info.GetIsolate()).host();
 
@@ -421,6 +431,7 @@ void installBindings(Resource& resource, v8::Local<v8::Context> context) {
     addFunction(context, native, "emitWebView", emitWebView);
     addFunction(context, native, "setWebViewVisible", setWebViewVisible);
     addFunction(context, native, "setWebViewFocused", setWebViewFocused);
+    addFunction(context, native, "showCursor", showCursor);
 
     (void)native->Set(context, toJs(isolate, "resourceName"), toJs(isolate, resource.name()));
     (void)native->Set(context, toJs(isolate, "resourcePath"),

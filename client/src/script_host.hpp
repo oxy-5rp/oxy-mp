@@ -131,6 +131,9 @@ public:
 
         /// Отдать окну ввод с клавиатуры или забрать.
         std::function<void(std::uint32_t view, bool focused)> focusView;
+
+        /// Показать указатель мыши или отпустить просьбу о нём.
+        std::function<void(bool show)> showCursor;
     };
 
     /// Грузит машину из каталога рядом с клиентом.
