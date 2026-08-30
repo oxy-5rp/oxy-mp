@@ -32,7 +32,10 @@ from extract import extract
 # Где живёт наша сторона. Слой и ядро, порознь для сервера и для клиента.
 НАШИ = {
     "server": ["script-js/js/alt_*.js", "script-js/src/*.cpp"],
-    "client": ["client-js/js/alt_*.js", "client-js/src/*.cpp"],
+    # Клиентская сторона шире серверной на один каталог: события сессии
+    # (`connectionComplete`, `disconnect`) объявляет не слой и не машина, а сам
+    # клиент — `GameSession::runScripts`. Без него сверка объявляет их немыми.
+    "client": ["client-js/js/alt_*.js", "client-js/src/*.cpp", "client/src/*.cpp"],
 }
 
 # Что сверяется. Порядок для вывода, а не для дела.
@@ -76,8 +79,8 @@ def зовёт(root: str) -> set[str]:
                 continue
 
             try:
-                текст = open(os.path.join(каталог, имя), encoding="utf-8",
-                             errors="replace").read()
+                текст = развернуть(open(os.path.join(каталог, имя), encoding="utf-8",
+                                             errors="replace").read())
             except OSError:
                 continue
 
@@ -112,14 +115,101 @@ def зовёт_у_модуля(root: str) -> set[str]:
                 continue
 
             try:
-                текст = open(os.path.join(каталог, имя), encoding="utf-8",
-                             errors="replace").read()
+                текст = развернуть(open(os.path.join(каталог, имя), encoding="utf-8",
+                                             errors="replace").read())
             except OSError:
                 continue
 
             найдено |= set(образец.findall(текст))
 
     return найдено
+
+
+def события(declarations: str) -> set[str]:
+    """Имена событий, которые объявляет alt:V.
+
+    Лежат они не перечислением, а полями интерфейса `IClientEvent` или
+    `IServerEvent`: `on` объявлен по ключам этого интерфейса.
+    """
+    текст = open(declarations, encoding="utf-8", errors="replace").read()
+    начало = re.search(r"interface I(?:Client|Server)Event\s*{", текст)
+
+    if начало is None:
+        return set()
+
+    глубина, конец = 0, начало.end()
+    for место, знак in enumerate(текст[начало.end() - 1:], начало.end() - 1):
+        глубина += (знак == "{") - (знак == "}")
+        if глубина == 0:
+            конец = место
+            break
+
+    return set(re.findall(r"^\s+(\w+)\s*[?:(]",
+                          текст[начало.end():конец], re.M))
+
+
+def подписки(root: str) -> set[str]:
+    """На какие события режим подписывается."""
+    образец = re.compile(
+        r"\b(?:%s)\.(?:on|once|onClient|onServer)\(\s*['\"](\w+)"
+        % "|".join(ПСЕВДОНИМЫ))
+    найдено: set[str] = set()
+
+    for каталог, _, файлы in os.walk(root):
+        for имя in файлы:
+            if not имя.endswith((".ts", ".cjs", ".js")):
+                continue
+
+            try:
+                найдено |= set(образец.findall(развернуть(
+                    open(os.path.join(каталог, имя), encoding="utf-8",
+                         errors="replace").read())))
+            except OSError:
+                continue
+
+    return найдено
+
+
+def немые_у_нас(patterns: list[str]) -> set[str]:
+    """События, про которые слой сам говорит, что не объявляет их ни разу.
+
+    Берётся из карты `неОбъявляемые` в слое, а не угадывается. Иначе выходит
+    ложь наоборот: имя такого события в наших файлах **есть** — оно там ключом
+    жалобы, — и свободный поиск считает его объявляемым. Так сверка молчала про
+    три события, которые живой запуск нашёл в первую же минуту.
+    """
+    найдено: set[str] = set()
+
+    for образец in patterns:
+        for файл in glob.glob(образец):
+            текст = open(файл, encoding="utf-8", errors="replace").read()
+            место = текст.find("неОбъявляемые")
+
+            if место < 0:
+                continue
+
+            конец = текст.find("]);", место)
+            найдено |= set(re.findall(r"\['(\w+)'",
+                                      текст[место:конец if конец > 0 else None]))
+
+    return найдено
+
+
+def развернуть(текст: str) -> str:
+    """Приводит собранный webpack-ом ресурс к обычному виду.
+
+    Webpack складывает каждый модуль в `eval("…")` одной строкой, и переводы
+    строк в ней записаны двумя знаками — обратной косой и `n`. Отсюда беда,
+    которую видно только на живом ресурсе: перед `altServer.on(` стоит буква
+    `n`, границы слова между ними нет, и поиск по `\\b` не находит ничего.
+
+    Сверка молчала так про `playerAnimationChange`, который живой запуск
+    находил в первую же минуту. А собранных webpack-ом режимов — большинство.
+    """
+    for знак in ("n", "r", "t"):
+        текст = текст.replace("\\" + знак, " ")
+
+    return текст
 
 
 def main() -> int:
@@ -164,6 +254,19 @@ def main() -> int:
         нехватка += len(у_модуля)
         print("\nу самого alt — режим зовёт, у нас нет (%d):" % len(у_модуля))
         print("  " + ", ".join(у_модуля))
+
+    # Третья поверхность: события. Считается только то, что объявляет сам
+    # alt:V, — своих событий у режима вдвое больше наших, и они не в счёт.
+    их_события = события(объявления)
+    объявлено_немыми = немые_у_нас(образцы)
+    немые = sorted(имя for имя in подписки(sys.argv[2])
+                   if имя in их_события
+                   and (имя in объявлено_немыми or имя not in наши))
+
+    if немые:
+        нехватка += len(немые)
+        print("\nсобытия — режим слушает, мы не объявляем (%d):" % len(немые))
+        print("  " + ", ".join(немые))
 
     print("\nсмотрели у себя в: %s" % ", ".join(образцы))
 
