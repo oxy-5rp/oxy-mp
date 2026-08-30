@@ -365,6 +365,7 @@ float angleBetween(float from, float to) {
 
 RemotePlayers::RemotePlayers(const NativeTable& table, const Vehicles& vehicles) noexcept
     : vehicles_(vehicles),
+      table_(table),
       animation_(table),
       appearance_(table),
       hashKey_(table.handlerFor(natives::kGetHashKey)),
@@ -1398,13 +1399,12 @@ bool RemotePlayers::animate(shared::PlayerId player, const shared::PlayerAnimati
     // Сценарий запоминается там же, где движение, и в том же поле имени: занят
     // персонаж одинаково — задачей, которую выдали не мы. Отличает их пустой
     // набор: у сценария его нет вовсе.
-    known->second.scriptedDictionary = animation.dictionary;
-    known->second.scriptedName =
-        animation.scenario.empty() ? animation.name : animation.scenario;
-    known->second.scriptedScenario = !animation.scenario.empty();
-    known->second.scriptedAt = gameTimer_ != nullptr
-                                   ? invokeNative<std::int32_t>(gameTimer_)
-                                   : 0;
+    if (!known->second.scripted) {
+        known->second.scripted.emplace(table_);
+    }
+
+    known->second.scripted->begin(
+        animation, gameTimer_ != nullptr ? invokeNative<std::int32_t>(gameTimer_) : 0);
 
     return true;
 }
@@ -1417,49 +1417,17 @@ bool RemotePlayers::stopAnimating(shared::PlayerId player) {
 
     animation_.clearTasks(known->second.ped);
 
-    known->second.scriptedDictionary.clear();
-    known->second.scriptedName.clear();
-    known->second.scriptedScenario = false;
-    known->second.scriptedAt = 0;
+    if (known->second.scripted) {
+        known->second.scripted->forget();
+    }
+
     known->second.taskedAt = 0;
 
     return true;
 }
 
 bool RemotePlayers::scripted(Puppet& puppet, std::int32_t now) const {
-    if (puppet.scriptedDictionary.empty() && !puppet.scriptedScenario) {
-        return false;
-    }
-
-    // Отсрочка. Задача начинается не в тот же миг, когда её выдали, и вопрос,
-    // заданный сразу, ответит «не играет». Поверив ему, мы снесли бы движение
-    // задачей ходьбы в том же кадре, в котором завели.
-    if (puppet.scriptedAt != 0 && now - puppet.scriptedAt < kScriptedGrace) {
-        return true;
-    }
-
-    // Идёт ли оно ещё, спрашивается у игры, а не считается по времени. У
-    // сценария вопрос свой: набора движений у него нет, и `IS_ENTITY_PLAYING_ANIM`
-    // о нём не знает ничего.
-    if (puppet.scriptedScenario) {
-        if (usingScenario_ != nullptr &&
-            invokeNative<bool>(usingScenario_, puppet.ped, puppet.scriptedName.c_str())) {
-            return true;
-        }
-    } else if (playingAnim_ != nullptr &&
-               invokeNative<bool>(playingAnim_, puppet.ped, puppet.scriptedDictionary.c_str(),
-                                  puppet.scriptedName.c_str(), kPlayingAnimTaskFlag)) {
-        return true;
-    }
-
-    // Кончилось — своим ходом либо чужой задачей. Забываем: держать за куклой
-    // движение, которого нет, значит не вести её вовсе.
-    puppet.scriptedDictionary.clear();
-    puppet.scriptedName.clear();
-    puppet.scriptedScenario = false;
-    puppet.scriptedAt = 0;
-
-    return false;
+    return puppet.scripted && puppet.scripted->playing(puppet.ped, now);
 }
 
 bool RemotePlayers::ownFire(const Puppet& puppet) const {
