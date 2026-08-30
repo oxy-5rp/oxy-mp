@@ -39,6 +39,10 @@ from extract import extract
 КЛАССЫ = ["Player", "Vehicle", "Entity", "Blip", "Colshape",
           "Checkpoint", "Ped", "Object", "Marker"]
 
+# Как режимы называют сам модуль alt. Нужно для верхних имён — тех, что зовут
+# не у сущности, а у модуля: `alt.emit`, `alt.setTimeout`.
+ПСЕВДОНИМЫ = ["alt", "altServer", "altClient", "altShared"]
+
 
 def сторона(declarations: str) -> str:
     """Серверные это объявления или клиентские — по имени файла."""
@@ -82,6 +86,42 @@ def зовёт(root: str) -> set[str]:
     return найдено
 
 
+def верхние(declarations: str) -> set[str]:
+    """Имена, которые alt:V объявляет у самого модуля, а не у класса."""
+    текст = open(declarations, encoding="utf-8", errors="replace").read()
+    текст = re.sub(r"/\*.*?\*/", "", текст, flags=re.S)
+
+    return set(re.findall(r"^\s*export function (\w+)", текст, re.M))
+
+
+def зовёт_у_модуля(root: str) -> set[str]:
+    """То, что режим зовёт именно у модуля alt, а не у чего попало.
+
+    Точнее, чем `зовёт`, и нарочно. У членов класса свободный поиск по точке
+    верен: игроком может оказаться любой объект. У верхних имён — нет:
+    `Utils.loadMapArea` и `camera.getCamPos` совпали бы с объявлениями alt:V,
+    не имея к ним отношения. Ровно четыре таких совпадения и вышло на первом
+    прогоне, и все четыре оказались собственными объектами режима.
+    """
+    образец = re.compile(r"\b(?:%s)\.(\w+)\s*\(" % "|".join(ПСЕВДОНИМЫ))
+    найдено: set[str] = set()
+
+    for каталог, _, файлы in os.walk(root):
+        for имя in файлы:
+            if not имя.endswith((".ts", ".cjs", ".js")):
+                continue
+
+            try:
+                текст = open(os.path.join(каталог, имя), encoding="utf-8",
+                             errors="replace").read()
+            except OSError:
+                continue
+
+            найдено |= set(образец.findall(текст))
+
+    return найдено
+
+
 def main() -> int:
     if len(sys.argv) < 3:
         print(__doc__)
@@ -114,6 +154,16 @@ def main() -> int:
         нехватка += len(нет)
         print("\n%s — режим зовёт, у нас нет (%d):" % (класс, len(нет)))
         print("  " + ", ".join(нет))
+
+    # Верхние имена — вторая половина поверхности, и до этого её не смотрели
+    # вовсе.
+    у_модуля = sorted(член for член in верхние(объявления)
+                      if член not in наши and член in зовёт_у_модуля(sys.argv[2]))
+
+    if у_модуля:
+        нехватка += len(у_модуля)
+        print("\nу самого alt — режим зовёт, у нас нет (%d):" % len(у_модуля))
+        print("  " + ", ".join(у_модуля))
 
     print("\nсмотрели у себя в: %s" % ", ".join(образцы))
 
