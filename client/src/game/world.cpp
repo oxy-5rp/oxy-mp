@@ -49,7 +49,6 @@ World::World(const NativeTable& table) noexcept
       parkedVehicles_(table.handlerFor(natives::kSetNumberOfParkedVehicles)),
       lowPriorityGenerators_(
           table.handlerFor(natives::kSetAllLowPriorityVehicleGeneratorsActive)),
-      clearGenerators_(table.handlerFor(natives::kRemoveVehiclesFromGeneratorsInArea)),
       closestVehicle_(table.handlerFor(natives::kGetClosestVehicle)),
       isMissionEntity_(table.handlerFor(natives::kIsEntityAMissionEntity)),
       deleteVehicle_(table.handlerFor(natives::kDeleteVehicle)) {}
@@ -187,8 +186,12 @@ void World::clearArea(shared::Vec3 centre, float radius) const {
     // Последние признаки нативов очистки означают «не щадить сюжетные объекты»:
     // прохожий, поставленный миссией, для нас такой же лишний, как случайный.
     invokeNative<void>(clearPeds_, centre.x, centre.y, centre.z, radius, false);
+    // Шестой признак и последний, безымянный довод — той же природы, что и
+    // «не щадить сюжетные»: открытая база молчит про них, а натив, звавшийся
+    // без них, читал их нулями из обнулённого NativeContext и так. Явные нули
+    // здесь — не смена поведения, а то, что оно названо, а не подразумевается.
     invokeNative<void>(clearVehicles_, centre.x, centre.y, centre.z, radius, false, false, false,
-                       false, false);
+                       false, false, false, 0);
     invokeNative<void>(clearCops_, centre.x, centre.y, centre.z, radius, false);
     invokeNative<void>(deleteAllTrains_);
 }

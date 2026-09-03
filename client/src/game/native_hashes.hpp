@@ -337,9 +337,6 @@ inline constexpr std::uint64_t kSetNumberOfParkedVehicles = 0XECDFDC2E8AC2D613;
 /// SET_ALL_LOW_PRIORITY_VEHICLE_GENERATORS_ACTIVE, канонический хеш 0X608207E7A8FB787C.
 inline constexpr std::uint64_t kSetAllLowPriorityVehicleGeneratorsActive = 0XEFAF1ADDE0F583C3;
 
-/// REMOVE_VEHICLES_FROM_GENERATORS_IN_AREA, канонический хеш 0X46A1E1A299EC4BBA.
-inline constexpr std::uint64_t kRemoveVehiclesFromGeneratorsInArea = 0XC4BCE90F7242F354;
-
 /// GET_AMMO_IN_PED_WEAPON, канонический хеш 0X015A522136D7F951.
 inline constexpr std::uint64_t kGetAmmoInPedWeapon = 0X1149D67DB429787A;
 

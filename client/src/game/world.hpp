@@ -113,7 +113,6 @@ private:
     NativeHandler pedBudget_ = nullptr;
     NativeHandler parkedVehicles_ = nullptr;
     NativeHandler lowPriorityGenerators_ = nullptr;
-    NativeHandler clearGenerators_ = nullptr;
     NativeHandler closestVehicle_ = nullptr;
     NativeHandler isMissionEntity_ = nullptr;
     NativeHandler deleteVehicle_ = nullptr;
