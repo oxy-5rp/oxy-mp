@@ -946,11 +946,14 @@
             throw new Error('vehicle.getWheelCamber: колёса поштучно у игры нативами не спрашиваются');
         }
 
-        getWheelConfigFlag(_wheel) {
+        // Флаги — с двумя доводами (`wheelIndex, flag`), в отличие от соседей
+        // выше: так объявлено у alt:V, и подпись держится под неё, хоть стаб и
+        // бросает в любом случае.
+        getWheelConfigFlag(_wheelIndex, _flag) {
             throw new Error('vehicle.getWheelConfigFlag: колёса поштучно у игры нативами не спрашиваются');
         }
 
-        getWheelDynamicFlag(_wheel) {
+        getWheelDynamicFlag(_wheelIndex, _flag) {
             throw new Error('vehicle.getWheelDynamicFlag: колёса поштучно у игры нативами не спрашиваются');
         }
 
