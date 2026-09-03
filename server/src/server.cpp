@@ -1084,6 +1084,7 @@ void Server::broadcastStates() {
         slot.peer = peer;
         slot.id = player.id;
         slot.position = player.position;
+        slot.dimension = player.dimension;
 
         // Молчащего писать незачем: получатель держит его на месте сам. Раз в
         // секунду — всё же пишем: подошедший рядом со стоящим иначе не увидел
@@ -1129,6 +1130,16 @@ void Server::broadcastStates() {
 
         for (const StateSlot& other : slots_) {
             if (other.peer == listener.peer || other.length == 0) {
+                continue;
+            }
+
+            // Разные измерения — та же точка карты, разные квартиры (см.
+            // script/dimension.hpp): игрок из одной не должен получать снимки
+            // из другой, а клиент про измерения не знает вовсе и защититься
+            // сам не может. streamObjects/streamPeds/streamVehicles это уже
+            // проверяют; здесь недоставало — слот заводился с полем dimension
+            // специально под эту проверку, и она осталась невписанной.
+            if (!script::dimensionsMeet(listener.dimension, other.dimension)) {
                 continue;
             }
 
