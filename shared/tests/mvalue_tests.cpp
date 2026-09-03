@@ -72,12 +72,12 @@ TEST_CASE("a vector and a colour survive a round trip", "[mvalue]") {
 TEST_CASE("an entity reference keeps its kind apart from its number", "[mvalue]") {
     // Номера игроков, машин и предметов считаются каждый от своего начала, и
     // ссылка без рода означала бы трёх разных.
-    const MValue vehicle = roundTrip(MValue::entity(EntityRef{EntityKind::Vehicle, 21U}));
+    const MValue vehicle = roundTrip(MValue::entity(EntityRef{MValueEntityKind::Vehicle, 21U}));
 
     REQUIRE(vehicle.asEntity() != nullptr);
-    CHECK(vehicle.asEntity()->kind == EntityKind::Vehicle);
+    CHECK(vehicle.asEntity()->kind == MValueEntityKind::Vehicle);
     CHECK(vehicle.asEntity()->id == 21U);
-    CHECK(vehicle != MValue::entity(EntityRef{EntityKind::Player, 21U}));
+    CHECK(vehicle != MValue::entity(EntityRef{MValueEntityKind::Player, 21U}));
 }
 
 TEST_CASE("a list survives a round trip", "[mvalue]") {

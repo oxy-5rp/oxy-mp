@@ -161,11 +161,11 @@ void writeRgba(ByteWriter& out, const Rgba& value) {
     }
 
     case MValue::Type::Entity: {
-        const auto entityKind = static_cast<EntityKind>(in.readU8());
+        const auto entityKind = static_cast<MValueEntityKind>(in.readU8());
         const std::uint32_t id = in.readU32();
 
-        if (entityKind != EntityKind::Player && entityKind != EntityKind::Vehicle &&
-            entityKind != EntityKind::Object) {
+        if (entityKind != MValueEntityKind::Player && entityKind != MValueEntityKind::Vehicle &&
+            entityKind != MValueEntityKind::Object) {
             in.fail();
             return MValue{};
         }
