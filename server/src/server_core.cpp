@@ -1321,11 +1321,6 @@ bool ServerCore::clearVehicleOwner(shared::VehicleId id) {
     return vehicles_->pinOwner(id, shared::kInvalidPlayerId, false);
 }
 
-/// Объявляет уход сущности — до того, как её уберут.
-///
-/// Общее на три рода: у alt:V это одно событие `removeEntity`, а не три, и
-/// различает роды оно самой сущностью. Игрока сюда не заводят — он уходит своим
-/// событием, и считать его уход дважды незачем.
 script::ServerConfigInfo ServerCore::config() const {
     if (config_ == nullptr) {
         return {};
@@ -1377,6 +1372,11 @@ bool ServerCore::askResource(std::string_view name, script::ResourceAction actio
     return sink_->resourceAsked(name, action);
 }
 
+/// Объявляет уход сущности — до того, как её уберут.
+///
+/// Общее на три рода: у alt:V это одно событие `removeEntity`, а не три, и
+/// различает роды оно самой сущностью. Игрока сюда не заводят — он уходит своим
+/// событием, и считать его уход дважды незачем.
 void ServerCore::tellEntityGone(shared::EntityKind kind, std::uint32_t id) {
     script::Event gone;
     gone.kind = script::EventKind::RemoveEntity;
