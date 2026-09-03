@@ -158,7 +158,16 @@ std::vector<Bundle::Entry> Bundle::readIndex(const Header& header,
     applyKeystreamAt(plain, key, header.nonce, 0);
 
     std::size_t at = 0;
-    entries.reserve(header.entryCount);
+
+    // entryCount приезжает из чужого файла и ничем не проверен: резерв по нему
+    // впрямую — это неограниченное выделение по одному лживому числу в
+    // заголовке. Сервер с крохотным index может назвать entryCount
+    // 0xFFFFFFFF, и reserve() попросит несколько сотен гигабайт под записи,
+    // которых в файле нет и быть не может, — клиент падает необработанным
+    // bad_alloc, даже не дойдя до цикла ниже, который прочёл бы файл честно и
+    // остановился бы сам. Больше записей, чем влезает по kEntryFixed байт
+    // каждая в сам буфер, всё равно не бывает — тем же пределом и режем.
+    entries.reserve(std::min<std::size_t>(header.entryCount, plain.size() / kEntryFixed));
 
     while (at + kEntryFixed <= plain.size()) {
         const std::size_t pathLength =

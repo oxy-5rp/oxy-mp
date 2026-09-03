@@ -131,6 +131,31 @@ TEST_CASE("a bundle that is not ours is refused") {
     CHECK_FALSE(Bundle::readHeader(std::span{nonsense}.subspan(0, 8)).has_value());
 }
 
+TEST_CASE("a lying entry count does not make readIndex reserve the world") {
+    // entryCount приезжает из чужого файла и ничем не проверен: сервер с
+    // крохотным index может назвать его 0xFFFFFFFF. До правки это шло прямо в
+    // reserve() и просило сотни гигабайт под записи, которых в файле нет и
+    // быть не может, — а падает такой reserve() необработанным исключением, то
+    // есть эта проверка сама по себе и есть регресс: не упади процесс, тест
+    // просто пройдёт и покажет, что записи прочлись как обычно.
+    const auto key = oxymp::shared::Vault::builtInKey();
+    const std::vector<Bundle::File> files = sample();
+
+    const std::vector<std::uint8_t> packed = Bundle::pack(files, key);
+
+    auto header = Bundle::readHeader(packed);
+    REQUIRE(header.has_value());
+
+    header->entryCount = 0xFFFFFFFFU;
+
+    const std::vector<Bundle::Entry> index = Bundle::readIndex(
+        *header, std::span{packed}.subspan(Bundle::kHeaderLength, header->indexLength), key);
+
+    // Разбор не смотрит на entryCount вовсе — он читает буфер, пока в нём
+    // хватает места на запись, — и лживое число не должно менять результат.
+    CHECK(index.size() == files.size());
+}
+
 TEST_CASE("a bundle with a broken index yields nothing rather than nonsense") {
     const auto key = oxymp::shared::Vault::builtInKey();
 
