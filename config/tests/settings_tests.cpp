@@ -93,6 +93,21 @@ TEST_CASE("an unknown setting in the file is ignored", "[settings]") {
     REQUIRE(settings.text("whatEvenIsThis").empty());
 }
 
+TEST_CASE("a known setting of the wrong kind in the file keeps its default",
+          "[settings]") {
+    // Файл синтаксически верен — разбор его не отвергает целиком, — но
+    // булево поле называет строкой. Молчаливое принятие подменило бы
+    // умолчание значением, которое flag() потом читает всё равно как false,
+    // — то самое «испорченный файл — не беда, получаются умолчания»,
+    // которое здесь тихо переставало бы держаться.
+    const TemporaryFile file{"crashReporterEnabled = 'yes'\nname = 'oxy'\n"};
+
+    const Settings settings = Settings::load(file.path());
+
+    REQUIRE(settings.flag("crashReporterEnabled"));
+    REQUIRE(settings.text("name") == "oxy");
+}
+
 TEST_CASE("settings survive a trip through the file", "[settings]") {
     const TemporaryFile file{""};
 
@@ -143,6 +158,17 @@ TEST_CASE("a change from the page is accepted by its json spelling", "[settings]
 
     REQUIRE(settings.applyJson("launcherSkinsDisabled", "[\"a\",\"b\"]"));
     REQUIRE(settings.list("launcherSkinsDisabled") == std::vector<std::string>{"a", "b"});
+}
+
+TEST_CASE("the page cannot change a setting's kind either", "[settings]") {
+    Settings settings;
+
+    // Та же защита, что и у чтения файла, с той же причиной: страница —
+    // не единственный источник правки в проекте, а испорченный или
+    // рассинхронизировавшийся код на ней не должен тихо подменять вид
+    // булева поля строкой.
+    REQUIRE_FALSE(settings.applyJson("voiceEnabled", "\"да\""));
+    REQUIRE(settings.flag("voiceEnabled"));
 }
 
 TEST_CASE("a whole number for a fractional setting stays fractional", "[settings]") {

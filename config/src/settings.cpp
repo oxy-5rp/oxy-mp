@@ -163,6 +163,36 @@ constexpr std::array<std::pair<const char*, const char*>, 5> kRenamed{{
     return pageName;
 }
 
+/// Кладёт значение на место умолчания того же вида — или отказывает вслух.
+///
+/// Общая для чтения файла и для правки со страницы: обеим нужно одно и то же —
+/// не дать чужому значению незаметно подменить вид настройки. Испорченный файл
+/// объявлен не бедой («получаются те же умолчания»), а это обещание держится
+/// только на настоящем отказе разбора; синтаксически верная строка чужого
+/// вида — скажем, `crashReporterEnabled = "yes"` вместо булева — проходила бы
+/// молча и подменяла собой умолчание строкой, которую flag() потом читает как
+/// false что бы в ней ни было. Дробное и целое между собой не в счёт: JS не
+/// различает `1` и `1.0`, а страница шлёт то, что есть.
+bool assignTyped(toml::table& table, const std::string& name, const toml::node& existing,
+                 const toml::node& incoming) {
+    if (existing.is_floating_point() && incoming.is_integer()) {
+        table.insert_or_assign(name, static_cast<double>(incoming.as_integer()->get()));
+        return true;
+    }
+
+    if (existing.is_integer() && incoming.is_floating_point()) {
+        table.insert_or_assign(name, static_cast<std::int64_t>(incoming.as_floating_point()->get()));
+        return true;
+    }
+
+    if (existing.type() != incoming.type()) {
+        return false;
+    }
+
+    table.insert_or_assign(name, incoming);
+    return true;
+}
+
 } // namespace
 
 struct Settings::State {
@@ -196,12 +226,15 @@ Settings Settings::load(const std::filesystem::path& file) {
     for (auto&& [key, value] : parsed.table()) {
         const std::string name{key.str()};
 
-        if (!settings.state_->table.contains(name)) {
+        const toml::node* const existing = settings.state_->table.get(name);
+        if (existing == nullptr) {
             spdlog::debug("настройка {} неизвестна — пропущена", name);
             continue;
         }
 
-        settings.state_->table.insert_or_assign(name, value);
+        if (!assignTyped(settings.state_->table, name, *existing, value)) {
+            spdlog::warn("настройка {} в файле не того вида — оставлено умолчание", name);
+        }
     }
 
     return settings;
@@ -308,23 +341,11 @@ bool Settings::applyJson(std::string_view key, std::string_view value) {
         return false;
     }
 
-    // Вид сохраняется прежним. В JavaScript целых и дробных чисел не бывает
-    // порознь: страница шлёт `1` и для `consoleHeight`, и для `uiVolume`. Приняв
-    // единицу как целое, мы записали бы `consoleHeight = 1` вместо `1.0` — и
-    // получили бы файл, в котором доля экрана вдруг стала целым числом.
-    if (existing->is_floating_point() && incoming->is_integer()) {
-        state_->table.insert_or_assign(
-            name, static_cast<double>(incoming->as_integer()->get()));
-        return true;
+    if (!assignTyped(state_->table, name, *existing, *incoming)) {
+        spdlog::debug("страница правит настройку {} значением не того вида: {}", key, value);
+        return false;
     }
 
-    if (existing->is_integer() && incoming->is_floating_point()) {
-        state_->table.insert_or_assign(
-            name, static_cast<std::int64_t>(incoming->as_floating_point()->get()));
-        return true;
-    }
-
-    state_->table.insert_or_assign(name, *incoming);
     return true;
 }
 
