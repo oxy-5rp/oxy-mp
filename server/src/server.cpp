@@ -1748,6 +1748,14 @@ void Server::handlePedDamage(net::PeerId peer, const shared::PedDamageReport& re
         return;
     }
 
+    // Разные измерения — разные квартиры на одной точке карты, и попасть из
+    // одной в другую нельзя точно так же, как нельзя попасть через полгорода.
+    if (!script::dimensionsMeet(attacker->dimension, ped->dimension)) {
+        spdlog::warn("player \"{}\" (id {}) reported a hit on a ped across dimensions",
+                     attacker->nickname, attacker->id);
+        return;
+    }
+
     // Дальше предела раздачи попасть нельзя: тот, у кого прохожего нет рядом, его
     // и не видит. Проверка не от взломщика, а от обычного расхождения — кукла
     // могла уехать между кадром и пакетом, — но пакет собирает кто угодно, и
@@ -1822,6 +1830,15 @@ void Server::handleVehicleDamage(net::PeerId peer, const shared::VehicleDamageRe
         return;
     }
 
+    // Разные измерения — разные квартиры на одной точке карты. Доклад о
+    // попадании через их границу — то же самое «попадание за километр» с
+    // другой стороны.
+    if (!script::dimensionsMeet(attacker->dimension, vehicle->dimension)) {
+        spdlog::warn("player \"{}\" (id {}) reported a hit on a vehicle across dimensions",
+                     attacker->nickname, attacker->id);
+        return;
+    }
+
     // Попадание с другого конца карты не бывает. Проверка та же, что и у людей,
     // и такая же грубая: точную линию выстрела сервер не построит — мира у него
     // нет, — а отличить перестрелку от доклада за километр может.
@@ -1888,6 +1905,15 @@ void Server::handleDamageReport(net::PeerId peer, const shared::DamageReport& re
     // отбросить его целиком значило бы сделать стрелявшего безобидным.
     const std::uint16_t amount = std::min(report.amount, config_.maxDamagePerHit);
     if (amount == 0) {
+        return;
+    }
+
+    // Разные измерения — та же точка карты, разные квартиры, и увидеть друг
+    // друга оттуда нельзя. Доклад о попадании через границу измерений —
+    // ровно то же самое «попадание за километр», просто по другой оси.
+    if (!script::dimensionsMeet(attacker->dimension, victim->dimension)) {
+        spdlog::warn("player \"{}\" (id {}) reported a hit across dimensions", attackerName,
+                     attackerId);
         return;
     }
 
