@@ -396,6 +396,11 @@ void Server::handleDisconnected(net::PeerId peer) {
     core_.forgetAttachments(
         AttachmentDirectory::Ref{.kind = shared::EntityKind::Player, .id = player->id});
 
+    // И его номер — из списков получателей меток. Номер достанется следующему
+    // вошедшему (PlayerRegistry::freeId), и не забудь список здесь, метка,
+    // назначенная ушедшему одному, досталась бы новому человеку даром.
+    blips_.forgetPlayer(player->id);
+
     // Пересмотр — немедленно, не дожидаясь очереди. Машины, которые вёл ушедший,
     // до него стоят замершими, и полсекунды неподвижной машины посреди дороги
     // видно всем.
@@ -1559,6 +1564,7 @@ void Server::reassignVehicles() {
         placements.push_back(VehicleDirectory::PlayerPlacement{
             .id = player.id,
             .position = player.position,
+            .dimension = player.dimension,
         });
     }
 

@@ -318,9 +318,21 @@ void VehicleDirectory::forgetPlayer(shared::PlayerId player) {
 
     // Машины ушедшего остаются без ведущего и замирают там, где он их оставил.
     // Нового назначит ближайший пересмотр — если рядом есть кому.
+    //
+    // Назначение скриптом снимается тоже, а не только владение, и это не
+    // симметрично оставленному владению нарочно. Номер ушедшего — наименьший
+    // свободный, и его выдадут следующему вошедшему (PlayerRegistry::freeId).
+    // Не сними мы pinned здесь, ближайший пересмотр отдал бы машину чужому
+    // человеку, которому просто достался старый номер, — назначение выбирается
+    // раньше расстояния и без проверки, тот ли это игрок, которому его давали.
     for (auto& [id, vehicle] : vehicles_) {
         if (vehicle.owner == player) {
             vehicle.owner = shared::kInvalidPlayerId;
+        }
+
+        if (vehicle.pinned == player) {
+            vehicle.pinned = shared::kInvalidPlayerId;
+            vehicle.pinnedSticky = false;
         }
     }
 }
@@ -357,6 +369,15 @@ shared::PlayerId VehicleDirectory::chooseOwner(const Vehicle& vehicle,
     float nearestSquared = kRangeSquared;
 
     for (const PlayerPlacement& player : players) {
+        // Одна точка карты бывает занята много раз (см. script/dimension.hpp):
+        // игрок вплотную к машине, но в другом измерении, её не видит и не
+        // пришлёт по ней ни одного снимка. Назначить его ведущим значило бы
+        // заморозить машину для всех, кто её действительно видит, — а
+        // ближайший пересмотр не спохватился бы, сочтя ведущего уже назначенным.
+        if (!script::dimensionsMeet(player.dimension, vehicle.dimension)) {
+            continue;
+        }
+
         const float squared = shared::distanceSquared(player.position, vehicle.state.position);
 
         if (squared <= nearestSquared) {
@@ -366,12 +387,13 @@ shared::PlayerId VehicleDirectory::chooseOwner(const Vehicle& vehicle,
     }
 
     // За рулём никого. Машину держит тот, кто её уже ведёт, пока он в пределах
-    // досягаемости и пока никто не оказался заметно ближе.
+    // досягаемости, в том же измерении и пока никто не оказался заметно ближе.
     if (const PlayerPlacement* current = findPlayer(players, vehicle.owner); current != nullptr) {
         const float currentSquared =
             shared::distanceSquared(current->position, vehicle.state.position);
 
-        if (currentSquared <= kRangeSquared) {
+        if (currentSquared <= kRangeSquared &&
+            script::dimensionsMeet(current->dimension, vehicle.dimension)) {
             if (nearest == nullptr || nearest->id == current->id) {
                 return current->id;
             }

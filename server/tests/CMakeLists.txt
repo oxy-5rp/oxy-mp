@@ -7,6 +7,7 @@ add_executable(oxymp_server_tests
     attachment_directory_tests.cpp
     config_file_tests.cpp
     console_tests.cpp
+    drawn_directory_tests.cpp
     game_data_tests.cpp
     resource_catalog_tests.cpp
     server_core_tests.cpp

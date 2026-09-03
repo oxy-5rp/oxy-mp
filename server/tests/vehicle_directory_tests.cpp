@@ -214,6 +214,26 @@ TEST_CASE("a named leader outlives the handover only if asked", "[vehicles]") {
     CHECK(changes.front().owner == 3);
 }
 
+TEST_CASE("a leaving player's naming does not follow their reused number", "[vehicles]") {
+    // Номер игрока — наименьшее свободное место (PlayerRegistry::freeId), и
+    // ушедший освобождает его следующему вошедшему. Назначение скриптом обязано
+    // уйти вместе с игроком, которому его давали, а не остаться ждать, кому
+    // достанется его старый номер.
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+
+    REQUIRE(directory.pinOwner(id, 7, true));
+    directory.forgetPlayer(7);
+
+    // Игрок под тем же номером 7 — это уже кто-то другой, стоящий далеко от
+    // машины. Без уборки назначения он получил бы её вопреки расстоянию.
+    const std::vector players{at(3, 1.0F), at(7, 9000.0F)};
+    const auto changes = directory.reassign(players);
+
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == 3);
+}
+
 TEST_CASE("the driver outranks a named leader", "[vehicles]") {
     // Порядок именно такой, и он не вкусовщина: ехать и считать поездку должен
     // один и тот же человек, иначе машина у них разъедется мгновенно.
@@ -248,6 +268,49 @@ TEST_CASE("an abandoned vehicle goes to the nearest player", "[vehicles]") {
     REQUIRE(changes.size() == 1);
     CHECK(changes.front().owner == 6);
     CHECK(directory.find(id)->owner == 6);
+}
+
+TEST_CASE("a vehicle does not get an owner from another dimension", "[vehicles]") {
+    // Одна точка карты бывает занята много раз (десять квартир, стоящих в
+    // одной точке, script/dimension.hpp). Игрок вплотную к машине, но в чужом
+    // измерении, её не видит и не пришлёт по ней ни одного снимка — назначь мы
+    // его, машина простаивала бы замороженной для всех, кто её действительно
+    // видит.
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, shared::kInvalidPlayerId, 0.0F);
+
+    VehicleDirectory::PlayerPlacement wrongDimension = at(9, 0.0F);
+    wrongDimension.dimension = 1;
+
+    VehicleDirectory::PlayerPlacement sameDimension = at(4, 200.0F);
+    sameDimension.dimension = 0;
+
+    const std::vector players{wrongDimension, sameDimension};
+    const auto changes = directory.reassign(players);
+
+    // Ближний по координатам — девятый, но он в другом измерении: машина
+    // достаётся дальнему, но своему.
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == 4);
+    CHECK(directory.find(id)->owner == 4);
+}
+
+TEST_CASE("a vehicle's dimension move drops an owner left behind", "[vehicles]") {
+    VehicleDirectory directory;
+    const shared::VehicleId id = spawn(directory, 1, 0.0F);
+
+    const std::vector players{at(1, 0.0F)};
+    CHECK(directory.reassign(players).empty());
+    CHECK(directory.find(id)->owner == 1);
+
+    // Скрипт переносит машину в другое измерение, а игрок остаётся на месте —
+    // тем же способом, каким устроена квартира. Прежний ведущий её больше не
+    // видит и обязан её отдать, а не удерживать по одной лишь близости.
+    REQUIRE(directory.setDimension(id, 1));
+
+    const auto changes = directory.reassign(players);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().owner == shared::kInvalidPlayerId);
 }
 
 TEST_CASE("a handover remembers who led the vehicle before", "[vehicles]") {
