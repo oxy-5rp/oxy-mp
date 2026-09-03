@@ -162,7 +162,7 @@
 
         for (const entry of called) {
             if (entry.once) {
-                off(name, entry.handler);
+                offEntry(name, entry);
             }
 
             try {
@@ -255,6 +255,23 @@
     function off(name, handler) {
         const found = listenersFor(name);
         const at = found.findIndex((entry) => entry.handler === handler);
+
+        if (at >= 0) {
+            found.splice(at, 1);
+        }
+    }
+
+    /// Снимает ровно эту запись, а не первую с тем же обработчиком.
+    ///
+    /// Нужна отдельно от off(): та ищет по значению handler, а один и тот же
+    /// обработчик бывает подписан дважды — постоянно через on и разово через
+    /// once. off(name, handler) сняла бы первую попавшуюся запись, и ей
+    /// оказалась бы постоянная, а не та once-подписка, что как раз сработала:
+    /// постоянная исчезла бы после одного события, а разовая осталась бы стоять
+    /// и звалась бы дальше.
+    function offEntry(name, entry) {
+        const found = listenersFor(name);
+        const at = found.indexOf(entry);
 
         if (at >= 0) {
             found.splice(at, 1);
