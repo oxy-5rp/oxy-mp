@@ -1935,6 +1935,37 @@ TEST_CASE("removing the thing it hangs on loosens what hung", "[server][script]"
     CHECK_FALSE(session.core.attachment(entity(shared::EntityKind::Object, box)).has_value());
 }
 
+TEST_CASE("removing what hangs on something tells clients that too", "[server][script]") {
+    // Обратная сторона предыдущей проверки: там убирали цель и смотрели, что
+    // сказано о висящем на ней; здесь убирают само висящее.
+    //
+    // Молчание здесь — не мелочь, а тот же номер-даром, что уже чинился у
+    // машины и у метки: реестр стирает собственную привязку убранной сущности
+    // сам (AttachmentDirectory::forget), но раньше об этом не говорилось
+    // клиентам отдельно — а привязка объявлена не устаревающей нарочно, чтобы
+    // пережить отъехавшую машину. Не скажи им, они ждали бы возвращения тела
+    // вечно, а с игроками номер вдобавок достаётся следующему вошедшему.
+    Session session;
+
+    const shared::VehicleId car = session.core.createVehicle(0xB779A091, shared::Vec3{}, 0.0F);
+    const shared::ObjectId box = session.core.createObject(0xBADF00D, shared::Vec3{}, {});
+
+    REQUIRE(car != shared::kInvalidVehicleId);
+    REQUIRE(box != shared::kInvalidObjectId);
+
+    script::AttachmentInfo worn;
+    worn.target = entity(shared::EntityKind::Vehicle, car);
+
+    REQUIRE(session.core.attachEntity(entity(shared::EntityKind::Object, box), worn));
+    REQUIRE(session.core.removeObject(box));
+
+    // Про сам box сказано дважды: привязали, потом убрали. Второе сообщение —
+    // ровно то, которого недоставало.
+    CHECK(std::ranges::count(session.sink.sent,
+                             std::format("attach {} {}",
+                                         static_cast<int>(shared::EntityKind::Object), box)) == 2);
+}
+
 TEST_CASE("detaching what hangs on nothing changes nothing", "[server][script]") {
     Session session;
 

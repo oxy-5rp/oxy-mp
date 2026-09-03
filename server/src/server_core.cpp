@@ -1475,6 +1475,19 @@ void ServerCore::forgetAttachments(AttachmentDirectory::Ref entity) {
     for (const AttachmentDirectory::Ref& loosened : attachments_->forget(entity)) {
         sink_->attachmentChanged(loosened);
     }
+
+    // И о самой исчезнувшей сущности — тем же способом, каким рассказывают об
+    // отвязке: `attachmentChanged` сам увидит, что привязки у неё в реестре
+    // больше нет (forget уже её стёр), и разошлёт «привязана никуда».
+    //
+    // Без этой строки клиент, друживший привязку с номером ушедшей сущности,
+    // ждал бы её возвращения вечно — привязка объявлена не устаревающей
+    // нарочно (тело может отъехать и вернуться), — а номер игрока тем
+    // временем достаётся следующему вошедшему (PlayerRegistry::freeId).
+    // Появись у нового человека тело раньше, чем он успеет сказать о себе
+    // что-то своё, клиенты бы молча приклеили его к чужой машине — привязка
+    // ведь ждала ровно этот номер, а не конкретного игрока.
+    sink_->attachmentChanged(entity);
 }
 
 std::vector<script::ObjectInfo> ServerCore::objects() const {
