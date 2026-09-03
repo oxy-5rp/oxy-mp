@@ -571,6 +571,24 @@ void Vehicles::driveDoors(Entry& entry) {
     }
 }
 
+void Vehicles::applyLockAndWindows(Entry& entry) {
+    // Замок накладывается только на изменение: он переключатель, а не
+    // состояние, которое нужно поддерживать. Заводское значение (`None`)
+    // означает «сервер о замке не говорил» — и трогать замок тогда не надо
+    // вовсе: игра выставила его сама, как ей положено для этой модели.
+    if (entry.lockState != entry.wantedLock && entry.wantedLock != 0) {
+        snapshot_.applyLock(entry.vehicle, entry.wantedLock);
+        entry.lockState = entry.wantedLock;
+    }
+
+    // Стёкла — там же и на тех же правах: сервер о них помнит, потому что игра
+    // о них не отвечает.
+    if (entry.windowsTold && entry.appliedWindows != entry.wantedWindows) {
+        snapshot_.applyWindows(entry.vehicle, entry.wantedWindows);
+        entry.appliedWindows = entry.wantedWindows;
+    }
+}
+
 void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, int localPed) {
     if (!ready()) {
         return;
@@ -670,15 +688,19 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
         answerTo(entry, view.owner, ours, towed);
         dress(state.id, entry);
 
+        // Замок и стёкла — раньше развилки по владению и для обеих её сторон:
+        // их накладывает всякий, кто машину видит, включая того, кто её ведёт.
+        applyLockAndWindows(entry);
+
         // Свою машину не трогаем. Её ведёт игра, а мы лишь снимаем с неё снимки:
         // наложить на неё пришедшее состояние значило бы бороться с собственной
         // физикой — и проиграть ей, потому что физика считается каждый кадр, а
         // снимки приходят каждый такт сервера.
         if (ours) {
-            // Двери — единственное, что мы делаем со своей машиной: их объявил
-            // сервер, а довести до угла их может только тот, у кого машина
-            // считается. Ведутся они каждый кадр, потому что натив держит дверь
-            // ровно пока его зовут.
+            // Двери — единственное, что мы ещё делаем со своей машиной: их
+            // объявил сервер, а довести до угла их может только тот, у кого
+            // машина считается. Ведутся они каждый кадр, потому что натив
+            // держит дверь ровно пока его зовут.
             driveDoors(entry);
 
             entry.applied = state;
@@ -718,24 +740,8 @@ void Vehicles::sync(const std::vector<View>& vehicles, shared::PlayerId self, in
 
         entry.applied = state;
 
-        // Замок накладывается здесь же и только на изменение: он переключатель,
-        // а не состояние, которое нужно поддерживать. Заводское значение
-        // (`None`) означает «сервер о замке не говорил» — и трогать замок тогда
-        // не надо вовсе: игра выставила его сама, как ей положено для этой
-        // модели.
-        if (entry.lockState != entry.wantedLock && entry.wantedLock != 0) {
-            snapshot_.applyLock(entry.vehicle, entry.wantedLock);
-            entry.lockState = entry.wantedLock;
-        }
-
-        // Стёкла — там же и на тех же правах: сервер о них помнит, потому что
-        // игра о них не отвечает. Сравнивается наложенное с желаемым, а не с
-        // игрой, и потому починка обязана объявить наложенное забытым — как и
-        // всё прочее ниже.
-        if (entry.windowsTold && entry.appliedWindows != entry.wantedWindows) {
-            snapshot_.applyWindows(entry.vehicle, entry.wantedWindows);
-            entry.appliedWindows = entry.wantedWindows;
-        }
+        // Замок и стёкла наложены выше, до развилки по владению; здесь остаётся
+        // только то, что зависит от repaired, а его знает один applyControls.
 
         // Починенная машина вышла из-под ремонта заводской, и вместе с вмятинами
         // с неё снялось всё, что мы накладывали когда-то: свет, сирена,
