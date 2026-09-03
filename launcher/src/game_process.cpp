@@ -23,6 +23,26 @@ constexpr const wchar_t* kLanguageArgument = L"-rglLanguage";
 /// Ключ, которым игра запускается сразу в свободный режим сети, минуя сюжет.
 constexpr const wchar_t* kStraightIntoFreemode = L"-StraightIntoFreemode";
 
+/// Как часто искать процесс игры, пока он не появился.
+///
+/// Этим интервалом ограничено окно, в котором игра уже бежит, а модуль ещё не
+/// внедрён: всё это время игрок видит её собственный вступительный ролик —
+/// логотипы и полицейскую заставку, — которую нечем закрыть, пока не встал наш
+/// перехват показа кадра. Прежде здесь было полсекунды: игра, запущенная сразу
+/// после опроса, оставалась неувиденной до следующего, и ролик успевал
+/// показаться. Двадцать пять миллисекунд — перебор таблицы процессов раз в
+/// полтора кадра, нагрузка на эти считаные секунды до появления игры
+/// пренебрежимая.
+constexpr DWORD kGameScanIntervalMs = 25;
+
+/// Как часто пытаться внедриться, пока процесс к этому не готов.
+///
+/// Внедрение через LoadLibrary в удалённом потоке удаётся не сразу: у только что
+/// созданного процесса загрузчик ещё поднимает ntdll и kernel32, и до того
+/// попытка отказывает. Повтор идёт до первого успеха; чаще пробовать — раньше
+/// поймать то мгновение, когда внедрение впервые проходит.
+constexpr DWORD kInjectRetryIntervalMs = 25;
+
 std::string lastErrorText() {
     return std::format("Windows error {}", ::GetLastError());
 }
@@ -114,7 +134,7 @@ std::unique_ptr<GameProcess> GameProcess::attach(std::chrono::seconds waitTimeou
             return nullptr;
         }
 
-        ::Sleep(500);
+        ::Sleep(kGameScanIntervalMs);
     }
 }
 
@@ -140,7 +160,7 @@ bool GameProcess::injectWithRetries(const std::filesystem::path& module,
             return false;
         }
 
-        ::Sleep(100);
+        ::Sleep(kInjectRetryIntervalMs);
     }
 }
 
