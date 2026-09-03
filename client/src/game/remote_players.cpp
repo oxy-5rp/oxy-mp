@@ -888,14 +888,22 @@ void RemotePlayers::sync(const std::vector<RemotePlayerView>& players, int local
                 break;
 
             case PuppetBody::Riding:
-                if (aiming(player.state)) {
+                if (aiming(player.state) &&
+                    !shared::has(player.state.flags, shared::PlayerFlag::Reloading)) {
                     // Сидящий в машине показывает единственное, что может
                     // показать: куда он целится из окна.
+                    //
+                    // Перезаряжающийся не наводит — то же правило, что и у
+                    // пешего в aim(): перезарядка выдана задачей в applyPosture,
+                    // а задача прицела из окна, выданная поверх неё тем же
+                    // кадром, снесла бы её без конца. Признак прицела при этом
+                    // стоит всю перезарядку — человек держит кнопку, — поэтому
+                    // спрашиваем не «целится ли», а «занят ли сейчас другим».
                     animation_.applyDriveBy(puppet.ped, player.state.aimAt,
                                             shared::has(player.state.flags,
                                                         shared::PlayerFlag::Shooting) &&
                                                 ownFire(puppet));
-                } else {
+                } else if (!aiming(player.state)) {
                     // А не целящийся — то же, что и пеший: куда смотрит. Без
                     // этого водитель и пассажиры едут, уставившись строго перед
                     // собой, как манекены.
