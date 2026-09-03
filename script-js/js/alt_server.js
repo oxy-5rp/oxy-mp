@@ -264,7 +264,7 @@
 
         for (const entry of called) {
             if (entry.once) {
-                off(name, entry.handler);
+                offEntry(name, entry);
             }
 
             let outcome;
@@ -341,11 +341,18 @@
     /// мостику на подписчика значило бы терять возможность отписаться — снять
     /// подписку у ядра нельзя.
     function bridge(name, coreName) {
-        if (bridged.has(coreName ?? name)) {
+        // Ключом — name, а не coreName. name уже разведён по приставке самими
+        // вызывающими: у on/once это голое имя, у onClient — то же имя с
+        // приставкой `client:`. coreName — то, что называют ядру, а не то, чем
+        // отличают один мостик от другого; событие клиента и одноимённое
+        // событие сессии/ресурса делят один coreName (сам name без приставки),
+        // и ключ по нему сталкивал бы их — второй bridge() решал бы, что мостик
+        // уже стоит, и не ставил своего вовсе.
+        if (bridged.has(name)) {
             return;
         }
 
-        bridged.add(coreName ?? name);
+        bridged.add(name);
 
         if (coreName === undefined) {
             // Мостиков два, и они разведены по именам, а не по форме доводов.
@@ -437,6 +444,23 @@
     function off(name, handler) {
         const found = listenersFor(name);
         const at = found.findIndex((entry) => entry.handler === handler);
+
+        if (at >= 0) {
+            found.splice(at, 1);
+        }
+    }
+
+    /// Снимает ровно эту запись, а не первую с тем же обработчиком.
+    ///
+    /// Нужна отдельно от off(): та ищет по значению handler, а один и тот же
+    /// обработчик бывает подписан дважды — постоянно через on и разово через
+    /// once. off(name, handler) сняла бы первую попавшуюся запись, и ей
+    /// оказалась бы постоянная, а не та once-подписка, что как раз сработала:
+    /// постоянная исчезла бы после одного события, а разовая осталась бы стоять
+    /// и звалась бы дальше.
+    function offEntry(name, entry) {
+        const found = listenersFor(name);
+        const at = found.indexOf(entry);
 
         if (at >= 0) {
             found.splice(at, 1);

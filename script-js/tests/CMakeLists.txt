@@ -44,6 +44,7 @@ foreach(case
     a-resource-hears-about-its-neighbours
     a-refused-resource-is-announced-to-neighbours
     object-form-of-setmeta-is-spread-into-pairs
+    a-permanent-listener-survives-a-once-with-the-same-handler
     a-handler-error-reaches-the-resource-itself)
 
     add_test(NAME "script-js: ${case}"

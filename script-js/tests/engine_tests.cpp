@@ -453,6 +453,61 @@ alt.on('consoleCommand', () => {
     engine()->stop("meta");
 }
 
+/// Постоянная подписка переживает разовую с тем же обработчиком.
+///
+/// off(), которым once снимает себя после срабатывания, искал запись по
+/// значению handler — и один и тот же обработчик, подписанный дважды (разом
+/// через on и once), путал их: снималась первая попавшаяся, а ей оказывалась
+/// постоянная. Разовая при этом оставалась стоять и звалась бы вечно, а
+/// постоянная исчезала после одного события.
+///
+/// Считается число вызовов. После первого события сработают оба — и on, и
+/// once, — как при верном поведении, так и при поломанном: разница не в счёте,
+/// а в том, что осталось подписанным. Она проявляется только на третьем
+/// событии: к тому времени верное поведение снимет ровно once и оставит on
+/// стоять, и счёт продолжит расти, а поломанное — снимет on вместо once,
+/// once расстреляет себя на втором событии, и на третьем стрелять уже некому.
+void aPermanentListenerSurvivesAOnceWithTheSameHandler() {
+    const Sandbox resource{"index.js", R"js(
+const alt = require('alt-server');
+const fs = require('fs');
+const path = require('path');
+
+let count = 0;
+const handler = () => {
+    count += 1;
+    fs.writeFileSync(path.join(__dirname, 'count.txt'), String(count));
+};
+
+alt.on('своё', handler);
+alt.once('своё', handler);
+
+alt.on('consoleCommand', () => alt.emit('своё'));
+)js"};
+
+    std::string error;
+    expect(engine()->start("once-vs-on", resource.root(), "index.js", error),
+           "ресурс не поднялся: " + error);
+
+    Event typed;
+    typed.kind = EventKind::ConsoleCommand;
+    typed.name = "давай";
+
+    (void)bus().dispatch(typed);
+    (void)bus().dispatch(typed);
+    (void)bus().dispatch(typed);
+
+    // 4: два вызова на первом событии (on и once оба стоят), один на втором
+    // (once уже снят собой) и ещё один на третьем — при верном поведении
+    // постоянный on остаётся стоять. Поломанное поведение снимает on вместо
+    // once на первом же событии и застревает на 3.
+    const std::string got = wrote(resource.root() / "count.txt");
+
+    expect(got == "4", "постоянная подписка не пережила разовую: счёт " + got);
+
+    engine()->stop("once-vs-on");
+}
+
 /// Ошибка в обработчике доходит до самого ресурса событием.
 ///
 /// У alt:V это `resourceError`, и вешают на него отправку в свой сбор ошибок.
@@ -516,6 +571,8 @@ const std::map<std::string, std::function<void()>>& cases() {
         {"escaping-entry-is-refused", &escapingEntryIsRefused},
         {"object-form-of-setmeta-is-spread-into-pairs",
          &objectFormOfSetMetaIsSpreadIntoPairs},
+        {"a-permanent-listener-survives-a-once-with-the-same-handler",
+         &aPermanentListenerSurvivesAOnceWithTheSameHandler},
         {"a-handler-error-reaches-the-resource-itself",
          &aHandlerErrorReachesTheResourceItself},
     };
