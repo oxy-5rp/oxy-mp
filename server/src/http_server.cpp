@@ -43,6 +43,34 @@ void closeSocket(SocketHandle socket) {
 #endif
 }
 
+/// Сколько ждать чтения или отправки одному клиенту, в секундах.
+///
+/// Без предела recv/send ждут вечно: клиент, подключившийся и не сказавший ни
+/// слова (или подтвердивший приём и не читающий дальше), держит их
+/// заблокированными до своего отключения — а раздача при этом одна на всех и
+/// однопоточная, так что зависший чужой сокет останавливает скачивание всем
+/// остальным до того же мгновения. Оно же держит и остановку сервера:
+/// деструктор ждёт этот самый поток через join().
+constexpr int kClientTimeoutSeconds = 10;
+
+/// Ставит предел на recv/send для одного клиентского сокета.
+///
+/// Молча — отказ здесь не повод не принять клиента: без предела соединение
+/// просто вернётся к поведению по умолчанию, то есть к тому, что уже было.
+void applyClientTimeout(SocketHandle client) {
+#ifdef _WIN32
+    const DWORD timeoutMs = kClientTimeoutSeconds * 1000;
+    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs),
+                 sizeof(timeoutMs));
+    ::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeoutMs),
+                 sizeof(timeoutMs));
+#else
+    timeval timeout{.tv_sec = kClientTimeoutSeconds, .tv_usec = 0};
+    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    ::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+}
+
 bool sendAll(SocketHandle socket, const char* data, std::size_t length) {
     std::size_t sent = 0;
 
@@ -185,6 +213,8 @@ void HttpServer::serve() {
 
 void HttpServer::handle(std::intptr_t raw) {
     const auto client = static_cast<SocketHandle>(raw);
+
+    applyClientTimeout(client);
 
     std::string request;
     std::array<char, 2048> buffer{};
