@@ -348,6 +348,48 @@ TEST_CASE("a resource that only hands out files needs no main") {
     CHECK(resource.clientFiles == std::vector<std::string>{"stream/amcj.yft"});
 }
 
+TEST_CASE("a dlc resource reads its file list from main") {
+    Sandbox sandbox;
+
+    // main у ресурса без кода указывает не на скрипт, а на список
+    // раздаваемого (dlc.toml/stream.toml у alt:V) — читается он readManifest,
+    // а не запускается.
+    sandbox.write("cars/resource.toml", "type = 'dlc'\nmain = 'dlc.toml'\n");
+    sandbox.write("cars/dlc.toml", "files = 'stream/amcj.yft'\n");
+    sandbox.write("cars/stream/amcj.yft", "RSC7");
+
+    ResourceCatalog catalog;
+    const std::vector<std::string> complaints = catalog.load(sandbox.root(), {"cars"});
+
+    CHECK(complaints.empty());
+    REQUIRE(catalog.all().size() == 1);
+
+    const ScriptResource& resource = catalog.all().front();
+
+    // main прочитан и обнулён: дальше по коду он означал бы «что запускать»,
+    // а исполнять здесь нечего.
+    CHECK(resource.main.empty());
+    CHECK(resource.clientFiles == std::vector<std::string>{"stream/amcj.yft"});
+}
+
+TEST_CASE("a dlc resource's main cannot read a file outside it", "[server][resources]") {
+    // Тот же путь наружу, что уже запрещён для client-files, но с другой
+    // стороны: main не раздаётся клиенту, а читается самим сервером — читать
+    // чужое по указке из чужого resource.toml нельзя точно так же.
+    const Sandbox sandbox;
+    sandbox.write("server.cfg", "тайна");
+    sandbox.write("beглец/resource.toml", "type = 'dlc'\nmain = '../server.cfg'\n");
+
+    ResourceCatalog catalog;
+    const std::vector<std::string> complaints = catalog.load(sandbox.root(), {"beглец"});
+
+    // Ресурс с негодным main не поднимается вовсе: раздавать ему как dlc
+    // больше нечего, а притворяться, что main просто пуст, значило бы молчать
+    // о попытке выйти за пределы каталога.
+    CHECK(catalog.all().empty());
+    CHECK(complaints.size() == 1);
+}
+
 TEST_CASE("a resource with nothing to run and nothing to hand out is a mistake") {
     Sandbox sandbox;
 

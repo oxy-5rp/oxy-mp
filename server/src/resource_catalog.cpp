@@ -308,7 +308,22 @@ std::vector<std::string> ResourceCatalog::load(const std::filesystem::path& dire
         resource.executes = resource.type != kFileOnlyType;
 
         if (!resource.executes && !resource.main.empty()) {
-            if (!readManifest(root / resource.main, resource, name, complaints)) {
+            const std::filesystem::path manifestPath = root / resource.main;
+
+            // main приходит из собственного описания ресурса — то есть от его
+            // автора, а не от нас, — и путь вида `../../server.cfg` вывел бы
+            // чтение за пределы каталога ресурса точно так же, как это уже
+            // запрещено для client-files ниже. Разница лишь в том, что здесь
+            // файл не раздаётся клиенту, а читается самим сервером, — но читать
+            // чужое по чужой указке нельзя и так.
+            if (!staysInside(root, manifestPath)) {
+                complaints.push_back(
+                    std::format("\"{}\": main \"{}\" уводит за пределы ресурса", name,
+                                resource.main));
+                continue;
+            }
+
+            if (!readManifest(manifestPath, resource, name, complaints)) {
                 continue;
             }
 
