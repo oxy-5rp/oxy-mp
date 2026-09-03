@@ -366,6 +366,26 @@ bool OverlayRenderer::ensureTarget(IDXGISwapChain* swapchain) {
     return SUCCEEDED(created);
 }
 
+void OverlayRenderer::fillOpaque(IDXGISwapChain* swapchain) {
+    if (failed_ || swapchain == nullptr) {
+        return;
+    }
+
+    if (!ensurePipeline(swapchain) || !ensureTarget(swapchain)) {
+        // Не гасим весь интерфейс из-за неудавшейся крышки: тогда в этот кадр
+        // просто покажется то, что под ней. Метку failed_ ставит draw(), у
+        // которого свой разговор про отказ.
+        return;
+    }
+
+    // Очистка цели не читает и не меняет привязок конвейера, поэтому сохранять
+    // и возвращать состояние игры здесь не нужно — в отличие от draw(). Альфа
+    // единица: крышка обязана быть непрозрачной, иначе ролик просвечивал бы
+    // сквозь неё.
+    const FLOAT black[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+    context_->ClearRenderTargetView(target_, black);
+}
+
 void OverlayRenderer::draw(IDXGISwapChain* swapchain, const std::uint8_t* pixels, int width,
                            int height, bool changed) {
     if (failed_ || swapchain == nullptr || pixels == nullptr || width <= 0 || height <= 0) {
