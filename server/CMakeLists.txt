@@ -7,6 +7,7 @@ add_executable(oxymp_server
     src/player_registry.cpp
     src/resource_catalog.cpp
     src/resource_store.cpp
+    src/rpf7.cpp
     src/server.cpp
     src/server_core.cpp
     src/object_directory.cpp
@@ -43,6 +44,7 @@ target_link_libraries(oxymp_server PRIVATE
     oxymp::script_md
     oxymp::shared_md
     oxymp::options
+    miniz::miniz_md
     spdlog::spdlog_header_only
 )
 

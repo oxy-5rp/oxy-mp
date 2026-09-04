@@ -2805,8 +2805,8 @@ void Server::startResources() {
             // вправе знать, какие его файлы лежат у игрока обычным текстом.
             spdlog::debug("resource \"{}\": {} is served as a plain file", resource.name, file);
 
-            if (!resources_.add(resource.root / file,
-                                std::format("{}/{}", resource.name, file))) {
+            if (!resources_.addMaybeArchive(resource.root / file,
+                                            std::format("{}/{}", resource.name, file))) {
                 spdlog::warn("resource \"{}\": file \"{}\" could not be read", resource.name,
                              file);
             }

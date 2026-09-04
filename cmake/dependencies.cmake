@@ -211,6 +211,48 @@ FetchContent_Declare(tomlplusplus
 )
 FetchContent_MakeAvailable(tomlplusplus)
 
+# miniz — распаковка deflate. Нужна для чтения чужих архивов .rpf: их записи
+# сжаты сырым deflate, а своего распаковщика в проекте не было.
+#
+# Как и у ENet, собственный CMakeLists не подключается (он тянет свои цели и
+# опции) — исходники только выкачиваются, а цель описывается здесь. Собирается
+# дважды, как и наши библиотеки: сервер с динамической библиотекой времени
+# выполнения, проверки — со статической (Catch2 собран статически).
+FetchContent_Declare(miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        3.0.2
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  cmake-build-is-not-used
+)
+FetchContent_MakeAvailable(miniz)
+
+set(OXYMP_MINIZ_SOURCES
+    "${miniz_SOURCE_DIR}/miniz.c"
+    "${miniz_SOURCE_DIR}/miniz_tdef.c"
+    "${miniz_SOURCE_DIR}/miniz_tinfl.c"
+    "${miniz_SOURCE_DIR}/miniz_zip.c"
+)
+
+foreach(miniz_target miniz miniz_md)
+    add_library(${miniz_target} STATIC ${OXYMP_MINIZ_SOURCES})
+    # Каталог с нашей заглушкой miniz_export.h — раньше исходников: этот заголовок
+    # обычно порождает CMake miniz, который мы не подключаем.
+    target_include_directories(${miniz_target} SYSTEM PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}/miniz-shim"
+        "${miniz_SOURCE_DIR}")
+
+    if(MSVC)
+        target_compile_options(${miniz_target} PRIVATE /w)
+    else()
+        target_compile_options(${miniz_target} PRIVATE -w)
+    endif()
+endforeach()
+
+add_library(miniz::miniz ALIAS miniz)
+add_library(miniz::miniz_md ALIAS miniz_md)
+
+set_target_properties(miniz_md PROPERTIES MSVC_RUNTIME_LIBRARY "${OXYMP_DYNAMIC_RUNTIME}")
+
 if(OXYMP_BUILD_TESTS)
     FetchContent_Declare(Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git

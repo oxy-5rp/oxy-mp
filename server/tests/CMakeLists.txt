@@ -10,6 +10,7 @@ add_executable(oxymp_server_tests
     drawn_directory_tests.cpp
     game_data_tests.cpp
     resource_catalog_tests.cpp
+    rpf7_tests.cpp
     server_core_tests.cpp
     state_bundler_tests.cpp
     vehicle_directory_tests.cpp
@@ -21,6 +22,7 @@ add_executable(oxymp_server_tests
     ../src/ped_directory.cpp
     ../src/resource_catalog.cpp
     ../src/player_registry.cpp
+    ../src/rpf7.cpp
     ../src/server_core.cpp
     ../src/vehicle_directory.cpp
     ../src/world_clock.cpp
@@ -35,6 +37,7 @@ target_link_libraries(oxymp_server_tests PRIVATE
     oxymp::script
     oxymp::shared
     oxymp::options
+    miniz::miniz
     spdlog::spdlog
     Catch2::Catch2WithMain
 )

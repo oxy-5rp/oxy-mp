@@ -1,11 +1,14 @@
 #include "resource_store.hpp"
 
+#include "rpf7.hpp"
+
 #include <oxymp/shared/resource/bundle.hpp>
 #include <oxymp/shared/resource/vault.hpp>
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <format>
 #include <fstream>
 #include <optional>
 
@@ -192,13 +195,12 @@ std::string ResourceStore::addBundle(const std::filesystem::path& root,
     return hash;
 }
 
-bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
-    const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
-    if (!plain) {
+bool ResourceStore::addContents(std::string name, const std::vector<std::uint8_t>& plain) {
+    if (plain.empty()) {
         return false;
     }
 
-    std::vector<std::uint8_t> packed = shared::Vault::pack(*plain, shared::Vault::builtInKey());
+    std::vector<std::uint8_t> packed = shared::Vault::pack(plain, shared::Vault::builtInKey());
     const std::string hash = shared::fingerprint(packed);
 
     Item item;
@@ -217,6 +219,47 @@ bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
     packed_.emplace(hash, std::move(packed));
 
     return true;
+}
+
+bool ResourceStore::add(const std::filesystem::path& path, std::string name) {
+    const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
+    if (!plain) {
+        return false;
+    }
+
+    return addContents(std::move(name), *plain);
+}
+
+bool ResourceStore::addMaybeArchive(const std::filesystem::path& path, std::string name) {
+    const std::optional<std::vector<std::uint8_t>> plain = readFile(path);
+    if (!plain) {
+        return false;
+    }
+
+    // Архив мода — не файл для игры, а короб с россыпью. Игра чужой .rpf не
+    // читает (оглавление она оставляет зашифрованным, метку OPEN не принимает),
+    // поэтому короб с меткой OPEN распаковывается здесь, а содержимое уходит
+    // клиенту россыпью — той же дорогой, что и модели, лежащие файлами. NG-архивы
+    // (в том числе настоящие DLC самой игры) распаковка отвергает — они уходят
+    // как есть, и их монтирует уже игра. Подробности — в памяти проекта
+    // custom-rpf-load-via-open-parse и docs/altv-parity.md.
+    if (name.ends_with(".rpf")) {
+        std::string error;
+        std::vector<RpfEntry> unpacked = unpackOpenRpf7(plain->data(), plain->size(), error);
+
+        if (!unpacked.empty()) {
+            for (RpfEntry& entry : unpacked) {
+                addContents(std::format("{}/{}", name, entry.path), entry.data);
+            }
+            spdlog::info("archive {} unpacked into {} loose files", name, unpacked.size());
+            return true;
+        }
+
+        spdlog::debug("archive {} is not an OPEN archive ({}); served as-is", name, error);
+        // Дальше — как обычный файл: не наш случай, пусть с ним разбирается игра.
+    }
+
+    return addContents(std::move(name), *plain);
 }
 
 const std::vector<std::uint8_t>* ResourceStore::find(const std::string& hash) const {
