@@ -8,7 +8,9 @@
 namespace oxymp::server {
 namespace {
 
-constexpr std::uint32_t kMagicRpf7 = 0x52504637;      // «RPF7» в порядке байт файла.
+// «RPF7» байтами файла (52 50 46 37), прочитанное little-endian, — 0x37465052.
+// Проверено чтением настоящего архива игры: 0x52504637 дало бы «7FPR».
+constexpr std::uint32_t kMagicRpf7 = 0x37465052;
 constexpr std::uint32_t kEncryptionOpen = 0x4E45504F; // «OPEN».
 constexpr std::uint32_t kEncryptionCfxp = 0x50584643; // «CFXP» — своя альтернатива CitizenFX.
 

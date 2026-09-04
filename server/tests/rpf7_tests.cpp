@@ -71,7 +71,7 @@ TEST_CASE("an OPEN RPF7 archive unpacks its files", "[rpf7]") {
     std::vector<std::uint8_t> archive(total, 0);
 
     // Заголовок.
-    putU32(archive, 0, 0x52504637);            // «RPF7»
+    putU32(archive, 0, 0x37465052);            // «RPF7»
     putU32(archive, 4, entryCount);
     putU32(archive, 8, static_cast<std::uint32_t>(names.size()));
     putU32(archive, 12, 0x4E45504F);           // «OPEN»
@@ -114,7 +114,7 @@ TEST_CASE("an OPEN RPF7 archive unpacks its files", "[rpf7]") {
 
 TEST_CASE("a non-OPEN RPF7 archive refuses out loud", "[rpf7]") {
     std::vector<std::uint8_t> archive(16, 0);
-    putU32(archive, 0, 0x52504637); // RPF7
+    putU32(archive, 0, 0x37465052); // RPF7
     putU32(archive, 4, 1);
     putU32(archive, 8, 0);
     putU32(archive, 12, 0x0FEFFFFF); // NG — зашифрованное оглавление
