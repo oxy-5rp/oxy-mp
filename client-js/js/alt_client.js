@@ -213,7 +213,9 @@
         ['playerStopTalking', 'голосовой связи в oxyMP нет'],
         ['taskChange', 'о смене задачи игра нам не сообщает'],
         ['voiceConnection', 'голосовой связи в oxyMP нет'],
-        ['weaponDamage', 'урон считает сервер; клиент только свидетельствует о попадании'],
+        // weaponDamage больше не немое: клиент раздаёт его из детекта попадания,
+        // а не из мёртвого сетевого события игры (см. обработчик server:__oxymp:hit
+        // ниже и docs/combat-anim-hooks-plan.md).
         ['worldObjectPositionChange', 'о переносе предмета сервер объявляет его состоянием'],
     ]);
 
@@ -551,6 +553,38 @@
     });
 
     bridged.add(`server:${kSyncedMetaEvent}`);
+
+    // --- weaponDamage: попадание локального игрока -----------------------------
+    //
+    // Приходит из C++ (game_session), не по сети: сетевых игровых событий
+    // фейк-сессия oxyMP не генерирует вовсе — проверено Frida, подробности в
+    // docs/combat-anim-hooks-plan.md. Событие берётся из того же детекта
+    // попадания (`HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY` + убыль здоровья/брони +
+    // оружие в руках), что шлёт доклад серверу, и приходит тем же приёмом, что
+    // события сервера, — с приставкой `server:`.
+    //
+    // Цель, оружие и урон настоящие; `offset` и `bodyPart` клиент здесь не
+    // добывает (направление удара и кость), поэтому заглушены нулём — это
+    // оговорено, а не выдано за полное совпадение. Свидетельство, а не
+    // распоряжение: возврат обработчика на игру не влияет, доклад серверу идёт
+    // своим путём. `alt.entities` берётся на каждый вызов — по той же причине,
+    // что и в `entityOf` выше.
+    const kHitEvent = '__oxymp:hit';
+
+    native.on(`server:${kHitEvent}`, (payload) => {
+        const [kind, id, weapon, damage] = decodeArgs(payload);
+
+        const target = kind === 0 ? alt.entities.playerById(id) : alt.entities.pedById(id);
+        if (!target) {
+            return;
+        }
+
+        fire('weaponDamage',
+             [target, weapon >>> 0, damage, new alt.shared.Vector3(0, 0, 0), 0,
+              alt.entities.local]);
+    });
+
+    bridged.add(`server:${kHitEvent}`);
 
     // --- Метаданные, назначенные лично нам ------------------------------------
     //

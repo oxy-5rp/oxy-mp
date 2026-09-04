@@ -536,6 +536,30 @@ TEST_CASE("the client knows every player of the session, not only itself", "[cli
     CHECK(said("я 7"));
 }
 
+TEST_CASE("weaponDamage reaches the resource from a noticed hit", "[client][js]") {
+    // Клиент замечает попадание своим детектом (`Peds::noticeDamage` и родня) и
+    // раздаёт weaponDamage через `server:__oxymp:hit` — не из мёртвого сетевого
+    // события игры, которого фейк-сессия не генерирует (проверено Frida, см.
+    // docs/combat-anim-hooks-plan.md). Здесь проверяется именно раздача до
+    // ресурса: цель, оружие и урон доходят верными; offset и bodyPart пока
+    // заглушены нулём и оговорены. Живой игрой это не покрыть — детект в игре.
+    Recorder& kept = recorder();
+    kept.selfId = 0;
+    kept.players = {{0, 100}, {1, 222}};
+    kept.names = {{0, "oxy"}, {1, "жертва"}};
+
+    REQUIRE(run("wd",
+                "const alt = require('alt-client');\n"
+                "alt.on('weaponDamage', (target, weapon, damage, offset, part, source) =>\n"
+                "    alt.log('WD ' + target.id + ' ' + (weapon >>> 0) + ' ' + damage\n"
+                "        + ' от ' + source.id + ' часть ' + part));\n"));
+
+    // kind 0 — игрок, номер 1, оружие weapon_pistol (0x1B06D571), урон 25.
+    Engine::instance()->dispatchServerEvent(text("__oxymp:hit"), bytes("[0,1,453432689,25]"));
+
+    CHECK(said("WD 1 453432689 25 от 0 часть 0"));
+}
+
 TEST_CASE("a player on foot is nowhere, not in the driver seat", "[client][js]") {
     // **Минус единица возвращалась дважды: и «не в машине», и «место не
     // нашлось».** А минус единица — это место водителя у игры, и не севший в

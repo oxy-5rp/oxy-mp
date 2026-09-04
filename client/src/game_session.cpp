@@ -184,16 +184,20 @@ GameSession::GameSession(const game::EngineAddresses& addresses, const game::Nat
     // Попадания уходят в ту же почту, что и реплики чата: замечает их игровой
     // поток, а отправляет сетевой.
     remotePlayers_.reportDamageTo(
-        [&mail = mail_](shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon) {
-            mail.postDamage(victim, amount, weapon);
+        [this](shared::PlayerId victim, std::uint16_t amount, std::uint32_t weapon) {
+            mail_.postDamage(victim, amount, weapon);
+            // И тем же движением — событием weaponDamage клиентским ресурсам.
+            // Доклад серверу выше от этого не зависит: это разные адресаты.
+            pendingHits_.push_back(
+                LocalHit{0, static_cast<std::uint32_t>(victim), weapon, amount});
         });
 
     // Попадания по чужим машинам — той же почтой и по той же причине: замечает
     // их игровой поток, а отправляет сетевой.
-    peds_.reportDamageTo(
-        [&mail = mail_](shared::PedId ped, std::uint16_t amount, std::uint32_t weapon) {
-            mail.postPedDamage(ped, amount, weapon);
-        });
+    peds_.reportDamageTo([this](shared::PedId ped, std::uint16_t amount, std::uint32_t weapon) {
+        mail_.postPedDamage(ped, amount, weapon);
+        pendingHits_.push_back(LocalHit{1, static_cast<std::uint32_t>(ped), weapon, amount});
+    });
 
     vehicles_.reportDamageTo([&mail = mail_](shared::VehicleId vehicle,
                                              const shared::VehicleHarm& harm,
@@ -1270,6 +1274,27 @@ void GameSession::applyServerEvents(int ped) {
             scripts_->serverEvent(event.name, event.payload);
         }
     }
+
+    // Попадания локального игрока — событием weaponDamage клиентским ресурсам.
+    //
+    // Идут тем же приёмом, что и события сервера (клиент помечает их приставкой
+    // `server:` при раздаче), но рождаются здесь, а не приходят по сети:
+    // сетевых игровых событий фейк-сессия не генерирует вовсе (проверено Frida,
+    // см. docs/combat-anim-hooks-plan.md), и weaponDamage берётся из того же
+    // детекта попадания, что шлёт доклад серверу. Это свидетельство, а не
+    // распоряжение: offset и bodyPart клиент здесь не добывает — их место в
+    // событии заглушено, а цель, оружие и урон настоящие.
+    if (scripts_ != nullptr) {
+        for (const LocalHit& hit : pendingHits_) {
+            scripts_->serverEvent("__oxymp:hit",
+                                  std::format("[{},{},{},{}]", hit.kind, hit.id, hit.weapon,
+                                              hit.amount));
+        }
+    }
+
+    // Осушается всегда, даже без скриптов: иначе попадания копились бы до конца
+    // сессии.
+    pendingHits_.clear();
 }
 
 namespace {
